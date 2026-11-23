@@ -111,14 +111,18 @@ window.CONFIG = {
   rider_h: { value: 62, min: 40, max: 66, step: 1 },          // rider height in the line
 
   // The trip to the stop (logical px, px per second, seconds)
-  speed_walk: { value: 700, min: 300, max: 2000, step: 20 },   // camels and donkeys
+  speed_walk: { value: 430, min: 200, max: 2000, step: 10 },   // camels and donkeys: a quick walk you can see
   speed_drive: { value: 860, min: 300, max: 2500, step: 20 },  // motorbikes, tuk-tuks, cars and vans
   glide_speed: { value: 940, min: 300, max: 3000, step: 20 },  // air taxis
   trip_ease: { value: 0.26, min: 0.05, max: 0.5, step: 0.01 }, // share of a trip spent speeding up, and again braking
   corner_r: { value: 56, min: 10, max: 120, step: 2 },         // radius of the road's rounded corners
   approach: { value: 150, min: 80, max: 260, step: 5 },        // length of the S that swings a vehicle into its bay
   bump_time: { value: 0.32, min: 0.1, max: 0.8, step: 0.02 },  // the squash and dock bump on arrival
-  bob: { value: 0.035, min: 0, max: 0.1, step: 0.005 },        // how much a walking animal bobs (scale)
+  bob: { value: 0.06, min: 0, max: 0.15, step: 0.005 },         // how much a walking animal bobs (scale)
+  sway: { value: 0.08, min: 0, max: 0.25, step: 0.005 },        // how far a walking animal's body swings side to side (radians)
+  stride: { value: 26, min: 10, max: 80, step: 1 },             // logical px walked per half step (shorter = quicker steps)
+  hop: { value: 5, min: 0, max: 16, step: 0.5 },                // logical px a walking animal lifts on each step
+  step_shear: { value: 0.09, min: 0, max: 0.3, step: 0.01 },    // how much a walking animal's body leans into each stride
   hover_alt: { value: 0.14, min: 0, max: 0.4, step: 0.02 },    // how high a gliding air taxi hovers (scale and shadow)
   roll_time: { value: 0.45, min: 0.1, max: 1.2, step: 0.05 },  // a garage vehicle rolling out onto its strip
 

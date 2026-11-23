@@ -520,12 +520,15 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
   const e = o.era != null ? o.era : eraNow(), E = ERAS[e], big = big3(len);
   const { img, h, w, K } = vehSize(len, c, ci, e);
   const alt = o.alt || 0, cover = o.cover || 0, rot = o.rotor || 0;
-  let sc = 1 + alt * 0.28, sway = 0;
+  let sc = 1 + alt * 0.28, sway = 0, walkPh = null;
   if (E.move === 'walk') {
-    if (o.gait != null) { const g = Math.sin(o.gait * Math.PI / 36); sc *= 1 + tune.bob * Math.abs(g); sway = 0.045 * g; }
+    if (o.gait != null) { const g = Math.sin(o.gait * Math.PI / tune.stride); sc *= 1 + tune.bob * Math.abs(g); sway = tune.sway * g; walkPh = g; }
     if (o.breath != null) sc *= 1 + 0.014 * o.breath;
   }
-  ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang + sway); ctx.scale(sc * (o.sqA || 1), sc * (o.sqC || 1));
+  ctx.save(); ctx.translate(cx, cy);
+  if (walkPh != null) ctx.translate(0, -tune.hop * Math.abs(walkPh)); // each step lifts the body a little (screen up)
+  ctx.rotate(ang + sway); ctx.scale(sc * (o.sqA || 1), sc * (o.sqC || 1));
+  if (walkPh != null) ctx.transform(1, tune.step_shear * walkPh, 0, 1, 0, 0); // the body leans into each stride
   if (o.alpha != null) ctx.globalAlpha *= o.alpha;
   const a0 = ctx.globalAlpha;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
