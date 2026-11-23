@@ -1411,7 +1411,7 @@ const SEG_A = {}, SEG_B = {};
 // vehicle is still on its own cells) a vehicle waiting on its cell for its turn.
 function clearStart(mv, t0) {
   const d = mv.t1 - mv.t0, others = state.moves.filter(o => o !== mv && o.t1 > t0 && o.kind !== 'fly');
-  if (!others.length) return t0;
+  if (!others.length) { mv.t0 = t0; mv.t1 = t0 + d; return t0; } // nothing else moving: start now (the times must still be set)
   const hit = start => {
     mv.t0 = start; mv.t1 = start + d;
     for (let tau = start; tau <= start + d + 1e-6; tau += 1 / 40) {
