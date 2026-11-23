@@ -21,6 +21,7 @@
 <canvas id="game"></canvas>
 <script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', 'ابجد abc').catch(() => {}));</script>
 <script src="config.js"></script>
+<script src="ads.js"></script>
 <script src="assets/sfx-data.js"></script>
 <script>
 'use strict';
@@ -163,7 +164,7 @@ function voice(e, big, pan, vol = 1) {
   if (!play(k, n, { rate, vol: tune.voice_vol * vol, pan, dur: k === 'camel' ? 1.5 : k === 'horse' ? 1.8 : 2.4 })) return false;
   voiceLast = audio.ac.currentTime; return true;
 }
-function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m || Ads.busy ? 0 : tune.volume; }
 addEventListener('tune', () => setMuted(muted));
 function tone(freq, dur, type = 'square', vol = 0.3, delay = 0) {
   if (!audio || muted) return;
@@ -980,6 +981,15 @@ function glassButton(x, y, w, h, on = true, hot = false) {
   ctx.strokeStyle = hot ? '#ffd34d' : on ? `rgba(${accent()},0.9)` : 'rgba(140,160,185,0.45)'; ctx.lineWidth = hot ? 4 : 2.5; ctx.stroke();
 }
 const KINDS = { primary: ['#2bd5f6', '#0b84b4', '#d8fbff'], secondary: ['#2d4466', '#18283f', '#7fdcff'], danger: ['#f0507a', '#b3164a', '#ffd6e2'], gold: ['#ffbe3d', '#c76a12', '#fff0c8'] };
+/** The gold "إعلان" pill with a play mark: sits on every button that leads to an ad. */
+function adPill(x, y, k = 1) {
+  const w = 96 * k, h = 36 * k;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(x + 2, y + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = '#ffd34d'; rrect(x, y, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = '#7a5200'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#2a1c00'; ctx.beginPath(); ctx.moveTo(x + 14 * k, y + 9 * k); ctx.lineTo(x + 14 * k, y + h - 9 * k); ctx.lineTo(x + 30 * k, y + h / 2); ctx.closePath(); ctx.fill();
+  text('إعلان', x + 62 * k, y + h / 2 + 1, 22 * k, '#2a1c00', 'center', 800);
+}
 function bigButton(x, y, w, h, label, kind = 'primary') {
   const [c0, c1, edge] = KINDS[kind] || KINDS.primary;
   ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(x + 3, y + 6, w, h, 26); ctx.fill();
@@ -1511,7 +1521,8 @@ function startLevel(L, again) {
     vc: [], tr: [], moves: [], qv: 0, lastBoard: -9, gateFree: [], busyUntil: 0,
     fx: [], msg: '', msgT: -9, flashGatesT: -9, blockLine: null,
     cursor: -1, kbd: false, tapped: false, bannerT: 0, won: false, winT: 0, prevBest: 0, hint: -1,
-    extra: 0, extraLeft: tune.extra_gates, extraT: -9, // the free extra stop
+    extra: 0, extraLeft: tune.extra_gates, extraT: -9, // the extra stop: one per attempt, for watching an ad
+    undoAd: false, offerSeen: {},                       // more undos by ad: once per attempt; which ad buttons were shown
     revealed: fullMask(n) - lv.hidden, // vehicles whose colour has been seen (only grows)
     counted: false, firstTry: false, // an attempt is logged from its first vehicle tap
     anger: 0, angryHit: false, calmT: 0, grumbleAt: 0, // the line's patience (riders get cross when vehicles are late)
@@ -1699,20 +1710,53 @@ function doTap(i) {
   if (S2.qi >= lv.queue.length) state.pending = 'win';
   else if (S2.gates.length >= nGates() || !lv.taxis.some(c => canExit(lv, S2, c.id))) state.pending = 'stuck';
 }
-// The free extra stop, once per level, offered on the stuck screen.
+// ---- Ads the player chooses (ads.js shows them; until a network is wired they are test cards) ----
+// Every button that leads to an ad carries the "إعلان" pill, so an ad is never a surprise.
+const FAILS = {}; // stuck screens per level this session: enough of them and the level may be skipped
+function seeOffer(placement) { if (!state.offerSeen[placement]) { state.offerSeen[placement] = true; Ads.offered(placement); } }
+/** The extra stop, once per attempt, for watching an ad to the end. */
+function askExtra() {
+  if (!canTakeExtra() || Ads.busy) return;
+  const lv = state.lv;
+  Ads.rewarded('extra_stop', 'موقف إضافي').then(ok => { if (state.lv !== lv) return; if (ok) takeExtra(); else toast('لم يكتمل الإعلان: لا موقف إضافي'); });
+}
+/** More undos, once per attempt, when the free ones are used up. */
+function canRefillUndo() { return state.undos <= 0 && !state.undoAd && tune.ad_undos > 0 && state.hist.length > 0; }
+function askUndos() {
+  if (!canRefillUndo() || Ads.busy) return;
+  const lv = state.lv;
+  Ads.rewarded('undo_refill', `${tune.ad_undos} تراجع`).then(ok => {
+    if (state.lv !== lv) return;
+    if (!ok) { toast('لم يكتمل الإعلان: لا تراجع إضافي'); return; }
+    state.undos += tune.ad_undos; state.undoAd = true; sfx.board(2); toast(`+${tune.ad_undos} تراجع`); events.push({ type: 'ad-undos', level: state.level });
+  });
+}
+/** Stuck on the same level again and again: move on to the next one (no stars for this one). */
+function canSkip() { const L = state.level; return tune.skip_after > 0 && (FAILS[L] || 0) >= tune.skip_after && L < tune.levels; }
+function askSkip() {
+  if (!canSkip() || Ads.busy) return;
+  const lv = state.lv, L = state.level;
+  Ads.rewarded('skip_level', 'تخطي المرحلة').then(ok => {
+    if (state.lv !== lv) return;
+    if (!ok) { toast('لم يكتمل الإعلان: لم تُتخطَّ المرحلة'); return; }
+    save.unlocked = Math.max(save.unlocked || 1, L + 1); persist(); FAILS[L] = 0;
+    const r = logRec(L); r.skips = (r.skips || 0) + 1; logSave(); events.push({ type: 'skip', level: L });
+    if (eraOf(L + 1) !== eraOf(L)) openUnlock(eraOf(L + 1), L + 1); else { startLevel(L + 1); scene = 'play'; sfx.ui(); }
+  });
+}
 function canTakeExtra() { return state.extraLeft > 0 && state.S.gates.length >= nGates(); }
 function takeExtra() {
   if (!canTakeExtra()) return false;
   state.extra++; state.extraLeft--; state.extraT = state.t; state.gateFree.push(state.t - 1);
   state.pending = ''; scene = 'play'; bgKey = '';
   const r = logRec(state.level); r.extraGates = (r.extraGates || 0) + 1; logSave();
-  sfx.dock(eraNow()); tone(988, 0.12, 'triangle', 0.2, 0.08); toast('موقف إضافي: هدية مجانية');
+  sfx.dock(eraNow()); tone(988, 0.12, 'triangle', 0.2, 0.08); toast('موقف إضافي جاهز');
   events.push({ type: 'extra', level: state.level });
   return true;
 }
 function doUndo() {
   if (!state.hist.length) { toast('لا شيء للتراجع'); return false; }
-  if (state.undos <= 0) { toast('انتهت مرات التراجع'); return false; }
+  if (state.undos <= 0) { if (canRefillUndo()) askUndos(); else toast('انتهت مرات التراجع'); return false; }
   state.S = JSON.parse(state.hist.pop()); state.undos--; state.undosUsed++;
   { const r = logRec(state.level); r.undos++; logSave(); }
   state.pending = ''; settle(); sfx.undo(); events.push({ type: 'undo' });
@@ -1734,6 +1778,7 @@ function finishLevel() {
   if (state.angryHit) r.angry = (r.angry || 0) + 1;
   const secs = Math.round(state.t * 10) / 10; if (r.bestTime == null || secs < r.bestTime) r.bestTime = secs;
   logSave();
+  FAILS[L] = 0; Ads.noteWin();
   state.won = true; scene = 'results'; sfx.win();
   for (let k = 0; k < 40; k++) spawn(0, W / 2, 470, (rng() - 0.5) * 700, -rng() * 600 - 100, 5 + rng() * 6, 1.6, PAL[k % 5].base, 700, false);
   events.push({ type: 'win', level: L, stars, angry: state.angryHit });
@@ -2290,11 +2335,14 @@ function drawHud() {
   const lv = state.lv, b = BTN;
   glassButton(...b.mute); drawIcon(muted ? 'mute' : 'sound', b.mute[0] + 38, b.mute[1] + 36, 44, '#f4f8ff');
   glassButton(...b.menu); drawIcon('menu', b.menu[0] + 38, b.menu[1] + 36, 40, '#f4f8ff');
-  const canUndo = state.undos > 0 && state.hist.length > 0;
+  const refill = canRefillUndo(), canUndo = (state.undos > 0 && state.hist.length > 0) || refill;
   glassButton(...b.undo, canUndo); drawIcon('undo', b.undo[0] + 36, b.undo[1] + 36, 46, canUndo ? '#f4f8ff' : '#7d8da3');
-  ctx.fillStyle = state.undos > 0 ? '#0b7a4b' : '#a3264d'; ell(b.undo[0] + 70, b.undo[1] + 14, 15, 15); ctx.fill();
-  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
-  text(String(state.undos), b.undo[0] + 70, b.undo[1] + 15, 22, '#fff');
+  if (refill) { seeOffer('undo_refill'); adPill(b.undo[0] + 4, b.undo[1] + 50, 0.72); } // out of undos: more for an ad, said on the button
+  else {
+    ctx.fillStyle = state.undos > 0 ? '#0b7a4b' : '#a3264d'; ell(b.undo[0] + 70, b.undo[1] + 14, 15, 15); ctx.fill();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+    text(String(state.undos), b.undo[0] + 70, b.undo[1] + 15, 22, '#fff');
+  }
   glassButton(...b.restart); drawIcon('restart', b.restart[0] + 41, b.restart[1] + 36, 46, '#f4f8ff');
   ctx.fillStyle = 'rgba(8,10,24,0.72)'; rrect(226, 8, 296, 98, 22); ctx.fill();
   ctx.strokeStyle = `rgba(${accent()},0.45)`; ctx.lineWidth = 1.5; ctx.stroke();
@@ -2326,13 +2374,21 @@ function panel(y0, h, img) {
   ctx.strokeStyle = `rgb(${accent()})`; ctx.lineWidth = 2.5; ctx.stroke();
 }
 const OVER_BTNS = { restart: [130, 800, 460, 104], undo: [130, 922, 460, 96] };
+const OVER_SKIP = { restart: [130, 756, 460, 96], undo: [130, 868, 460, 88], skip: [130, 978, 460, 88] }; // the same screen once skipping is on offer
+const overBtns = () => (canSkip() ? OVER_SKIP : OVER_BTNS);
 const OFFER_BTNS = { extra: [130, 748, 460, 108], undo: [130, 886, 460, 88], restart: [130, 990, 460, 88] };
 function frontRider(y) { // the front rider, big, on a soft spotlight
   const front = state.tr[state.S.qi]; if (!front) return;
   ctx.fillStyle = 'rgba(255,255,255,0.12)'; ell(W / 2, y, 70, 70); ctx.fill();
   drawRider(W / 2, y + 60, front.col, 124);
 }
-function drawOffer() { // the first time the stops fill up in a level: a free extra stop
+function undoRow(r) { // the undo line of a stuck screen: free undos, or more for an ad, or none
+  if (state.undos > 0 && state.hist.length > 0) bigButton(...r, `تراجع (${state.undos})`, 'secondary');
+  else if (canRefillUndo()) { seeOffer('undo_refill'); bigButton(...r, `${tune.ad_undos} تراجع إضافي`, 'secondary'); adPill(r[0] + 16, r[1] - 12); }
+  else text('لا تراجع متبقٍ', W / 2, r[1] + r[3] / 2, 28, '#a3b6d0');
+}
+function undoTap(p, r) { if (!inRect(p, ...r)) return false; if (state.undos > 0 && state.hist.length) doUndo(); else if (canRefillUndo()) askUndos(); else return false; return true; }
+function drawOffer() { // the stops are full: one more stop for watching an ad, once per attempt
   drawPlay();
   panel(330, 780, ERAS[eraNow()].bgImg);
   text('المواقف ممتلئة', W / 2, 400, 54, '#ffb347');
@@ -2342,30 +2398,30 @@ function drawOffer() { // the first time the stops fill up in a level: a free ex
     text(`ولا ${noun} بلونه عند المواقف`, W / 2, 514, 32, '#e4ecff');
     frontRider(616);
   }
-  text('خذ موقفاً إضافياً مجاناً، مرة في كل مرحلة', W / 2, 712, 28, '#7ef0b0');
+  text('شاهد إعلاناً قصيراً وخذ موقفاً إضافياً', W / 2, 712, 28, '#7ef0b0');
+  seeOffer('extra_stop');
   bigButton(...OFFER_BTNS.extra, 'موقف إضافي', 'primary');
   drawIcon('gate', OFFER_BTNS.extra[0] + 400, OFFER_BTNS.extra[1] + 58, 56, '#ffffff');
-  const canUndo = state.undos > 0 && state.hist.length > 0;
-  if (canUndo) bigButton(...OFFER_BTNS.undo, `تراجع (${state.undos})`, 'secondary');
-  else text('لا تراجع متبقٍ', W / 2, OFFER_BTNS.undo[1] + 44, 28, '#a3b6d0');
+  adPill(OFFER_BTNS.extra[0] + 16, OFFER_BTNS.extra[1] - 12);
+  undoRow(OFFER_BTNS.undo);
   bigButton(...OFFER_BTNS.restart, 'أعد المرحلة', 'secondary');
 }
 function drawOver() {
   if (canTakeExtra()) { drawOffer(); return; }
   drawPlay();
-  panel(360, 690, ERAS[eraNow()].bgImg);
-  text('عالق', W / 2, 440, 60, '#ff6b81');
+  const skip = canSkip(), B = overBtns(), dy = skip ? -44 : 0;
+  panel(skip ? 316 : 360, skip ? 778 : 690, ERAS[eraNow()].bgImg);
+  text('عالق', W / 2, 440 + dy, 60, '#ff6b81');
   const front = state.tr[state.S.qi], noun = ERAS[eraNow()].noun;
-  text('كل المواقف مشغولة،', W / 2, 520, 32, '#e4ecff');
+  text('كل المواقف مشغولة،', W / 2, 520 + dy, 32, '#e4ecff');
   if (front) {
-    text(`وأول مسافر بلون ${COLOUR_NAME[front.col]}`, W / 2, 566, 32, '#e4ecff');
-    text(`ولا ${noun} بلونه عند المواقف`, W / 2, 612, 32, '#e4ecff');
-    frontRider(700);
+    text(`وأول مسافر بلون ${COLOUR_NAME[front.col]}`, W / 2, 566 + dy, 32, '#e4ecff');
+    text(`ولا ${noun} بلونه عند المواقف`, W / 2, 612 + dy, 32, '#e4ecff');
+    frontRider(700 + dy - (skip ? 12 : 0));
   }
-  bigButton(...OVER_BTNS.restart, 'أعد المرحلة', 'primary');
-  const canUndo = state.undos > 0 && state.hist.length > 0;
-  if (canUndo) bigButton(...OVER_BTNS.undo, `تراجع (${state.undos})`, 'secondary');
-  else text('لا تراجع متبقٍ: الإعادة مجانية', W / 2, 970, 28, '#a3b6d0');
+  bigButton(...B.restart, 'أعد المرحلة', 'primary'); // trying again is always free, and never shows an ad
+  undoRow(B.undo);
+  if (skip) { seeOffer('skip_level'); bigButton(...B.skip, 'تخطَّ المرحلة', 'gold'); adPill(B.skip[0] + 16, B.skip[1] - 12); }
 }
 const RES_BTNS = { next: [130, 820, 460, 108], again: [130, 946, 460, 92] };
 function drawResults() {
@@ -2561,6 +2617,7 @@ function drawStats() {
   ctx.fillStyle = '#a8001c'; rrect(W / 2 + 54, ly - 16, 40, 32, 16); ctx.fill(); ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2; ctx.stroke();
   text('صعبة جداً', W / 2 - 16, ly + 1, 24, '#bfe2f6');
   text(`نجوم ${ERAS[statsEra].name}: ${eraStars(statsEra)} من ${ERA_LEVELS * 3}`, W / 2, ly + 52, 26, '#ffe2a8');
+  { const a = Ads.totals(); text(`إعلانات (تجريبية): عُرضت ${a.offered} · شوهدت ${a.completed} · أُغلقت ${a.closed}`, W / 2, ly + 96, 24, '#ffd34d'); }
   bigButton(...STATS_BTNS.back, 'رجوع', 'primary');
   const armed = gt - statsClearT < 3;
   bigButton(...STATS_BTNS.clear, armed ? 'اضغط للتأكيد' : 'مسح السجل', armed ? 'danger' : 'secondary');
@@ -2858,6 +2915,7 @@ const scenes = {
         if (state.pending === 'win') { state.winT = state.t; finishLevel(); }
         else {
           scene = 'over'; sfx.stuck(); events.push({ type: 'stuck', level: state.level, offer: canTakeExtra() }); state.gained = 'عالق';
+          FAILS[state.level] = (FAILS[state.level] || 0) + 1;
           const r = logRec(state.level); r.stuck++; logSave();
         }
       }
@@ -2868,25 +2926,27 @@ const scenes = {
     update(dt) {
       state.t += dt; updatePlayWorld(dt);
       if (canTakeExtra()) { // the offer screen; Enter, Space or E takes the free stop
-        if (pressed('KeyE') || pressed('Enter') || pressed('Space')) { takeExtra(); return; }
+        if (pressed('KeyE') || pressed('Enter') || pressed('Space')) { askExtra(); return; }
         if (pressed('KeyR')) { doRestart(); return; }
         if (pressed('KeyU')) { doUndo(); return; }
         if (pressed('Escape')) { openEra(eraNow()); return; }
         let p;
         while ((p = takeTap())) {
-          if (inRect(p, ...OFFER_BTNS.extra)) { takeExtra(); return; }
-          if (inRect(p, ...OFFER_BTNS.undo) && state.undos > 0 && state.hist.length) { doUndo(); return; }
+          if (inRect(p, ...OFFER_BTNS.extra)) { askExtra(); return; }
+          if (undoTap(p, OFFER_BTNS.undo)) return;
           if (inRect(p, ...OFFER_BTNS.restart)) { doRestart(); return; }
         }
         return;
       }
       if (pressed('KeyR') || pressed('Enter') || pressed('Space')) { doRestart(); return; }
       if (pressed('KeyU')) { doUndo(); return; }
+      if (pressed('KeyN') && canSkip()) { askSkip(); return; }
       if (pressed('Escape')) { openEra(eraNow()); return; }
-      let p;
+      let p; const B = overBtns();
       while ((p = takeTap())) {
-        if (inRect(p, ...OVER_BTNS.restart)) { doRestart(); return; }
-        if (inRect(p, ...OVER_BTNS.undo) && state.undos > 0 && state.hist.length) { doUndo(); return; }
+        if (inRect(p, ...B.restart)) { doRestart(); return; }
+        if (undoTap(p, B.undo)) return;
+        if (B.skip && inRect(p, ...B.skip)) { askSkip(); return; }
       }
     },
     draw() { drawOver(); },
@@ -2895,11 +2955,13 @@ const scenes = {
     update(dt) {
       state.t += dt; updatePlayWorld(dt);
       if (!state.prefetched && state.t - state.winT > 1.1 && state.level < tune.levels) { state.prefetched = true; dealLevel(state.level + 1); } // dealt now, while the stars rest
-      const L = state.level, next = () => {
+      const L = state.level, go = () => {
         if (L >= tune.levels) { scene = 'title'; sfx.ui(); }
         else if (eraOf(L + 1) !== eraOf(L)) openUnlock(eraOf(L + 1), L + 1);
         else { startLevel(L + 1); scene = 'play'; sfx.ui(); }
       };
+      // a short ad between levels: only here, after a win, and only when the rules in ads.js say it is due
+      const next = () => { const lv = state.lv; if (L < tune.levels && Ads.interstitialDue(L, eraOf(L + 1) !== eraOf(L))) Ads.interstitial('between_levels').then(() => { if (state.lv === lv && scene === 'results') go(); }); else go(); };
       if (pressed('Enter') || pressed('Space')) { next(); return; }
       if (pressed('KeyR')) { doRestart(); return; }
       if (pressed('Escape')) { openEra(eraNow()); return; }
@@ -2923,7 +2985,10 @@ function waitingFor() {
   if (scene === 'play' || scene === 'over' || scene === 'results') { const e = eraOf(state.level); requestEra(e); return LOAD[e].ready ? null : e; }
   return null;
 }
+let adUp = false;
 function step() {
+  if (Ads.busy !== adUp) { adUp = Ads.busy; if (audio) audio.out.gain.value = muted || adUp ? 0 : tune.volume; } // an ad owns the sound while it plays
+  if (adUp) { tapQueue.length = 0; hit.clear(); return; } // and the game waits: no time passes, no input leaks through
   if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
   taps = tapQueue.splice(0);
   gt += STEP;

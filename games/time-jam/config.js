@@ -92,7 +92,19 @@ window.CONFIG = {
   ],
 
   // Free help, honest labels, covered vehicles, queueing
-  extra_gates: { value: 1, min: 0, max: 1, step: 1 },      // free extra stop offered once per level when stuck
+  extra_gates: { value: 1, min: 0, max: 1, step: 1 },      // an extra stop offered once per attempt when stuck, for watching an ad
+
+  // Ads (ads.js shows test cards until a real network is wired in). Chosen ads give help; the only forced ad
+  // sits between levels after a win. Never after a loss, on a restart, before the win screen or a new era's opening.
+  ads_on: { value: 1, min: 0, max: 1, step: 1 },               // 0 = no ads at all: the help is simply given
+  ad_undos: { value: 3, min: 0, max: 9, step: 1 },             // undos given for one ad when the free ones are used up (once per attempt)
+  skip_after: { value: 3, min: 0, max: 10, step: 1 },          // stuck screens on one level before "skip the level" is offered for an ad (0 = never)
+  ads_first_level: { value: 3, min: 1, max: 25, step: 1 },     // no between-levels ad until this level has been won
+  ads_every_wins: { value: 2, min: 1, max: 10, step: 1 },      // wins since the last ad (of any kind) before a between-levels ad
+  ads_gap: { value: 150, min: 0, max: 600, step: 10 },         // seconds since the last ad (of any kind) before a between-levels ad
+  ads_session_cap: { value: 6, min: 0, max: 30, step: 1 },     // most between-levels ads in one visit
+  ads_test_seconds: { value: 5, min: 0.2, max: 30, step: 0.2 }, // how long a test card runs
+  ads_test_skip: { value: 2, min: 0, max: 30, step: 0.5 },     // seconds before a between-levels test card can be skipped
   warn_time: { value: 2.6, min: 0.8, max: 6, step: 0.2 },  // seconds the red "صعبة جداً" banner stays before a very hard level (a tap ends it)
   reveal_time: { value: 0.4, min: 0.1, max: 1, step: 0.05 },   // seconds for a cover to slide off
   fly_gap: { value: 8, min: 0, max: 40, step: 2 },         // logical px kept between vehicles on the road
