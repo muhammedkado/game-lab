@@ -2382,12 +2382,26 @@ function frontRider(y) { // the front rider, big, on a soft spotlight
   ctx.fillStyle = 'rgba(255,255,255,0.12)'; ell(W / 2, y, 70, 70); ctx.fill();
   drawRider(W / 2, y + 60, front.col, 124);
 }
-function undoRow(r) { // the undo line of a stuck screen: free undos, or more for an ad, or none
-  if (state.undos > 0 && state.hist.length > 0) bigButton(...r, `تراجع (${state.undos})`, 'secondary');
-  else if (canRefillUndo()) { seeOffer('undo_refill'); bigButton(...r, `${tune.ad_undos} تراجع إضافي`, 'secondary'); adPill(r[0] + 16, r[1] - 12); }
-  else text('لا تراجع متبقٍ', W / 2, r[1] + r[3] / 2, 28, '#a3b6d0');
+// On a stuck screen, taking back a move costs an ad. The free undos are for slips during play; getting out
+// of a dead end is the rescue, like the extra stop. Trying the level again stays free.
+function canRescue() { return state.hist.length > 0; }
+function askRescue() {
+  if (!canRescue() || Ads.busy) return;
+  const lv = state.lv;
+  Ads.rewarded('stuck_undo', 'تراجع خطوة').then(ok => {
+    if (state.lv !== lv || scene !== 'over') return;
+    if (!ok) { toast('لم يكتمل الإعلان: لا تراجع'); return; }
+    state.S = JSON.parse(state.hist.pop()); state.undosUsed++; // it is still an undo: it counts for the stars
+    { const r = logRec(state.level); r.undos++; r.adUndos = (r.adUndos || 0) + 1; logSave(); }
+    state.pending = ''; settle(); sfx.undo(); events.push({ type: 'ad-undo', level: state.level });
+    scene = 'play';
+  });
 }
-function undoTap(p, r) { if (!inRect(p, ...r)) return false; if (state.undos > 0 && state.hist.length) doUndo(); else if (canRefillUndo()) askUndos(); else return false; return true; }
+function undoRow(r) { // the undo line of a stuck screen: one step back for an ad
+  if (canRescue()) { seeOffer('stuck_undo'); bigButton(...r, 'تراجع خطوة', 'secondary'); adPill(r[0] + 16, r[1] - 12); }
+  else text('لا خطوة للتراجع', W / 2, r[1] + r[3] / 2, 28, '#a3b6d0');
+}
+function undoTap(p, r) { if (!inRect(p, ...r) || !canRescue()) return false; askRescue(); return true; }
 function drawOffer() { // the stops are full: one more stop for watching an ad, once per attempt
   drawPlay();
   panel(330, 780, ERAS[eraNow()].bgImg);
@@ -2928,7 +2942,7 @@ const scenes = {
       if (canTakeExtra()) { // the offer screen; Enter, Space or E takes the free stop
         if (pressed('KeyE') || pressed('Enter') || pressed('Space')) { askExtra(); return; }
         if (pressed('KeyR')) { doRestart(); return; }
-        if (pressed('KeyU')) { doUndo(); return; }
+        if (pressed('KeyU')) { askRescue(); return; }
         if (pressed('Escape')) { openEra(eraNow()); return; }
         let p;
         while ((p = takeTap())) {
@@ -2939,7 +2953,7 @@ const scenes = {
         return;
       }
       if (pressed('KeyR') || pressed('Enter') || pressed('Space')) { doRestart(); return; }
-      if (pressed('KeyU')) { doUndo(); return; }
+      if (pressed('KeyU')) { askRescue(); return; }
       if (pressed('KeyN') && canSkip()) { askSkip(); return; }
       if (pressed('Escape')) { openEra(eraNow()); return; }
       let p; const B = overBtns();
