@@ -1,0 +1,999 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: Is coiling bots on a phone fun, and does a closing sandstorm make a 3-minute round build to a climax? -->
+<!-- Date: 2026-11-23 -->
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#14122f">
+<title>أفعى الكثبان · Dune Serpent</title>
+<link rel="stylesheet" href="vendor/almarai.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #14122f; overflow: hidden; overscroll-behavior: none;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
+<script src="config.js"></script>
+<script>
+'use strict';
+// Dune Serpent: slither across moonlit dunes, swallow amber beads, make rivals crash into you, outlast the storm.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 720, H = 1280;        // logical size: portrait phone
+const PIXEL = false;
+const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
+const TITLE = 'أفعى الكثبان';
+const TITLE_EN = 'Dune Serpent';
+const CONTROLS = [
+  'اسحب بإصبعك: تتجه الأفعى نحو إصبعك',
+  'كُل الخرز الكهرماني لتطول',
+  'اضغط زر الاندفاع أو ضع إصبعًا ثانيًا لتسرع',
+  'إذا لمس رأسك جسد أفعى أخرى أو العاصفة تخرج',
+  'الأسهم للالتفاف · Space اندفاع · P إيقاف · M صوت',
+];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function fit() { // fills the window at any size and pixel ratio
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  canvas.style.imageRendering = PIXEL ? 'pixelated' : 'auto';
+  ctx.setTransform(r, 0, 0, r, 0, 0); ctx.imageSmoothingEnabled = !PIXEL;
+}
+addEventListener('resize', fit); fit();
+function clear(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, W, H); }
+const AR = /[؀-ۿ]/;
+function text(s, x, y, size, c, align = 'center', weight = '') {
+  ctx.fillStyle = c; ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.direction = AR.test(s) ? 'rtl' : 'ltr';
+  ctx.textBaseline = 'middle'; ctx.fillText(s, x, y);
+}
+function pill(s, x, y, size, c, bg, weight = 'bold') { // text on a dark tag: readable over sand, beads or storm
+  ctx.font = `${weight} ${size}px ${FONT}`;
+  const w = ctx.measureText(s).width + size * 0.8, h = size * 1.35;
+  ctx.fillStyle = bg; rr(ctx, x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+  text(s, x, y + 1, size, c, 'center', weight);
+}
+
+// ---- Input: keys by position (event.code), OS key repeat ignored ------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code); // true for one step after the key goes down
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => down.clear());
+// Touch: the first free finger steers, the boost button or a second finger sprints
+const taps = []; let tapList = [];
+const ptrs = new Map(); let steerSeen = false;
+function toLogical(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+const inRect = (p, b) => p.x >= b[0] && p.x <= b[0] + b[2] && p.y >= b[1] && p.y <= b[1] + b[3];
+const BTN_PAUSE = [16, 16, 76, 76], BTN_MUTE = [102, 16, 76, 76], BTN_HOME = [16, 16, 84, 84];
+const BOOST = { x: 132, y: 1132, r: 96 };
+const onBoost = p => Math.hypot(p.x - BOOST.x, p.y - BOOST.y) < BOOST.r;
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault(); startAudio();
+  const p = toLogical(e); taps.push(p);
+  let kind = 'steer';
+  if (scene !== 'play') kind = 'none';
+  else if (inRect(p, BTN_PAUSE) || inRect(p, BTN_MUTE)) kind = 'none';
+  else if (onBoost(p)) kind = 'boost';
+  ptrs.set(e.pointerId, { x: p.x, y: p.y, kind, t: performance.now() });
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* old Safari */ }
+});
+canvas.addEventListener('pointermove', e => {
+  const q = ptrs.get(e.pointerId); if (!q) return;
+  const p = toLogical(e); q.x = p.x; q.y = p.y;
+});
+function endPtr(e) { ptrs.delete(e.pointerId); }
+canvas.addEventListener('pointerup', endPtr);
+canvas.addEventListener('pointercancel', endPtr);
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)(); // a check may inject one
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3, delay = 0, slide = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur + 0.02);
+}
+let lastPop = 0, popRun = 0;
+const sfx = {
+  start() { tone(330, 0.15, 'triangle', 0.22); tone(440, 0.15, 'triangle', 0.22, 0.1); tone(587, 0.3, 'triangle', 0.22, 0.2); },
+  pop() {
+    const now = audio ? audio.ac.currentTime : 0;
+    if (now - lastPop < 0.05) return;
+    popRun = now - lastPop < 0.4 ? Math.min(popRun + 1, 12) : 0; lastPop = now;
+    tone(520 + popRun * 45, 0.07, 'sine', 0.14, 0, 900 + popRun * 45);
+  },
+  boost() { tone(180, 0.25, 'sawtooth', 0.06, 0, 420); },
+  burst() { tone(660, 0.12, 'triangle', 0.18); tone(880, 0.12, 'triangle', 0.18, 0.08); tone(1175, 0.25, 'triangle', 0.18, 0.16); },
+  far() { tone(300, 0.15, 'triangle', 0.06, 0, 200); },
+  die() { tone(260, 0.7, 'sawtooth', 0.22, 0, 55); tone(130, 0.6, 'triangle', 0.2, 0.1, 50); },
+  warn() { tone(520, 0.12, 'square', 0.1); tone(700, 0.14, 'square', 0.1, 0.14); },
+  storm() { tone(70, 1.4, 'sawtooth', 0.14, 0, 45); tone(110, 1.0, 'triangle', 0.1, 0.2, 60); },
+  tick() { tone(1250, 0.05, 'square', 0.08); },
+  win() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.25, 'triangle', 0.22, i * 0.12)); },
+};
+
+// ---- The game: helpers ------------------------------------------------------------------
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+function angDiff(a, b) { let d = a - b; while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU; return d; }
+function hash(n) { // decoration only (fixed look), never gameplay
+  n = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b); n ^= n >>> 13; n = Math.imul(n, 0xc2b2ae35); n ^= n >>> 16;
+  return (n >>> 0) / 4294967296;
+}
+function mk(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+function rr(g, x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+function ell(g, x, y, rx, ry, rot = 0) { g.beginPath(); g.ellipse(x, y, rx, ry, rot, 0, TAU); }
+function circ(g, x, y, r) { g.beginPath(); g.arc(x, y, r, 0, TAU); }
+function line(g, x0, y0, x1, y1) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
+
+// ---- The game: serpents and palettes ----------------------------------------------------
+const PALS = [
+  { name: 'أنت', kind: 'player', base: '#2ec4c0', dark: '#08303e', light: '#c4fff6', mark: '#0d4a5e', gold: '#f2c14e', pat: 'diamond' },
+  { name: 'بوت أحمر', kind: 'coiler', base: '#d8453a', dark: '#330a0e', light: '#ffb8a6', mark: '#2a080a', gold: '#f6d27a', pat: 'band' },
+  { name: 'بوت أخضر', kind: 'forager', base: '#7cc243', dark: '#183d12', light: '#e4ffb8', mark: '#2c5a1c', gold: '#f6e08a', pat: 'diamond' },
+  { name: 'بوت بنفسجي', kind: 'coward', base: '#a070e0', dark: '#26113f', light: '#ecdcff', mark: '#4a2a80', gold: '#f2d6ff', pat: 'saddle' },
+  { name: 'بوت برتقالي', kind: 'coiler', base: '#ef8a2e', dark: '#3e1c06', light: '#ffdcae', mark: '#5a2a08', gold: '#fff0c0', pat: 'diamond' },
+  { name: 'بوت وردي', kind: 'forager', base: '#ef6fa8', dark: '#40102a', light: '#ffd6ea', mark: '#7a1a48', gold: '#ffe6f2', pat: 'band' },
+  { name: 'بوت عاجي', kind: 'coward', base: '#e3d6b8', dark: '#3e3524', light: '#ffffff', mark: '#8a7652', gold: '#fff6dc', pat: 'saddle' },
+  { name: 'بوت أزرق', kind: 'forager', base: '#4f8cf0', dark: '#0f2450', light: '#d4e4ff', mark: '#16306a', gold: '#e8f0ff', pat: 'chain' },
+  { name: 'بوت زيتي', kind: 'coiler', base: '#a9a63c', dark: '#2c2b0a', light: '#f6f4b8', mark: '#3e3c10', gold: '#f2d64e', pat: 'band' },
+];
+const KIND_AR = { player: 'أنت', forager: 'جامع', coiler: 'ملتفّ', coward: 'جبان' };
+
+function drawHead(g, x, y, a, s, t, look) { // world units; s: the serpent
+  const P = s.pal, kind = s.kind, k = s.r / 12 * 1.15;
+  g.save(); g.translate(x, y); g.rotate(a); g.scale(k, k);
+  g.lineJoin = 'round'; g.lineWidth = 2.2; g.strokeStyle = P.dark; g.fillStyle = P.base;
+  g.beginPath();
+  if (kind === 'player') { g.moveTo(23, 0); g.bezierCurveTo(21, -10, 10, -16, 0, -15); g.bezierCurveTo(-8, -14, -10, -8, -10, 0); g.bezierCurveTo(-10, 8, -8, 14, 0, 15); g.bezierCurveTo(10, 16, 21, 10, 23, 0); }
+  else if (kind === 'coiler') { g.moveTo(25, 0); g.lineTo(7, -18); g.lineTo(-8, -13); g.lineTo(-9, 0); g.lineTo(-8, 13); g.lineTo(7, 18); g.closePath(); }
+  else if (kind === 'coward') { g.ellipse(6, 0, 17, 10, 0, 0, TAU); }
+  else { g.ellipse(5, 0, 15, 13.5, 0, 0, TAU); }
+  g.fill(); g.stroke();
+  // viper V-mark on top of the head
+  g.strokeStyle = P.mark; g.lineWidth = 2.6; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(-6, -7); g.lineTo(8, 0); g.lineTo(-6, 7); g.stroke();
+  // horns, each kind its own
+  g.fillStyle = '#f1e6c8'; g.strokeStyle = P.dark; g.lineWidth = 1.2;
+  const tri = (ax, ay, bx, by, cx, cy) => { g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.lineTo(cx, cy); g.closePath(); g.fill(); g.stroke(); };
+  if (kind === 'player') { g.fillStyle = P.gold; tri(14, -3, 25, 0, 14, 3); g.fillStyle = P.gold; tri(-2, -2.5, -13, 0, -2, 2.5); }
+  else if (kind === 'coiler') { tri(5, -11, -5, -21, 0, -9); tri(5, 11, -5, 21, 0, 9); }
+  else if (kind === 'coward') { tri(18, -1.6, 24, 0, 18, 1.6); }
+  else { tri(17, -2.6, 24, 0, 17, 2.6); }
+  // eyes, looking where it steers
+  const ey = kind === 'coiler' ? 9 : kind === 'coward' ? 6 : 7.5, ex = kind === 'coward' ? 9 : 8, er = kind === 'coward' ? 5 : 4;
+  const la = clamp(look, -0.6, 0.6);
+  for (const sy of [-1, 1]) {
+    g.fillStyle = '#fbf6e6'; ell(g, ex, sy * ey, er, er * 0.85); g.fill();
+    g.fillStyle = '#120a10'; ell(g, ex + Math.cos(la) * 1.4, sy * ey + Math.sin(la) * 1.4, er * 0.35, er * 0.75); g.fill();
+    g.fillStyle = '#fff'; circ(g, ex - 1, sy * ey - 1.2, 0.9); g.fill();
+  }
+  // forked tongue flicks now and then
+  if (((t + s.id * 0.37) % 1.7) < 0.22) {
+    const tip = kind === 'coiler' ? 25 : 23;
+    g.strokeStyle = '#e0304a'; g.lineWidth = 1.6;
+    g.beginPath(); g.moveTo(tip, 0); g.lineTo(tip + 9, 0); g.lineTo(tip + 13, -3); g.moveTo(tip + 9, 0); g.lineTo(tip + 13, 3); g.stroke();
+  }
+  g.restore();
+}
+const sx_ = new Float32Array(1300), sy_ = new Float32Array(1300);
+function drawBody(g, s, alpha, t) {
+  const n = s.xs.length; if (n < 2) return;
+  for (let i = 0; i < n; i++) {
+    const px = s.pxs[i], py = s.pys[i];
+    sx_[i] = px === undefined ? s.xs[i] : lerp(px, s.xs[i], alpha);
+    sy_[i] = py === undefined ? s.ys[i] : lerp(py, s.ys[i], alpha);
+  }
+  const P = s.pal, r = s.r, tn = Math.min(7, n - 2), m = n - tn;
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  const poly = () => { g.beginPath(); g.moveTo(sx_[0], sy_[0]); for (let i = 1; i < m; i++) g.lineTo(sx_[i], sy_[i]); };
+  const tailR = i => r * (1 - (i - m + 1) / (tn + 1) * 0.72);
+  if (s.boosting) { g.strokeStyle = hexA(P.light, 0.28 + 0.12 * Math.sin(t * 30)); g.lineWidth = 2 * r + 18; poly(); g.stroke(); }
+  g.strokeStyle = P.dark; g.lineWidth = 2 * r + 5; poly(); g.stroke();
+  g.fillStyle = P.dark; for (let i = m; i < n; i++) { circ(g, sx_[i], sy_[i], tailR(i) + 2.5); g.fill(); }
+  g.strokeStyle = P.base; g.lineWidth = 2 * r; poly(); g.stroke();
+  g.fillStyle = P.base; for (let i = m; i < n; i++) { circ(g, sx_[i], sy_[i], tailR(i)); g.fill(); }
+  // desert-viper markings along the back
+  const dir = i => { let dx = sx_[i - 1] - sx_[i + 1], dy = sy_[i - 1] - sy_[i + 1]; const L = Math.hypot(dx, dy) || 1; return [dx / L, dy / L]; };
+  if (P.pat === 'diamond' || P.pat === 'chain') {
+    g.fillStyle = P.pat === 'diamond' ? P.mark : P.light; g.beginPath();
+    for (let i = 3; i < m - 1; i += 3) {
+      const [dx, dy] = dir(i), x = sx_[i], y = sy_[i], a = r * 0.85, b = r * 0.6;
+      g.moveTo(x + dx * a, y + dy * a); g.lineTo(x - dy * b, y + dx * b); g.lineTo(x - dx * a, y - dy * a); g.lineTo(x + dy * b, y - dx * b); g.closePath();
+    }
+    g.fill();
+    g.fillStyle = P.pat === 'diamond' ? hexA(P.light, 0.85) : P.mark; g.beginPath();
+    for (let i = 3; i < m - 1; i += 3) { g.moveTo(sx_[i] + r * 0.26, sy_[i]); g.arc(sx_[i], sy_[i], r * 0.26, 0, TAU); }
+    g.fill();
+  } else if (P.pat === 'band') {
+    g.strokeStyle = P.mark; g.lineWidth = r * 0.62; g.lineCap = 'butt'; g.beginPath();
+    for (let i = 4; i < m - 1; i += 4) { const [dx, dy] = dir(i), nx = -dy * r * 0.97, ny = dx * r * 0.97; g.moveTo(sx_[i] + nx, sy_[i] + ny); g.lineTo(sx_[i] - nx, sy_[i] - ny); }
+    g.stroke();
+    g.strokeStyle = hexA(P.light, 0.8); g.lineWidth = r * 0.16; g.beginPath();
+    for (let i = 4; i < m - 1; i += 4) { const [dx, dy] = dir(i), nx = -dy * r * 0.9, ny = dx * r * 0.9, ox = dx * r * 0.45, oy = dy * r * 0.45; g.moveTo(sx_[i] + nx + ox, sy_[i] + ny + oy); g.lineTo(sx_[i] - nx + ox, sy_[i] - ny + oy); }
+    g.stroke(); g.lineCap = 'round';
+  } else {
+    g.fillStyle = P.mark; g.beginPath();
+    for (let i = 3; i < m - 1; i += 5) {
+      const [dx, dy] = dir(i);
+      for (const sd of [-1, 1]) { const x = sx_[i] - dy * r * 0.5 * sd, y = sy_[i] + dx * r * 0.5 * sd; g.moveTo(x + r * 0.36, y); g.ellipse(x, y, r * 0.36, r * 0.36, 0, 0, TAU); }
+    }
+    g.fill();
+  }
+  g.strokeStyle = hexA(P.light, 0.32); g.lineWidth = r * 0.45; poly(); g.stroke();
+  const ha = Math.atan2(sy_[0] - sy_[1], sx_[0] - sx_[1]);
+  drawHead(g, sx_[0], sy_[0], ha, s, t, angDiff(s.ta, s.a));
+}
+
+// ---- The game: beads, background, storm (drawn tiles, built once) ------------------------
+function makeBead(r, bright) {
+  const S = Math.ceil(r * 6), c = mk(S, S), g = c.getContext('2d'), m = S / 2;
+  const halo = g.createRadialGradient(m, m, r * 0.4, m, m, m);
+  halo.addColorStop(0, bright ? 'rgba(255,200,90,0.75)' : 'rgba(255,180,60,0.55)'); halo.addColorStop(0.45, 'rgba(255,150,30,0.18)'); halo.addColorStop(1, 'rgba(255,140,20,0)');
+  g.fillStyle = halo; g.fillRect(0, 0, S, S);
+  g.translate(m, m + r * 0.15);
+  const gr = g.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r * 1.2);
+  gr.addColorStop(0, '#fff6d0'); gr.addColorStop(0.45, '#ffc23d'); gr.addColorStop(1, '#c2650a');
+  g.fillStyle = gr; g.beginPath(); g.moveTo(0, -r * 1.45);
+  g.bezierCurveTo(r * 0.55, -r * 0.75, r, -r * 0.3, r, r * 0.15); g.arc(0, r * 0.15, r, 0, Math.PI);
+  g.bezierCurveTo(-r, -r * 0.3, -r * 0.55, -r * 0.75, 0, -r * 1.45); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.85)'; ell(g, -r * 0.35, -r * 0.1, r * 0.22, r * 0.34, 0.4); g.fill();
+  return c;
+}
+const beadSmall = makeBead(5.5, false), beadBig = makeBead(8.5, true);
+function makeNightTile() {
+  const S = 512, c = mk(S, S), g = c.getContext('2d');
+  g.fillStyle = '#211e55'; g.fillRect(0, 0, S, S);
+  for (let k = 0; k < 8; k++) {
+    const x = hash(k * 3 + 11) * S, y = hash(k * 3 + 12) * S, r = 60 + hash(k * 3 + 13) * 110;
+    for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
+      const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+      gr.addColorStop(0, k & 1 ? 'rgba(120,120,220,0.12)' : 'rgba(5,5,30,0.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.fillRect(x + dx - r, y + dy - r, 2 * r, 2 * r);
+    }
+  }
+  for (let j = 0; j < 16; j++) { // moonlit dune ripples
+    const y0 = j * 32 + 8, ph = j * 1.3, amp = 6 + (j % 4) * 2;
+    for (const dy of [-S, 0, S]) {
+      const path = off => {
+        g.beginPath();
+        for (let x = 0; x <= S; x += 8) {
+          const y = y0 + dy + off + amp * Math.sin(TAU * x / S * 2 + ph) + 3 * Math.sin(TAU * x / S * 5 + ph * 1.7);
+          x ? g.lineTo(x, y) : g.moveTo(x, y);
+        }
+      };
+      g.lineWidth = 3; g.strokeStyle = 'rgba(8,6,30,0.55)'; path(3); g.stroke();
+      g.lineWidth = 2; g.strokeStyle = 'rgba(150,160,240,0.33)'; path(0); g.stroke();
+    }
+  }
+  for (let k = 0; k < 160; k++) { g.fillStyle = k % 4 ? 'rgba(160,170,255,0.35)' : 'rgba(230,235,255,0.6)'; g.fillRect((hash(k + 300) * S) | 0, (hash(k + 700) * S) | 0, 2, 2); }
+  return c;
+}
+const nightTile = makeNightTile();
+const nightPat = ctx.createPattern(nightTile, 'repeat');
+let moonGrad = null, vignGrad = null;
+function grads() {
+  moonGrad = ctx.createRadialGradient(120, 60, 0, 120, 60, 1100);
+  moonGrad.addColorStop(0, 'rgba(210,220,255,0.18)'); moonGrad.addColorStop(1, 'rgba(210,220,255,0)');
+  vignGrad = ctx.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.75);
+  vignGrad.addColorStop(0, 'rgba(5,4,25,0)'); vignGrad.addColorStop(1, 'rgba(5,4,25,0.55)');
+}
+grads();
+
+// ---- The game: world state, spatial hashes --------------------------------------------
+let snakes = [], beads = [], parts = [], HG = 1, HOFF = 0;
+const HC = 80, SCAP = 9000, BCAP = 9000;
+let sHead = new Int32Array(1), bHead = new Int32Array(1);
+const sNext = new Int32Array(SCAP), sOwn = new Int16Array(SCAP), sIdx = new Int32Array(SCAP);
+const bNext = new Int32Array(BCAP);
+function hcell(x, y) { return clamp(((y + HOFF) / HC) | 0, 0, HG - 1) * HG + clamp(((x + HOFF) / HC) | 0, 0, HG - 1); }
+function buildHashes() {
+  sHead.fill(-1); let k = 0;
+  for (const s of snakes) if (s.alive) for (let i = 0; i < s.xs.length && k < SCAP; i++) {
+    const c = hcell(s.xs[i], s.ys[i]); sNext[k] = sHead[c]; sHead[c] = k; sOwn[k] = s.id; sIdx[k] = i; k++;
+  }
+  bHead.fill(-1);
+  for (let j = 0; j < beads.length && j < BCAP; j++) { const c = hcell(beads[j].x, beads[j].y); bNext[j] = bHead[c]; bHead[c] = j; }
+}
+function bodyHit(x, y, rad, selfId) { // first other serpent's segment within rad + its radius, or -1
+  const cx = clamp(((x + HOFF) / HC) | 0, 0, HG - 1), cy = clamp(((y + HOFF) / HC) | 0, 0, HG - 1);
+  for (let gy = Math.max(0, cy - 1); gy <= Math.min(HG - 1, cy + 1); gy++) for (let gx = Math.max(0, cx - 1); gx <= Math.min(HG - 1, cx + 1); gx++) {
+    for (let e = sHead[gy * HG + gx]; e >= 0; e = sNext[e]) {
+      const o = sOwn[e]; if (o === selfId) continue;
+      const s = snakes[o], i = sIdx[e], dx = s.xs[i] - x, dy = s.ys[i] - y, R = rad + s.r * 0.9;
+      if (dx * dx + dy * dy < R * R) return e;
+    }
+  }
+  return -1;
+}
+function safeR() {
+  const t = state.t, s0 = tune.storm_start, R0 = tune.arena_radius;
+  if (t <= s0) return R0;
+  const k = clamp((t - s0) / Math.max(1, tune.round_time - s0), 0, 1);
+  return lerp(R0, tune.storm_end_radius, k * (2 - k) * 0.5 + k * 0.5);
+}
+
+// ---- The game: serpents -------------------------------------------------------------
+function makeSnake(id, x, y, a, len) {
+  const P = PALS[id];
+  const s = { id, isPlayer: id === 0, pal: P, kind: P.kind, name: P.name, xs: [], ys: [], pxs: [], pys: [], a, ta: a, len, r: tune.base_radius,
+    alive: true, boosting: false, wantBoost: false, dropAcc: 0, kills: 0, skill: 0.7, think: 0, gx: x, gy: y, lapse: false,
+    prey: -1, lesson: false, lessonEnd: 0, respawnT: 0, final: 0, wander: a, boostT: 0 };
+  for (let i = 0; i < Math.floor(len); i++) { s.xs.push(x - Math.cos(a) * i * tune.seg_spacing); s.ys.push(y - Math.sin(a) * i * tune.seg_spacing); }
+  s.skill = tune.bot_skill_min + rng() * Math.max(0, tune.bot_skill_max - tune.bot_skill_min);
+  return s;
+}
+function radiusOf(s) { return tune.base_radius + Math.min(tune.radius_max_add, s.len * tune.radius_growth); }
+function moveSnake(s, dt) {
+  const d = angDiff(s.ta, s.a), m = tune.turn_rate * (s.boosting ? 0.85 : 1) * dt;
+  s.a += clamp(d, -m, m);
+  if (s.a > Math.PI) s.a -= TAU; else if (s.a < -Math.PI) s.a += TAU;
+  const canBoost = s.wantBoost && s.len > tune.min_boost_len;
+  if (canBoost && !s.boosting && s.isPlayer) sfx.boost();
+  s.boosting = canBoost;
+  const sp = tune.speed * (s.boosting ? tune.boost_mult : 1);
+  const n0 = s.xs.length;
+  for (let i = 0; i < n0; i++) { s.pxs[i] = s.xs[i]; s.pys[i] = s.ys[i]; }
+  s.pxs.length = n0; s.pys.length = n0;
+  s.xs[0] += Math.cos(s.a) * sp * dt; s.ys[0] += Math.sin(s.a) * sp * dt;
+  const sp2 = tune.seg_spacing;
+  for (let i = 1; i < n0; i++) {
+    const dx = s.xs[i - 1] - s.xs[i], dy = s.ys[i - 1] - s.ys[i], L = Math.hypot(dx, dy);
+    if (L > sp2) { const k = (L - sp2) / L; s.xs[i] += dx * k; s.ys[i] += dy * k; }
+  }
+  if (s.boosting) { // sprinting sheds beads behind the tail
+    const c = tune.boost_cost * dt; s.len -= c; s.dropAcc += c * 0.5;
+    if (s.dropAcc >= tune.bead_growth) {
+      s.dropAcc -= tune.bead_growth;
+      const i = s.xs.length - 1;
+      addBead(s.xs[i] + (rng() - 0.5) * 10, s.ys[i] + (rng() - 0.5) * 10, tune.bead_growth, false, 0, 0);
+    }
+  }
+  s.len = clamp(s.len, 2, tune.max_len);
+  const want = Math.max(2, Math.floor(s.len));
+  while (s.xs.length < want) { const i = s.xs.length - 1; s.xs.push(s.xs[i]); s.ys.push(s.ys[i]); }
+  while (s.xs.length > want) { s.xs.pop(); s.ys.pop(); }
+  s.r = radiusOf(s);
+}
+function addBead(x, y, g, big, vx, vy) {
+  beads.push({ x, y, g, big, vx, vy, ph: rng() * TAU, t0: state.t, nat: false, dead: false });
+}
+function eatBeads(s, dt) {
+  const hx = s.xs[0], hy = s.ys[0], pull = s.r + tune.magnet, eat = s.r + 6;
+  const cx = clamp(((hx + HOFF) / HC) | 0, 0, HG - 1), cy = clamp(((hy + HOFF) / HC) | 0, 0, HG - 1);
+  for (let gy = Math.max(0, cy - 1); gy <= Math.min(HG - 1, cy + 1); gy++) for (let gx = Math.max(0, cx - 1); gx <= Math.min(HG - 1, cx + 1); gx++) {
+    for (let j = bHead[gy * HG + gx]; j >= 0; j = bNext[j]) {
+      const b = beads[j]; if (b.dead) continue;
+      const dx = hx - b.x, dy = hy - b.y, d = Math.hypot(dx, dy);
+      if (d < eat) {
+        b.dead = true; s.len = Math.min(tune.max_len, s.len + b.g);
+        if (s.isPlayer) { sfx.pop(); parts.push({ x: b.x, y: b.y, vx: 0, vy: 0, t: 0, life: 0.3, col: '#ffd27a', r: 10, k: 2 }); }
+      } else if (d < pull && state.t - b.t0 > 0.25) { const v = 420 * dt / d; b.x += dx * Math.min(1, v); b.y += dy * Math.min(1, v); }
+    }
+  }
+}
+function killSnake(s, by, why) {
+  if (!s.alive) return;
+  s.alive = false; s.final = s.len; s.deathT = state.t;
+  // the signature: a ribbon of glowing beads along the whole body
+  const n = s.xs.length, total = s.len * tune.death_share, count = Math.max(3, Math.ceil(total / tune.big_bead_growth));
+  const g = total / count;
+  for (let k = 0; k < count; k++) {
+    const i = Math.min(n - 1, Math.floor(k / count * n)), a = rng() * TAU, v = 30 + rng() * 60;
+    addBead(s.xs[i] + Math.cos(a) * s.r * 0.5, s.ys[i] + Math.sin(a) * s.r * 0.5, g, true, Math.cos(a) * v, Math.sin(a) * v);
+  }
+  for (let i = 0; i < n; i += 3) parts.push({ x: s.xs[i], y: s.ys[i], vx: (rng() - 0.5) * 80, vy: (rng() - 0.5) * 80, t: 0, life: 0.5 + rng() * 0.4, col: s.pal.light, r: s.r * 0.8, k: 0 });
+  parts.push({ x: s.xs[0], y: s.ys[0], vx: 0, vy: 0, t: 0, life: 0.6, col: s.pal.base, r: s.r * 5, k: 1 });
+  events.push({ type: 'out', who: s.id, by: by ? by.id : -1, why, len: Math.floor(s.len) });
+  if (by) by.kills++;
+  if (s.isPlayer) {
+    state.alive = false; state.final = s.len; state.why = why; state.killer = by ? by.id : -1; state.endT = state.t + 1.3;
+    state.camX = s.xs[0]; state.camY = s.ys[0]; state.shake = 16; sfx.die();
+  } else {
+    s.respawnT = state.t < tune.storm_start ? state.t + tune.respawn_time : Infinity;
+    if (by && by.isPlayer) { state.kills++; sfx.burst(); say(`${s.name} اصطدم بك فانفجر خرزًا`, '#ffe08a', 2.4); }
+    else sfx.far();
+  }
+}
+function spawnSpot(minD) {
+  const R = safeR() * 0.82; let best = [0, 0], bs = -1;
+  for (let k = 0; k < 30; k++) {
+    const a = rng() * TAU, d = Math.sqrt(rng()) * R, x = Math.cos(a) * d, y = Math.sin(a) * d;
+    let md = 1e9; for (const s of snakes) if (s.alive) for (let i = 0; i < s.xs.length; i += 4) md = Math.min(md, Math.hypot(s.xs[i] - x, s.ys[i] - y));
+    if (md > bs) { bs = md; best = [x, y]; }
+    if (md > minD) break;
+  }
+  return best;
+}
+function respawn(s) {
+  const [x, y] = spawnSpot(500), a = rng() * TAU, ns = makeSnake(s.id, x, y, a, s.kind === 'coiler' ? tune.coiler_start_len : tune.start_len);
+  ns.kills = s.kills; snakes[s.id] = ns;
+  events.push({ type: 'respawn', who: s.id });
+}
+
+// ---- The game: bots (labelled as bots everywhere) ---------------------------------------
+function bestBead(b, range) {
+  const hx = b.xs[0], hy = b.ys[0], cr = Math.ceil(range / HC);
+  const cx = clamp(((hx + HOFF) / HC) | 0, 0, HG - 1), cy = clamp(((hy + HOFF) / HC) | 0, 0, HG - 1);
+  let best = null, bs = 0; const sr = state.safeR - 120, me = snakes[0], calmFar = state.t < tune.calm_time && me.alive;
+  for (let gy = Math.max(0, cy - cr); gy <= Math.min(HG - 1, cy + cr); gy++) for (let gx = Math.max(0, cx - cr); gx <= Math.min(HG - 1, cx + cr); gx++) {
+    for (let j = bHead[gy * HG + gx]; j >= 0; j = bNext[j]) {
+      const q = beads[j]; if (q.dead || q.x * q.x + q.y * q.y > sr * sr) continue;
+      if (calmFar && (q.x - me.xs[0]) ** 2 + (q.y - me.ys[0]) ** 2 < 300 * 300) continue; // peaceful start: your patch is yours
+      const dx = q.x - hx, dy = q.y - hy, d = Math.hypot(dx, dy); if (d > range) continue;
+      const ahead = Math.cos(Math.atan2(dy, dx) - b.a) > 0.4 ? 1.4 : 1;
+      const sc = q.g * ahead / (d + 70);
+      if (sc > bs) { bs = sc; best = q; }
+    }
+  }
+  return best;
+}
+function botThink(b, dt) {
+  const T = state.t, calm = T < tune.calm_time, hx = b.xs[0], hy = b.ys[0];
+  b.think -= dt;
+  if (b.think <= 0) {
+    b.think = 0.1 + rng() * 0.08;
+    b.lapse = !calm && rng() < (1 - b.skill) * 0.3;
+    let gx = hx + Math.cos(b.wander) * 300, gy = hy + Math.sin(b.wander) * 300, boost = false;
+    const dc = Math.hypot(hx, hy), sr = state.safeR;
+    if (dc > sr - 240) { // the storm: head back in, a little sideways so it curves
+      const a = Math.atan2(-hy, -hx) + 0.5; gx = hx + Math.cos(a) * 300; gy = hy + Math.sin(a) * 300;
+      boost = !calm && dc > sr - 110 && b.len > tune.min_boost_len + 4;
+    } else {
+      let mode = 'forage';
+      if (b.kind === 'coward') {
+        let th = null, td = tune.flee_range;
+        for (const o of snakes) if (o !== b && o.alive && o.len > b.len * 1.05) { const d = Math.hypot(o.xs[0] - hx, o.ys[0] - hy); if (d < td) { td = d; th = o; } }
+        if (th) {
+          mode = 'flee';
+          const a = Math.atan2(hy - th.ys[0], hx - th.xs[0]); gx = hx + Math.cos(a) * 300; gy = hy + Math.sin(a) * 300;
+          boost = !calm && td < 170 && b.len > tune.min_boost_len + 4;
+        }
+      }
+      if (b.kind === 'coiler' && T >= tune.coil_start) {
+        let p = null;
+        if (b.lesson && T < b.lessonEnd && snakes[0].alive && snakes[0].len < b.len) p = snakes[0];
+        else {
+          b.lesson = false; let pd = tune.coil_range;
+          for (const o of snakes) if (o !== b && o.alive && o.len < b.len * 0.9) { const d = Math.hypot(o.xs[0] - hx, o.ys[0] - hy); if (d < pd) { pd = d; p = o; } }
+        }
+        if (p) {
+          mode = 'coil'; b.prey = p.id;
+          const px = p.xs[0], py = p.ys[0], pa = p.a, d = Math.hypot(px - hx, py - hy);
+          const toMe = Math.atan2(hy - py, hx - px), ahead = Math.cos(angDiff(toMe, pa)) > 0.5;
+          if (ahead && d < 320) { // cut across its path
+            gx = px + Math.cos(pa) * 150; gy = py + Math.sin(pa) * 150;
+            boost = !calm && d < 260 && b.len > tune.min_boost_len + 6;
+          } else { // circle it
+            const R = 95 + p.r * 2, phi = toMe + 0.95;
+            gx = px + Math.cos(phi) * R; gy = py + Math.sin(phi) * R;
+            boost = !calm && d > 380 && b.len > tune.min_boost_len + 10 && rng() < 0.3;
+          }
+        } else b.prey = -1;
+      }
+      if (mode === 'forage') {
+        const q = bestBead(b, b.kind === 'forager' ? 420 : 320);
+        if (q) { gx = q.x; gy = q.y; boost = !calm && q.big && b.kind !== 'coward' && b.len > 24 && Math.hypot(q.x - hx, q.y - hy) > 120 && rng() < 0.5; }
+        else if (rng() < 0.3) b.wander += (rng() - 0.5) * 1.2;
+      }
+    }
+    b.gx = gx; b.gy = gy; b.wantBoost = boost;
+  }
+  // steering: look ahead for bodies and the storm, take the nearest clear heading to the goal
+  const a0 = Math.atan2(b.gy - hy, b.gx - hx);
+  if (b.lapse) { b.ta = a0; return; }
+  const look = (b.r + 26 + 85 * b.skill * (b.boosting ? 1.5 : 1)) * (state.t < tune.calm_time ? 1.3 : 1), sr = state.safeR - 30;
+  for (const o of [0, 0.35, -0.35, 0.7, -0.7, 1.1, -1.1, 1.6, -1.6, 2.2, -2.2, 2.9]) {
+    const a = a0 + o, c = Math.cos(a), s = Math.sin(a);
+    let ok = true;
+    for (const f of [0.45, 1]) {
+      const x = hx + c * look * f, y = hy + s * look * f;
+      if (x * x + y * y > sr * sr || bodyHit(x, y, b.r + 6, b.id) >= 0) { ok = false; break; }
+    }
+    if (ok) { b.ta = a; return; }
+  }
+  b.ta = a0 + 1.6;
+}
+
+// ---- The game: effects ---------------------------------------------------------------
+function updateParts(dt) {
+  for (const p of parts) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.93; p.vy *= 0.93; }
+  parts = parts.filter(p => p.t < p.life);
+}
+function say(s, col, dur) { state.msg = { s, col, until: state.t + dur }; }
+
+// ---- The game: round -----------------------------------------------------------------
+function loadBest() { try { return Number(localStorage.getItem('gamelab.dune-serpent.best')) || 0; } catch (_) { return 0; } }
+function saveBest(v) { try { localStorage.setItem('gamelab.dune-serpent.best', String(v)); } catch (_) { /* private mode */ } }
+let scene, state;
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  HOFF = tune.arena_radius + 240; HG = Math.ceil(HOFF * 2 / HC) + 1;
+  sHead = new Int32Array(HG * HG); bHead = new Int32Array(HG * HG);
+  beads = []; parts = [];
+  state = { t: 0, score: 0, len: 0, gained: '', kills: 0, best: loadBest(), alive: true, final: 0, why: '', killer: -1, endT: 0,
+    result: null, msg: null, zoom: tune.zoom_start, camX: 0, camY: 0, shake: 0, safeR: tune.arena_radius, lastTick: -1,
+    said: {}, steered: false, lessonOn: false, lessonEnd: 0, boosted: false };
+  snakes = [makeSnake(0, 0, 0, -Math.PI / 2, tune.start_len)];
+  for (let k = 1; k < PALS.length; k++) {
+    const a = (k - 1) / (PALS.length - 1) * TAU + rng() * 0.4, d = 800 + rng() * 450;
+    snakes.push(makeSnake(k, Math.cos(a) * d, Math.sin(a) * d, rng() * TAU, PALS[k].kind === 'coiler' ? tune.coiler_start_len : tune.start_len));
+  }
+  const R = tune.arena_radius - 60;
+  for (let k = 0; k < tune.bead_count; k++) { const a = rng() * TAU, d = Math.sqrt(rng()) * R; addBead(Math.cos(a) * d, Math.sin(a) * d, tune.bead_growth, false, 0, 0); beads[beads.length - 1].nat = true; }
+  for (let k = 0; k < 70; k++) { const a = rng() * TAU, d = 60 + rng() * 260; addBead(Math.cos(a) * d, Math.sin(a) * d - 120, tune.bead_growth, false, 0, 0); beads[beads.length - 1].nat = true; }
+  for (const b of beads) b.t0 = -1;
+}
+function startRound() { reset(); scene = 'play'; sfx.start(); events.push({ type: 'start' }); say('اسحب لتوجّه الأفعى نحو الخرز', '#fff', 4); }
+function endRound(reason) {
+  const me = snakes[0], fin = state.alive ? me.len : state.final;
+  const stand = snakes.map(s => ({ id: s.id, alive: s.alive, len: s.alive ? s.len : s.final })).sort((a, b) => (b.alive - a.alive) || (b.len - a.len));
+  const rank = stand.findIndex(s => s.id === 0) + 1;
+  const newBest = Math.floor(fin) > state.best;
+  if (newBest) { state.best = Math.floor(fin); saveBest(state.best); }
+  state.result = { reason, fin: Math.floor(fin), stand, rank, newBest };
+  state.score = Math.floor(fin); state.gained = `طولك ${Math.floor(fin)}`;
+  scene = 'results';
+  if (reason === 'last' || (reason === 'time' && rank === 1)) sfx.win();
+  events.push({ type: 'end', reason, len: Math.floor(fin), rank });
+}
+function playerControl(p) {
+  let steer = null, nSteer = 0, boostBtn = false;
+  for (const q of ptrs.values()) {
+    if (q.kind === 'boost') boostBtn = true;
+    else if (q.kind === 'steer') { nSteer++; if (!steer || q.t < steer.t) steer = q; }
+  }
+  if (steer) {
+    const dx = steer.x - W / 2, dy = steer.y - H / 2;
+    if (dx * dx + dy * dy > 18 * 18) { p.ta = Math.atan2(dy, dx); state.steered = true; }
+  }
+  const L = down.has('ArrowLeft') || down.has('KeyA'), R = down.has('ArrowRight') || down.has('KeyD');
+  if (L !== R) { p.ta = p.a + (L ? -1 : 1); state.steered = true; state.keyTurn = true; }
+  else if (state.keyTurn) { p.ta = p.a; state.keyTurn = false; } // keys let go: straighten out
+  p.wantBoost = boostBtn || nSteer >= 2 || down.has('Space') || down.has('ArrowUp');
+  if (p.wantBoost && p.boosting) state.boosted = true;
+}
+
+// ---- The game: drawing ---------------------------------------------------------------
+let viewZ = 1, viewX = 0, viewY = 0;
+function drawWorld() {
+  const p = snakes[0], t = state.t;
+  let cx, cy;
+  if (p.alive) { cx = lerp(p.pxs[0] ?? p.xs[0], p.xs[0], ALPHA); cy = lerp(p.pys[0] ?? p.ys[0], p.ys[0], ALPHA); }
+  else { cx = state.camX; cy = state.camY; }
+  if (state.shake > 0.5) { cx += Math.sin(t * 61) * state.shake; cy += Math.cos(t * 53) * state.shake; }
+  const z = state.zoom; viewZ = z; viewX = cx; viewY = cy;
+  const hw = W / 2 / z, hh = H / 2 / z, x0 = cx - hw - 60, x1 = cx + hw + 60, y0 = cy - hh - 60, y1 = cy + hh + 60;
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-cx, -cy);
+  ctx.fillStyle = nightPat; ctx.fillRect(cx - hw - 2, cy - hh - 2, hw * 2 + 4, hh * 2 + 4);
+  // beads
+  for (const b of beads) {
+    if (b.dead || b.x < x0 || b.x > x1 || b.y < y0 || b.y > y1) continue;
+    const img = b.big ? beadBig : beadSmall, age = t - b.t0;
+    let sc = 1 + 0.12 * Math.sin(t * 4 + b.ph);
+    if (age < 0.35) sc *= b.big ? 0.4 + age / 0.35 * 0.9 : age / 0.35;
+    const w = img.width * sc * 0.5;
+    ctx.drawImage(img, b.x - w, b.y - w, w * 2, w * 2);
+  }
+  // serpents, shortest first so the long ones lie on top; you on top of all
+  const order = snakes.filter(s => s.alive && s !== p).sort((a, b) => a.len - b.len);
+  if (p.alive) order.push(p);
+  for (const s of order) {
+    let seen = false;
+    for (let i = 0; i < s.xs.length; i += 6) if (s.xs[i] > x0 - 40 && s.xs[i] < x1 + 40 && s.ys[i] > y0 - 40 && s.ys[i] < y1 + 40) { seen = true; break; }
+    if (seen) drawBody(ctx, s, ALPHA, t);
+  }
+  // bursts
+  for (const q of parts) {
+    const f = 1 - q.t / q.life;
+    if (q.k === 1) { ctx.strokeStyle = hexA(q.col, f * 0.8); ctx.lineWidth = 6; circ(ctx, q.x, q.y, q.r * (1.4 - f)); ctx.stroke(); }
+    else if (q.k === 2) { ctx.strokeStyle = hexA(q.col, f); ctx.lineWidth = 2.5; circ(ctx, q.x, q.y, q.r * (1.6 - f)); ctx.stroke(); }
+    else { ctx.fillStyle = hexA(q.col, f * 0.8); circ(ctx, q.x, q.y, q.r * (0.5 + f * 0.5)); ctx.fill(); }
+  }
+  // the sandstorm wall
+  const R = state.safeR;
+  if (Math.hypot(cx, cy) + Math.hypot(hw, hh) > R) {
+    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.arc(0, 0, R, 0, TAU, true);
+    ctx.fillStyle = 'rgba(176,118,42,0.62)'; ctx.fill();
+    ctx.lineCap = 'round';
+    for (let k = 0; k < 26; k++) {
+      const rr2 = R + 18 + (k % 13) * 26, sp = (k % 3 + 1) * 0.12 * (k & 1 ? 1 : -1), a = t * sp + hash(k + 40) * TAU;
+      ctx.strokeStyle = k % 4 ? 'rgba(236,190,110,0.45)' : 'rgba(255,226,160,0.6)'; ctx.lineWidth = 3 + (k % 4) * 2;
+      for (let j = 0; j < 6; j++) { ctx.beginPath(); ctx.arc(0, 0, rr2, a + j * TAU / 6, a + j * TAU / 6 + 0.22 + (k % 3) * 0.08); ctx.stroke(); }
+    }
+    ctx.strokeStyle = 'rgba(255,200,110,0.9)'; ctx.lineWidth = 9; ctx.setLineDash([40, 26]); ctx.lineDashOffset = -t * 120;
+    circ(ctx, 0, 0, R); ctx.stroke();
+    ctx.strokeStyle = 'rgba(120,60,10,0.8)'; ctx.lineWidth = 4; ctx.setLineDash([12, 30]); ctx.lineDashOffset = t * 80;
+    circ(ctx, 0, 0, R + 10); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.restore();
+  ctx.fillStyle = moonGrad; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = vignGrad; ctx.fillRect(0, 0, W, H);
+  // name tags: every bot is labelled as a bot
+  for (const s of snakes) if (s.alive) {
+    const X = (s.xs[0] - cx) * z + W / 2, Y = (s.ys[0] - cy) * z + H / 2;
+    if (X < -60 || X > W + 60 || Y < -60 || Y > H + 60) continue;
+    const tag = s.isPlayer ? 'أنت' : s.name;
+    ctx.font = `bold 24px ${FONT}`; const tw = ctx.measureText(tag).width / 2 + 16;
+    pill(tag, clamp(X, tw + 4, W - tw - 4), clamp(Y - s.r * z * 1.6 - 26, 24, H - 24), 24, '#fff', hexA(s.pal.dark, 0.85));
+  }
+}
+function drawButton(b, kind) {
+  ctx.fillStyle = 'rgba(14,12,40,0.66)'; rr(ctx, b[0], b[1], b[2], b[3], 18); ctx.fill();
+  ctx.strokeStyle = 'rgba(200,205,255,0.5)'; ctx.lineWidth = 2; rr(ctx, b[0] + 3, b[1] + 3, b[2] - 6, b[3] - 6, 15); ctx.stroke();
+  const cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+  ctx.fillStyle = '#e9ecff'; ctx.strokeStyle = '#e9ecff';
+  if (kind === 'pause') { rr(ctx, cx - 13, cy - 16, 9, 32, 3); ctx.fill(); rr(ctx, cx + 4, cy - 16, 9, 32, 3); ctx.fill(); }
+  else if (kind === 'mute') {
+    ctx.beginPath(); ctx.moveTo(cx - 20, cy - 7); ctx.lineTo(cx - 11, cy - 7); ctx.lineTo(cx, cy - 17); ctx.lineTo(cx, cy + 17); ctx.lineTo(cx - 11, cy + 7); ctx.lineTo(cx - 20, cy + 7); ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+    if (muted) { line(ctx, cx + 7, cy - 9, cx + 21, cy + 9); line(ctx, cx + 21, cy - 9, cx + 7, cy + 9); }
+    else { ctx.beginPath(); ctx.arc(cx + 2, cy, 9, -0.9, 0.9); ctx.stroke(); ctx.beginPath(); ctx.arc(cx + 2, cy, 17, -0.9, 0.9); ctx.stroke(); }
+  } else if (kind === 'home') {
+    ctx.beginPath(); ctx.moveTo(cx, cy - 22); ctx.lineTo(cx + 24, cy); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx + 17, cy + 20); ctx.lineTo(cx - 17, cy + 20); ctx.lineTo(cx - 17, cy); ctx.lineTo(cx - 24, cy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(14,12,40,0.9)'; ctx.fillRect(cx - 6, cy + 6, 12, 14);
+  }
+}
+function fmtTime(s) { s = Math.max(0, Math.ceil(s)); return `${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`; }
+function drawHUD() {
+  const t = state.t, me = snakes[0];
+  drawButton(BTN_PAUSE, 'pause'); drawButton(BTN_MUTE, 'mute');
+  const left = tune.round_time - t;
+  ctx.fillStyle = 'rgba(14,12,40,0.7)'; rr(ctx, 188, 16, 192, 158, 20); ctx.fill();
+  text(fmtTime(left), 284, 54, 48, left < 10 ? '#ffb0a0' : '#fff', 'center', 'bold');
+  text(`طولك ${Math.floor(state.alive ? me.len : state.final)}`, 284, 102, 28, PALS[0].light, 'center', 'bold');
+  const st = tune.storm_start - t;
+  text(st > 0 ? `العاصفة بعد ${fmtTime(st)}` : 'العاصفة تضيق', 284, 146, 24, st > 0 ? '#e8d6a8' : '#ffc27a', 'center', 'bold');
+  // live length board
+  const rows = snakes.map(s => ({ s, len: s.alive ? s.len : (s.isPlayer ? state.final : s.final) })).sort((a, b) => (b.s.alive - a.s.alive) || (b.len - a.len));
+  const bx = 390, by = 16, bw = 314, rh = 33;
+  ctx.fillStyle = 'rgba(14,12,40,0.7)'; rr(ctx, bx, by, bw, 12 + rows.length * rh, 18); ctx.fill();
+  rows.forEach(({ s, len }, k) => {
+    const y = by + 6 + k * rh + rh / 2, P = s.pal;
+    if (s.isPlayer) { ctx.fillStyle = 'rgba(255,255,255,0.14)'; rr(ctx, bx + 6, y - rh / 2 + 2, bw - 12, rh - 4, 10); ctx.fill(); }
+    ctx.fillStyle = P.base; ctx.strokeStyle = P.dark; ctx.lineWidth = 3; circ(ctx, bx + bw - 26, y, 10); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = P.mark; circ(ctx, bx + bw - 26, y, 4); ctx.fill();
+    text(s.isPlayer ? 'أنت' : `${s.name} · ${KIND_AR[s.kind]}`, bx + bw - 46, y, 24, s.alive ? '#fff' : '#9a98b8', 'right', s.isPlayer ? 'bold' : '');
+    text(s.alive ? `${Math.floor(len)}` : 'خارج', bx + 14, y, 24, s.alive ? '#ffd27a' : '#9a98b8', 'left', 'bold');
+  });
+  // minimap: arena, storm and heads
+  const mr = 92, mx = W - mr - 20, my = H - mr - 20, R0 = tune.arena_radius, sc = mr / R0;
+  ctx.fillStyle = 'rgba(14,12,40,0.78)'; circ(ctx, mx, my, mr + 8); ctx.fill();
+  ctx.fillStyle = 'rgba(176,118,42,0.7)'; circ(ctx, mx, my, mr); ctx.fill();
+  ctx.fillStyle = '#2a2766'; circ(ctx, mx, my, state.safeR * sc); ctx.fill();
+  ctx.strokeStyle = '#ffc27a'; ctx.lineWidth = 2; circ(ctx, mx, my, state.safeR * sc); ctx.stroke();
+  for (const s of snakes) if (s.alive && !s.isPlayer) { ctx.fillStyle = s.pal.base; circ(ctx, mx + s.xs[0] * sc, my + s.ys[0] * sc, 3.5 + Math.min(3, s.len / 60)); ctx.fill(); }
+  if (me.alive) { ctx.fillStyle = PALS[0].base; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; circ(ctx, mx + me.xs[0] * sc, my + me.ys[0] * sc, 6); ctx.fill(); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(mx + (viewX - W / 2 / viewZ) * sc, my + (viewY - H / 2 / viewZ) * sc, W / viewZ * sc, H / viewZ * sc);
+  // boost button
+  const on = me.boosting, pulse = state.lessonOn && !state.boosted ? 0.5 + 0.5 * Math.sin(t * 10) : 0;
+  if (pulse) { ctx.strokeStyle = `rgba(255,210,122,${pulse})`; ctx.lineWidth = 8; circ(ctx, BOOST.x, BOOST.y, BOOST.r + 10); ctx.stroke(); }
+  ctx.fillStyle = on ? 'rgba(255,190,80,0.55)' : 'rgba(14,12,40,0.6)'; circ(ctx, BOOST.x, BOOST.y, BOOST.r - 14); ctx.fill();
+  ctx.strokeStyle = me.len > tune.min_boost_len ? '#ffd27a' : '#77759a'; ctx.lineWidth = 5; circ(ctx, BOOST.x, BOOST.y, BOOST.r - 14); ctx.stroke();
+  ctx.fillStyle = me.len > tune.min_boost_len ? '#ffe2a6' : '#77759a';
+  for (const o of [-14, 10]) { ctx.beginPath(); ctx.moveTo(BOOST.x - 4 + o, BOOST.y - 24); ctx.lineTo(BOOST.x + 16 + o, BOOST.y); ctx.lineTo(BOOST.x - 4 + o, BOOST.y + 24); ctx.lineTo(BOOST.x - 12 + o, BOOST.y + 24); ctx.lineTo(BOOST.x + 8 + o, BOOST.y); ctx.lineTo(BOOST.x - 12 + o, BOOST.y - 24); ctx.closePath(); ctx.fill(); }
+  // message line
+  if (state.msg && t < state.msg.until) {
+    ctx.globalAlpha = clamp((state.msg.until - t) * 2, 0, 1);
+    pill(state.msg.s, W / 2, 380, 30, state.msg.col, 'rgba(14,10,36,0.86)');
+    ctx.globalAlpha = 1;
+  }
+  // where the steering finger points
+  for (const q of ptrs.values()) if (q.kind === 'steer') {
+    ctx.strokeStyle = 'rgba(200,240,255,0.5)'; ctx.lineWidth = 3; circ(ctx, q.x, q.y, 34); ctx.stroke();
+    ctx.fillStyle = 'rgba(200,240,255,0.25)'; circ(ctx, q.x, q.y, 14); ctx.fill();
+  }
+}
+function drawNight() { ctx.fillStyle = nightPat; ctx.fillRect(0, 0, W, H); ctx.fillStyle = moonGrad; ctx.fillRect(0, 0, W, H); }
+function demoSnake(id, pts, len, t) { // a posed serpent for the title and figures
+  const s = makeSnakeShape(id, pts, len); drawBody(ctx, s, 1, t);
+}
+function makeSnakeShape(id, fn, n) {
+  const P = PALS[id], s = { id, pal: P, kind: P.kind, xs: [], ys: [], pxs: [], pys: [], r: 0, a: 0, ta: 0, boosting: false };
+  for (let i = 0; i < n; i++) { const [x, y] = fn(i); s.xs.push(x); s.ys.push(y); }
+  s.r = fn(-1)[0]; s.a = Math.atan2(s.ys[0] - s.ys[1], s.xs[0] - s.xs[1]); s.ta = s.a;
+  return s;
+}
+
+// ---- Scenes ---------------------------------------------------------------------------
+const BTN_AGAIN = [150, 990, 420, 100], BTN_MENU = [210, 1110, 300, 84];
+const BTN_RESUME = [150, 540, 420, 100], BTN_RESTART = [150, 664, 420, 100], BTN_QUIT = [150, 788, 420, 100];
+function bigButton(b, s, main) {
+  ctx.fillStyle = 'rgba(0,0,10,0.4)'; rr(ctx, b[0] + 4, b[1] + 6, b[2], b[3], 24); ctx.fill();
+  const g = ctx.createLinearGradient(0, b[1], 0, b[1] + b[3]);
+  g.addColorStop(0, main ? '#3fd6cf' : '#3a3678'); g.addColorStop(1, main ? '#14817f' : '#24205a');
+  ctx.fillStyle = g; rr(ctx, b[0], b[1], b[2], b[3], 24); ctx.fill();
+  ctx.strokeStyle = main ? '#c4fff6' : '#9a98d8'; ctx.lineWidth = 3; rr(ctx, b[0] + 5, b[1] + 5, b[2] - 10, b[3] - 10, 20); ctx.stroke();
+  text(s, b[0] + b[2] / 2, b[1] + b[3] / 2 + 2, main ? 38 : 32, main ? '#05262c' : '#fff', 'center', 'bold');
+}
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() {
+      drawNight();
+      const t = state.t;
+      text('أفاعي الكثبان وأشكالها', W / 2, 56, 36, '#fff', 'center', 'bold');
+      const card = (x, y, w, h) => { ctx.fillStyle = 'rgba(14,12,40,0.55)'; rr(ctx, x, y, w, h, 22); ctx.fill(); };
+      const figs = [[0, 'أنت · قرن ذهبي وعرف'], [2, 'بوت جامع · رأس مستدير'], [1, 'بوت ملتفّ · رأس مثلث بقرنين'], [3, 'بوت جبان · رأس نحيل']];
+      figs.forEach(([id, label], k) => {
+        const x = 20 + (k % 2) * 350, y = 100 + ((k / 2) | 0) * 330;
+        card(x, y, 330, 310);
+        ctx.save(); ctx.translate(x + 165, y + 135); ctx.scale(1.6, 1.6);
+        demoSnake(id, i => i < 0 ? [12] : [70 - i * 7, Math.sin(i * 0.38 + t * 2) * 22], 24, t);
+        ctx.restore();
+        text(label, x + 165, y + 280, 26, '#fff', 'center', 'bold');
+      });
+      card(20, 770, 330, 230);
+      ctx.drawImage(beadSmall, 80, 820, beadSmall.width * 2.4, beadSmall.width * 2.4);
+      ctx.drawImage(beadBig, 190, 805, beadBig.width * 2.2, beadBig.width * 2.2);
+      text('خرز كهرماني صغير وكبير', 185, 960, 26, '#fff', 'center', 'bold');
+      card(370, 770, 330, 230);
+      ctx.save(); ctx.beginPath(); rr(ctx, 370, 770, 330, 230, 22); ctx.clip();
+      ctx.translate(535, 1250); const R = 400;
+      ctx.beginPath(); ctx.rect(-400, -600, 800, 800); ctx.arc(0, 0, R, 0, TAU, true); ctx.fillStyle = 'rgba(176,118,42,0.7)'; ctx.fill();
+      for (let k = 0; k < 14; k++) { ctx.strokeStyle = 'rgba(236,190,110,0.6)'; ctx.lineWidth = 4; const a = -Math.PI / 2 - 0.5 + hash(k) + t * 0.2 * (k & 1 ? 1 : -1); ctx.beginPath(); ctx.arc(0, 0, R + 20 + (k % 7) * 22, a, a + 0.25); ctx.stroke(); }
+      ctx.strokeStyle = 'rgba(255,200,110,0.9)'; ctx.lineWidth = 9; ctx.setLineDash([40, 26]); ctx.lineDashOffset = -t * 120; circ(ctx, 0, 0, R); ctx.stroke(); ctx.setLineDash([]);
+      ctx.restore();
+      text('جدار العاصفة', 535, 960, 26, '#fff', 'center', 'bold');
+      card(20, 1020, 680, 240);
+      for (let k = 0; k < 16; k++) { const x = 90 + k * 36, y = 1110 + Math.sin(k * 0.6) * 30; ctx.drawImage(beadBig, x - 26, y - 26, 52, 52); }
+      text('أفعى تنفجر شريطًا من الخرز', W / 2, 1210, 26, '#fff', 'center', 'bold');
+    },
+  },
+  title: {
+    update() {
+      for (const p of tapList) {
+        if (location.protocol.startsWith('http') && inRect(p, BTN_HOME)) { location.href = '../../'; return; }
+        startRound(); return;
+      }
+      if (pressed('Enter') || pressed('Space')) startRound();
+      state.t += STEP;
+    },
+    draw() {
+      drawNight();
+      const t = clock.now();
+      for (let k = 0; k < 40; k++) { const sc = 0.5 + 0.5 * Math.sin(t * 2 + k); ctx.globalAlpha = 0.6; ctx.drawImage(beadSmall, (hash(k + 5) * W) | 0, 380 + ((hash(k + 9) * 900) | 0), 22 * sc + 10, 22 * sc + 10); }
+      ctx.globalAlpha = 1;
+      if (location.protocol.startsWith('http')) drawButton(BTN_HOME, 'home');
+      ctx.save(); ctx.translate(360, 520); ctx.scale(1.7, 1.7);
+      demoSnake(0, i => i < 0 ? [13] : [Math.cos(i * 0.16 + t * 0.8) * (120 - i * 1.1), Math.sin(i * 0.16 + t * 0.8) * (60 - i * 0.55)], 60, t);
+      ctx.restore();
+      text(TITLE, W / 2, 190, 104, '#ffe2a6', 'center', 'bold');
+      text(TITLE_EN, W / 2, 290, 40, '#b8bdf0', 'center', 'bold');
+      ctx.fillStyle = 'rgba(14,12,40,0.7)'; rr(ctx, 30, 690, 660, 340, 26); ctx.fill();
+      CONTROLS.forEach((c, i) => text(c, W / 2, 730 + i * 54, 28, '#fff', 'center', i === 1 ? 'bold' : ''));
+      text('المنافسون الثمانية بوتات وليسوا لاعبين حقيقيين', W / 2, 1000, 24, '#c9c6f0', 'center');
+      if (state.best > 0) text(`أطول أفعى لك: ${state.best}`, W / 2, 1066, 30, '#ffd27a', 'center', 'bold');
+      ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
+      pill('المس الشاشة للبدء', W / 2, 1170, 44, '#05262c', '#3fd6cf');
+      ctx.globalAlpha = 1;
+    },
+  },
+  play: {
+    update(dt) {
+      if (pressed('KeyP') || pressed('Escape')) { scene = 'pause'; return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_PAUSE)) { scene = 'pause'; return; }
+        if (inRect(p, BTN_MUTE)) setMuted(!muted);
+      }
+      state.t += dt; const T = state.t;
+      state.safeR = safeR();
+      const me = snakes[0];
+      if (me.alive) playerControl(me);
+      buildHashes();
+      for (const s of snakes) {
+        if (!s.alive) { if (!s.isPlayer && T >= s.respawnT) respawn(s); continue; }
+        if (!s.isPlayer) botThink(s, dt);
+        moveSnake(s, dt);
+      }
+      buildHashes();
+      // heads against bodies, then the storm
+      const dying = [];
+      for (const s of snakes) {
+        if (!s.alive) continue;
+        const hx = s.xs[0], hy = s.ys[0];
+        if (hx * hx + hy * hy > state.safeR * state.safeR) { dying.push([s, null, 'storm']); continue; }
+        const e = bodyHit(hx, hy, s.r * 0.7, s.id);
+        if (e < 0) continue;
+        const o = snakes[sOwn[e]];
+        if (sIdx[e] <= 1) { // head-on: the shorter one breaks
+          if (s.len < o.len * 0.97) dying.push([s, o, 'body']);
+          else if (o.len < s.len * 0.97) dying.push([o, s, 'body']);
+          else { dying.push([s, o, 'body']); dying.push([o, s, 'body']); }
+        } else dying.push([s, o, 'body']);
+      }
+      for (const [s, o, why] of dying) killSnake(s, o, why);
+      for (const s of snakes) if (s.alive) eatBeads(s, dt);
+      // beads: pops settle, the storm swallows those outside, nature tops the field up
+      const sr2 = (state.safeR + 10) ** 2; let nat = 0, removed = false;
+      for (const b of beads) {
+        if (b.vx || b.vy) { b.x += b.vx * dt; b.y += b.vy * dt; b.vx *= 0.9; b.vy *= 0.9; if (Math.abs(b.vx) + Math.abs(b.vy) < 1) b.vx = b.vy = 0; }
+        if (!b.dead && b.x * b.x + b.y * b.y > sr2) b.dead = true;
+        if (b.dead) removed = true; else if (b.nat) nat++;
+      }
+      if (removed) beads = beads.filter(b => !b.dead);
+      const target = tune.bead_count * (state.safeR / tune.arena_radius) ** 2;
+      for (let k = 0; k < 3 && nat < target; k++, nat++) {
+        const a = rng() * TAU, d = Math.sqrt(rng()) * (state.safeR - 60);
+        addBead(Math.cos(a) * d, Math.sin(a) * d, tune.bead_growth, false, 0, 0); beads[beads.length - 1].nat = true;
+      }
+      updateParts(dt);
+      // camera zoom follows your length
+      const zt = clamp(tune.zoom_start - (me.len - tune.start_len) * tune.zoom_per_seg, tune.zoom_min, tune.zoom_start);
+      state.zoom = lerp(state.zoom, zt, 1 - Math.exp(-dt * 1.2));
+      state.shake *= 0.9;
+      // the first minute, taught by doing
+      const S = state.said;
+      if (!S.calm && T >= tune.calm_time) { S.calm = true; say('انتهى الهدوء: البوتات تتسابق على الخرز', '#ffe08a', 2.6); }
+      if (!S.coil && T >= tune.coil_start) {
+        S.coil = true;
+        let c = null, cd = 1e9;
+        for (const s of snakes) if (s.alive && s.kind === 'coiler' && s.len > me.len) { const d = Math.hypot(s.xs[0] - me.xs[0], s.ys[0] - me.ys[0]); if (d < cd) { cd = d; c = s; } }
+        if (c && me.alive) {
+          c.lesson = true; c.lessonEnd = T + 14; state.lessonOn = true; state.lessonEnd = T + 9;
+          sfx.warn(); say(`${c.name} يحاول الالتفاف حولك: اندفع بالزر`, '#ffb8a6', 3.5);
+          events.push({ type: 'coil', who: c.id });
+        }
+      }
+      if (state.lessonOn && T > state.lessonEnd) state.lessonOn = false;
+      if (!S.stormSoon && T >= tune.storm_start - 5) { S.stormSoon = true; say('العاصفة تقترب', '#ffc27a', 2.5); }
+      if (!S.storm && T >= tune.storm_start) { S.storm = true; sfx.storm(); say('العاصفة بدأت تضيق الساحة', '#ffc27a', 3); }
+      const left = tune.round_time - T;
+      if (left < 10 && Math.ceil(left) !== state.lastTick) { state.lastTick = Math.ceil(left); sfx.tick(); }
+      state.len = Math.floor(me.alive ? me.len : state.final); state.score = state.len;
+      if (!state.alive) { if (T >= state.endT) endRound('out'); return; }
+      const botsLeft = snakes.some(s => !s.isPlayer && (s.alive || s.respawnT < Infinity));
+      if (!botsLeft) { endRound('last'); return; }
+      if (T >= tune.round_time) endRound('time');
+    },
+    draw() { drawWorld(); drawHUD(); },
+  },
+  pause: {
+    update() {
+      if (pressed('KeyP') || pressed('Escape') || pressed('Enter') || pressed('Space')) { scene = 'play'; return; }
+      if (pressed('KeyR')) { startRound(); return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_RESUME)) { scene = 'play'; return; }
+        if (inRect(p, BTN_RESTART)) { startRound(); return; }
+        if (inRect(p, BTN_QUIT)) { reset(); scene = 'title'; return; }
+      }
+    },
+    draw() {
+      drawWorld(); drawHUD();
+      ctx.fillStyle = 'rgba(8,6,28,0.66)'; ctx.fillRect(0, 0, W, H);
+      text('استراحة', W / 2, 400, 72, '#fff', 'center', 'bold');
+      bigButton(BTN_RESUME, 'متابعة', true); bigButton(BTN_RESTART, 'جولة جديدة'); bigButton(BTN_QUIT, 'القائمة');
+      text('P أو Esc للمتابعة', W / 2, 950, 26, '#c9c6f0', 'center');
+    },
+  },
+  results: {
+    update() {
+      if (pressed('Enter') || pressed('Space') || pressed('KeyR')) { startRound(); return; }
+      if (pressed('Escape')) { reset(); scene = 'title'; return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_AGAIN)) { startRound(); return; }
+        if (inRect(p, BTN_MENU)) { reset(); scene = 'title'; return; }
+      }
+    },
+    draw() {
+      drawWorld(); drawHUD();
+      ctx.fillStyle = 'rgba(8,6,28,0.7)'; ctx.fillRect(0, 0, W, H);
+      const R = state.result;
+      ctx.fillStyle = 'rgba(24,20,62,0.96)'; rr(ctx, 50, 110, 620, 1110, 30); ctx.fill();
+      ctx.strokeStyle = PALS[0].base; ctx.lineWidth = 6; rr(ctx, 60, 120, 600, 1090, 24); ctx.stroke();
+      let head, sub;
+      if (R.reason === 'last') { head = 'فزت بالجولة'; sub = 'آخر أفعى حيّة في الكثبان'; }
+      else if (R.reason === 'time') { head = R.rank === 1 ? 'فزت بالجولة' : 'انتهى الوقت'; sub = R.rank === 1 ? 'أطول أفعى حيّة عند النهاية' : `مركزك ${R.rank} من ${snakes.length}`; }
+      else { head = 'خرجت من الجولة'; sub = state.why === 'storm' ? 'ابتلعتك العاصفة' : `اصطدم رأسك بجسد ${PALS[state.killer].name}`; }
+      text(head, W / 2, 200, 56, '#fff', 'center', 'bold');
+      text(sub, W / 2, 268, 30, '#ffd9a8', 'center');
+      text(`طولك ${R.fin}`, W / 2, 344, 48, PALS[0].light, 'center', 'bold');
+      text(R.newBest ? 'رقم شخصي جديد' : `أطول أفعى لك: ${state.best}`, W / 2, 402, 28, R.newBest ? '#ffe08a' : '#c9c6f0', 'center', 'bold');
+      R.stand.forEach((s, k) => {
+        const y = 470 + k * 52, P = PALS[s.id];
+        if (s.id === 0) { ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(ctx, 100, y - 24, 520, 48, 12); ctx.fill(); }
+        text(`${k + 1}`, 596, y, 28, '#c9c6f0', 'center', 'bold');
+        ctx.fillStyle = P.base; ctx.strokeStyle = P.dark; ctx.lineWidth = 3; circ(ctx, 556, y, 12); ctx.fill(); ctx.stroke();
+        text(s.id === 0 ? 'أنت' : `${P.name} · ${KIND_AR[P.kind]}`, 534, y, 26, s.alive ? '#fff' : '#9a98b8', 'right', s.id === 0 ? 'bold' : '');
+        text(s.alive ? `${Math.floor(s.len)}` : `خارج · ${Math.floor(s.len)}`, 120, y, 26, s.alive ? '#ffd27a' : '#9a98b8', 'left', 'bold');
+      });
+      text(`أفاعٍ اصطدمت بك: ${state.kills}`, W / 2, 944, 28, '#c9c6f0', 'center');
+      bigButton(BTN_AGAIN, 'العب مجددًا', true); bigButton(BTN_MENU, 'القائمة');
+    },
+  },
+};
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  tapList = taps.splice(0);
+  scenes[scene].update(STEP); hit.clear(); tapList = [];
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+document.addEventListener('visibilitychange', () => { if (document.hidden && scene === 'play') scene = 'pause'; });
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

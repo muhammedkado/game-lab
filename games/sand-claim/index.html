@@ -1,0 +1,1206 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: Is the risk of a long loop versus a safe short one exciting on a phone against five readable bots? -->
+<!-- Date: 2026-11-23 -->
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#a87c45">
+<title>رمال · Sand Claim</title>
+<link rel="stylesheet" href="vendor/almarai.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #a87c45; overflow: hidden; overscroll-behavior: none;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
+<script src="config.js"></script>
+<script>
+'use strict';
+// Sand Claim: ride out of your camp, trace a loop of footprints, get home to claim the inside.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 720, H = 1280;        // logical size: portrait phone
+const PIXEL = false;
+const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
+const TITLE = 'رمال';
+const TITLE_EN = 'Sand Claim';
+const CONTROLS = [
+  'اسحب بإصبعك في أي مكان لتوجيه جملك',
+  'اخرج من أرضك وارسم حلقة ثم عُد لتملك ما بداخلها',
+  'إذا قُطع أثرك أو قطعته بنفسك تخرج من الجولة',
+  'الواحة داخل أرضك تمنحك نسبة إضافية',
+  'الأسهم أو WASD للتوجيه · P إيقاف · M صوت',
+];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function fit() { // fills the window at any size and pixel ratio
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  canvas.style.imageRendering = PIXEL ? 'pixelated' : 'auto';
+  ctx.setTransform(r, 0, 0, r, 0, 0); ctx.imageSmoothingEnabled = !PIXEL;
+}
+addEventListener('resize', fit); fit();
+function clear(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, W, H); }
+const AR = /[؀-ۿ]/;
+function text(s, x, y, size, c, align = 'center', weight = '') {
+  ctx.fillStyle = c; ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.direction = AR.test(s) ? 'rtl' : 'ltr';
+  ctx.textBaseline = 'middle'; ctx.fillText(s, x, y);
+}
+function pill(s, x, y, size, c, bg, align = 'center', weight = 'bold') { // text on a dark tag: readable on any sand or rug
+  ctx.font = `${weight} ${size}px ${FONT}`;
+  const w = ctx.measureText(s).width + size * 0.8, h = size * 1.35;
+  const x0 = align === 'center' ? x - w / 2 : align === 'left' ? x - size * 0.4 : x - w + size * 0.4;
+  ctx.fillStyle = bg; rr(ctx, x0, y - h / 2, w, h, h / 2); ctx.fill();
+  text(s, align === 'center' ? x : align === 'left' ? x : x, y + 1, size, c, align, weight);
+}
+
+// ---- Input: keys by position (event.code), OS key repeat ignored ------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code); // true for one step after the key goes down
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => down.clear());
+// Touch: a floating stick under the finger, and taps for the drawn buttons
+const taps = []; let tapList = [];
+const ptr = { id: null, ox: 0, oy: 0, x: 0, y: 0, stick: false };
+function toLogical(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault(); startAudio();
+  const p = toLogical(e); taps.push(p);
+  if (ptr.id === null) {
+    ptr.id = e.pointerId; ptr.ox = ptr.x = p.x; ptr.oy = ptr.y = p.y;
+    ptr.stick = scene === 'play' && !inRect(p, BTN_PAUSE) && !inRect(p, BTN_MUTE);
+  }
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* old Safari */ }
+});
+canvas.addEventListener('pointermove', e => {
+  if (e.pointerId !== ptr.id) return;
+  const p = toLogical(e); ptr.x = p.x; ptr.y = p.y;
+});
+function endPtr(e) { if (e.pointerId === ptr.id) { ptr.id = null; ptr.stick = false; } }
+canvas.addEventListener('pointerup', endPtr);
+canvas.addEventListener('pointercancel', endPtr);
+const inRect = (p, b) => p.x >= b[0] && p.x <= b[0] + b[2] && p.y >= b[1] && p.y <= b[1] + b[3];
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)(); // a check may inject one
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3, delay = 0, slide = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur + 0.02);
+}
+const sfx = {
+  start() { tone(392, 0.14, 'triangle', 0.25); tone(523, 0.14, 'triangle', 0.25, 0.1); tone(659, 0.25, 'triangle', 0.25, 0.2); },
+  capture(big) {
+    tone(440, 0.12, 'triangle', 0.22); tone(554, 0.12, 'triangle', 0.22, 0.07); tone(659, 0.2, 'triangle', 0.22, 0.14);
+    if (big) tone(880, 0.3, 'triangle', 0.2, 0.22);
+  },
+  cut() { tone(980, 0.18, 'sawtooth', 0.16, 0, 260); tone(1320, 0.12, 'square', 0.08, 0.05); },
+  die() { tone(300, 0.6, 'sawtooth', 0.22, 0, 70); tone(180, 0.5, 'triangle', 0.2, 0.1, 60); },
+  far() { tone(240, 0.16, 'triangle', 0.08, 0, 160); },
+  warn() { tone(660, 0.1, 'square', 0.12); tone(880, 0.12, 'square', 0.12, 0.13); },
+  tick() { tone(1250, 0.05, 'square', 0.08); },
+  oasis() { tone(784, 0.1, 'sine', 0.2); tone(1046, 0.25, 'sine', 0.2, 0.08); },
+  win() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.25, 'triangle', 0.22, i * 0.12)); },
+};
+
+// ---- The game: helpers ------------------------------------------------------------------
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+function angDiff(a, b) { let d = a - b; while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU; return d; }
+function hash(n) { // decoration only (fixed look), never gameplay
+  n = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b); n ^= n >>> 13; n = Math.imul(n, 0xc2b2ae35); n ^= n >>> 16;
+  return (n >>> 0) / 4294967296;
+}
+function mk(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+function rr(g, x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+function ell(g, x, y, rx, ry, rot = 0) { g.beginPath(); g.ellipse(x, y, rx, ry, rot, 0, TAU); }
+function circ(g, x, y, r) { g.beginPath(); g.arc(x, y, r, 0, TAU); }
+function line(g, x0, y0, x1, y1) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
+
+// ---- The game: world, factions ----------------------------------------------------------
+const N = 120, NN = N * N, CS = 18, RT = 4;    // grid cells, logical px per cell, rug tile in cells
+const BG = '#a87c45';
+const FACTIONS = [null,
+  { name: 'أنت', col: '#2b5fd0', dark: '#163a86', light: '#a9c2f7', motif: 'diamond', kind: 'player', spawn: [60, 60] },
+  { name: 'بوت أحمر', col: '#c63b2d', dark: '#7a1d14', light: '#f4a596', motif: 'stripes', kind: 'hunter', spawn: [100, 20] },
+  { name: 'بوت أخضر', col: '#2e8c50', dark: '#175230', light: '#a1ddb5', motif: 'zigzag', kind: 'greedy', spawn: [20, 20] },
+  { name: 'بوت بنفسجي', col: '#8146ad', dark: '#4a2566', light: '#d6b6ee', motif: 'steps', kind: 'cautious', spawn: [20, 100] },
+  { name: 'بوت فيروزي', col: '#12898e', dark: '#0a4f52', light: '#95e0df', motif: 'checks', kind: 'greedy', spawn: [100, 100] },
+  { name: 'بوت رمادي', col: '#505767', dark: '#252931', light: '#bcc3d0', motif: 'arrows', kind: 'cautious', spawn: [60, 106] },
+];
+const KIND_AR = { player: 'راكب', hunter: 'صيّاد', greedy: 'طمّاع', cautious: 'حذِر' };
+const OASES = [[67.5, 51.5], [27.5, 63.5], [95.5, 58.5], [56.5, 89.5], [38.5, 32.5], [82.5, 33.5]];
+const GHOST = [[63, 60.5], [73.5, 60.5], [73.5, 43.5], [60.5, 43.5], [60.5, 58.3]]; // the first-move hint loop
+const BTN_PAUSE = [16, 16, 76, 76], BTN_MUTE = [102, 16, 76, 76], BTN_HOME = [16, 16, 84, 84];
+
+const own = new Uint8Array(NN);      // land owner per cell (0 sand)
+const shown = new Uint8Array(NN);    // owner as painted on the world canvas (lags own while a rug unrolls)
+const trail = new Uint8Array(NN);    // trail owner per cell
+const trailIx = new Int32Array(NN);  // index of that cell in its owner's trail
+const counts = new Int32Array(8);
+const vis = new Int32Array(NN); let visId = 0;
+const bfs = new Int32Array(NN), dist = new Int32Array(NN);
+let riders = [], batches = [], parts = [], pops = [], oases = [];
+
+// ---- The game: drawn tiles and sprites (built once) -----------------------------------
+function makeSandTile(base, hi, lo, spk) {
+  const S = 12 * CS, c = mk(S, S), g = c.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, S, S);
+  for (let k = 0; k < 7; k++) {
+    const x = hash(k * 3 + 1) * S, y = hash(k * 3 + 2) * S, r = 30 + hash(k * 3 + 3) * 50;
+    for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
+      const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+      gr.addColorStop(0, k & 1 ? 'rgba(255,240,200,0.2)' : 'rgba(140,90,30,0.12)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.fillRect(x + dx - r, y + dy - r, 2 * r, 2 * r);
+    }
+  }
+  for (let j = 0; j < 9; j++) { // dune ripples: whole periods across the tile so it repeats
+    const y0 = j * 24 + 6, ph = j * 1.7, amp = 4 + (j % 3) * 1.5;
+    for (const dy of [-S, 0, S]) {
+      const path = off => {
+        g.beginPath();
+        for (let x = 0; x <= S; x += 4) {
+          const y = y0 + dy + off + amp * Math.sin(TAU * x / S * 2 + ph) + 2 * Math.sin(TAU * x / S * 3 + ph * 2);
+          x ? g.lineTo(x, y) : g.moveTo(x, y);
+        }
+      };
+      g.lineWidth = 2.4; g.strokeStyle = lo; path(2.4); g.stroke();
+      g.lineWidth = 1.8; g.strokeStyle = hi; path(0); g.stroke();
+    }
+  }
+  for (let k = 0; k < 90; k++) { g.fillStyle = k % 3 ? spk : hi; g.fillRect((hash(k + 500) * S) | 0, (hash(k + 900) * S) | 0, 2, 2); }
+  return c;
+}
+const CREAM = '#f5e8c8';
+function makeRugTile(f) {
+  const F = FACTIONS[f], S = RT * CS, c = mk(S, S), g = c.getContext('2d');
+  g.fillStyle = F.col; g.fillRect(0, 0, S, S);
+  g.fillStyle = 'rgba(0,0,0,0.10)'; for (let y = 0; y < S; y += 3) g.fillRect(0, y, S, 1);   // the weave
+  g.fillStyle = 'rgba(255,255,255,0.07)'; for (let x = 0; x < S; x += 3) g.fillRect(x, 0, 1, S);
+  const m = S / 2;
+  g.lineJoin = 'miter';
+  switch (F.motif) {
+    case 'diamond': {
+      g.strokeStyle = CREAM; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(m, 5); g.lineTo(S - 5, m); g.lineTo(m, S - 5); g.lineTo(5, m); g.closePath(); g.stroke();
+      g.fillStyle = F.dark; g.beginPath(); g.moveTo(m, m - 14); g.lineTo(m + 14, m); g.lineTo(m, m + 14); g.lineTo(m - 14, m); g.fill();
+      g.fillStyle = '#f2c14e'; g.beginPath(); g.moveTo(m, m - 5); g.lineTo(m + 5, m); g.lineTo(m, m + 5); g.lineTo(m - 5, m); g.fill();
+      g.fillStyle = CREAM;
+      for (const [x, y] of [[0, 0], [S, 0], [0, S], [S, S]]) { g.beginPath(); g.moveTo(x, y - 7); g.lineTo(x + 7, y); g.lineTo(x, y + 7); g.lineTo(x - 7, y); g.fill(); }
+      break;
+    }
+    case 'stripes': {
+      g.fillStyle = F.dark; g.fillRect(0, 0, S, 6); g.fillRect(0, S - 6, S, 6); g.fillRect(0, m - 7, S, 14);
+      g.fillStyle = CREAM; g.fillRect(0, 9, S, 3); g.fillRect(0, S - 12, S, 3);
+      g.fillStyle = '#f2c14e'; for (let x = 4; x < S; x += 9) g.fillRect(x, m - 2, 4, 4);
+      break;
+    }
+    case 'zigzag': {
+      g.lineWidth = 4;
+      for (const [y, col] of [[18, CREAM], [54, F.dark]]) {
+        g.strokeStyle = col; g.beginPath();
+        for (let x = -12; x <= S + 12; x += 12) g.lineTo(x, y + ((x / 12) & 1 ? -8 : 8));
+        g.stroke();
+      }
+      g.fillStyle = '#f2c14e'; for (let x = 6; x < S; x += 12) { g.fillRect(x - 1.5, 34, 3, 3); }
+      break;
+    }
+    case 'steps': {
+      for (const [n, col] of [[5, CREAM], [3, F.dark], [1, '#f2c14e']]) {
+        g.fillStyle = col;
+        for (let r = -n; r <= n; r++) { const w = (n - Math.abs(r)) * 12 + 6; g.fillRect(m - w / 2, m + r * 6 - 3, w, 6); }
+      }
+      g.fillStyle = F.dark; g.fillRect(0, 0, S, 3); g.fillRect(0, S - 3, S, 3);
+      break;
+    }
+    case 'checks': {
+      for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) if ((x + y) & 1) { g.fillStyle = F.dark; g.fillRect(x * 18, y * 18, 18, 18); }
+      else { g.fillStyle = CREAM; g.fillRect(x * 18 + 7, y * 18 + 3, 4, 12); g.fillRect(x * 18 + 3, y * 18 + 7, 12, 4); }
+      break;
+    }
+    case 'arrows': {
+      for (let x = 0; x < S; x += 18) {
+        g.fillStyle = CREAM; g.beginPath(); g.moveTo(x, m); g.lineTo(x + 9, m - 13); g.lineTo(x + 18, m); g.fill();
+        g.fillStyle = F.dark; g.beginPath(); g.moveTo(x, m); g.lineTo(x + 9, m + 13); g.lineTo(x + 18, m); g.fill();
+      }
+      g.fillStyle = '#e07a3a'; g.fillRect(0, 0, S, 4); g.fillRect(0, S - 4, S, 4);
+      break;
+    }
+  }
+  return c;
+}
+function makePrints(f) { // one trail cell: a tint of the faction colour and one camel footprint
+  const F = FACTIONS[f], out = [];
+  for (let d = 0; d < 8; d++) {
+    out.push([0, 1].map(s => {
+      const c = mk(CS, CS), g = c.getContext('2d');
+      g.fillStyle = hexA(F.col, 0.5); g.fillRect(0, 0, CS, CS);
+      g.translate(CS / 2, CS / 2); g.rotate(d * TAU / 8); g.translate(0, s ? 3.4 : -3.4);
+      g.fillStyle = F.dark;
+      ell(g, 1.2, -1.6, 3.4, 1.7, 0.18); g.fill(); ell(g, 1.2, 1.6, 3.4, 1.7, -0.18); g.fill();
+      return c;
+    }));
+  }
+  return out;
+}
+function drawPrint(g, x, y, a, s, side, col) { // one camel footprint: a split two-toed pad
+  g.save(); g.translate(x, y); g.rotate(a); g.scale(s, s); g.translate(0, side ? 3.4 : -3.4);
+  g.fillStyle = col; ell(g, 1.2, -1.6, 3.4, 1.7, 0.18); g.fill(); ell(g, 1.2, 1.6, 3.4, 1.7, -0.18); g.fill(); g.restore();
+}
+function makeRoll(f) { // the rolled edge of a rug as it unrolls
+  const F = FACTIONS[f], c = mk(28, 28), g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 28, 28);
+  gr.addColorStop(0, F.light); gr.addColorStop(0.45, F.col); gr.addColorStop(1, F.dark);
+  g.fillStyle = gr; rr(g, 1, 1, 26, 26, 10); g.fill();
+  g.strokeStyle = CREAM; g.lineWidth = 2; g.beginPath(); g.arc(14, 14, 6.5, 0.3, TAU * 0.85); g.stroke();
+  g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 1.5; rr(g, 1, 1, 26, 26, 10); g.stroke();
+  return c;
+}
+function blob(g, r, n, k, amp) {
+  const pts = [];
+  for (let j = 0; j < n; j++) { const a = j / n * TAU, rr2 = r * (1 + amp * (hash(k * 31 + j) - 0.5)); pts.push([Math.cos(a) * rr2, Math.sin(a) * rr2]); }
+  g.beginPath();
+  for (let j = 0; j <= n; j++) {
+    const p = pts[j % n], q = pts[(j + 1) % n], mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+    j ? g.quadraticCurveTo(p[0], p[1], mx, my) : g.moveTo(mx, my);
+  }
+  g.closePath();
+}
+function drawPalm(g, x, y, s, rot, k) {
+  g.fillStyle = 'rgba(40,60,20,0.28)'; ell(g, x + 7 * s, y + 8 * s, 17 * s, 13 * s); g.fill();
+  for (let i = 0; i < 8; i++) {
+    const a = rot + i * TAU / 8 + (hash(k * 13 + i) - 0.5) * 0.3, L = (18 + hash(k * 7 + i) * 6) * s, w = 5.5 * s;
+    const tx = x + Math.cos(a) * L, ty = y + Math.sin(a) * L, nx = -Math.sin(a) * w, ny = Math.cos(a) * w;
+    const mx = x + Math.cos(a) * L * 0.5, my = y + Math.sin(a) * L * 0.5;
+    g.fillStyle = i & 1 ? '#2f7a34' : '#3f9440';
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(mx + nx, my + ny, tx, ty); g.quadraticCurveTo(mx - nx, my - ny, x, y); g.fill();
+    g.strokeStyle = '#8fc760'; g.lineWidth = 1; line(g, x, y, tx * 0.92 + x * 0.08, ty * 0.92 + y * 0.08);
+  }
+  g.fillStyle = '#c8761f'; for (let i = 0; i < 5; i++) { circ(g, x + Math.cos(i * 1.3) * 3.4 * s, y + Math.sin(i * 1.3) * 3.4 * s, 1.8 * s); g.fill(); }
+  g.fillStyle = '#6b4a24'; circ(g, x, y, 2.8 * s); g.fill();
+}
+function makeOasis(k) {
+  const R = 6 * CS, c = mk(R * 2, R * 2), g = c.getContext('2d');
+  g.translate(R, R);
+  g.fillStyle = 'rgba(120,145,60,0.5)'; blob(g, 3.7 * CS, 12, k + 1, 0.25); g.fill();
+  g.fillStyle = '#b99a5e'; blob(g, 2.8 * CS, 10, k + 7, 0.2); g.fill();
+  const gr = g.createRadialGradient(-8, -10, 4, 0, 0, 2.6 * CS);
+  gr.addColorStop(0, '#9be3f5'); gr.addColorStop(0.5, '#3b9ed1'); gr.addColorStop(1, '#1d5f93');
+  g.fillStyle = gr; blob(g, 2.35 * CS, 10, k + 7, 0.2); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.6)'; g.lineWidth = 2;
+  for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(-6 + i * 9, -4 + i * 7, 8, 3.6, 4.6); g.stroke(); }
+  g.strokeStyle = '#4f7a2a'; g.lineWidth = 2;
+  for (let i = 0; i < 14; i++) { const a = hash(k * 50 + i) * TAU, r = 2.45 * CS; line(g, Math.cos(a) * r, Math.sin(a) * r, Math.cos(a) * (r + 6), Math.sin(a) * (r + 6) - 3); }
+  for (let p = 0; p < 5; p++) {
+    const a = p / 5 * TAU + hash(k * 9 + p) * 0.8, r = (3.0 + hash(k * 17 + p) * 0.8) * CS;
+    drawPalm(g, Math.cos(a) * r, Math.sin(a) * r, 0.95 + hash(k * 5 + p) * 0.3, hash(k + p * 3) * TAU, k * 10 + p);
+  }
+  return c;
+}
+const sandTile = makeSandTile('#e6c387', '#f6e0ae', '#c79a5c', '#b98a4e');
+const oobTile = makeSandTile('#b48a52', '#c9a26a', '#8e6532', '#7d5629');
+const rugTiles = FACTIONS.map((F, f) => f ? makeRugTile(f) : null);
+const prints = FACTIONS.map((F, f) => f ? makePrints(f) : null);
+const rolls = FACTIONS.map((F, f) => f ? makeRoll(f) : null);
+const oasisImgs = OASES.map((p, k) => makeOasis(k));
+const world = mk(N * CS, N * CS), wctx = world.getContext('2d');
+const mini = mk(N, N), mctx = mini.getContext('2d');
+const oobPat = ctx.createPattern(oobTile, 'repeat');
+const sandPat = ctx.createPattern(sandTile, 'repeat');
+
+// ---- The game: camel riders, each temperament with its own outline ----------------------
+function drawRider(g, x, y, a, f, kind, gait, s, t) {
+  const F = FACTIONS[f];
+  g.save(); g.translate(x, y); g.scale(s, s);
+  g.save(); g.rotate(a); g.fillStyle = 'rgba(80,45,10,0.28)'; ell(g, 3, 6, 21, 12); g.fill(); g.restore();
+  g.rotate(a);
+  const sw = Math.sin(gait * 2.6) * 4.5;
+  g.lineCap = 'round'; g.strokeStyle = '#7d5128'; g.lineWidth = 3.2;
+  line(g, 9, -4, 9 + sw, -11); line(g, 9, 4, 9 - sw, 11); line(g, -10, -4, -10 - sw, -11); line(g, -10, 4, -10 + sw, 11);
+  g.lineWidth = 2; g.beginPath(); g.moveTo(-15, 0); g.quadraticCurveTo(-19, Math.sin(t * 7) * 2, -22, Math.sin(t * 7 + 1) * 3); g.stroke();
+  if (kind === 'greedy') { // saddle bags bulging out both sides
+    for (const sy of [-1, 1]) {
+      g.fillStyle = '#8a5a2c'; g.strokeStyle = '#4f3015'; g.lineWidth = 1.4;
+      rr(g, -14, sy > 0 ? 7 : -15, 13, 8, 3); g.fill(); g.stroke();
+      g.fillStyle = F.col; g.fillRect(-12, sy > 0 ? 10 : -12, 9, 2.4);
+    }
+  }
+  g.fillStyle = '#d29a5c'; g.strokeStyle = '#7a4a20'; g.lineWidth = 1.6;
+  ell(g, -2, 0, 15, 8.5); g.fill(); g.stroke();
+  g.strokeStyle = '#c48b4e'; g.lineWidth = 6.5; line(g, 10, 0, 20, 0);
+  g.fillStyle = '#d6a064'; g.strokeStyle = '#7a4a20'; g.lineWidth = 1.4; ell(g, 23, 0, 5.8, 4); g.fill(); g.stroke();
+  g.fillStyle = '#9b6a38'; ell(g, 19.5, -3.8, 1.8, 1.2); g.fill(); ell(g, 19.5, 3.8, 1.8, 1.2); g.fill();
+  g.fillStyle = '#5a3414'; circ(g, 27.8, -1.3, 0.9); g.fill(); circ(g, 27.8, 1.3, 0.9); g.fill();
+  g.fillStyle = '#e8bd85'; ell(g, 3, 0, 6, 5); g.fill();
+  g.fillStyle = F.col; g.strokeStyle = F.dark; g.lineWidth = 1.3; rr(g, -11, -8.5, 14, 17, 3); g.fill(); g.stroke();
+  g.strokeStyle = CREAM; g.lineWidth = 1.2; line(g, -11, -4.5, 3, -4.5); line(g, -11, 4.5, 3, 4.5);
+  g.strokeStyle = F.dark; g.lineWidth = 1; for (let i = -9; i <= 1; i += 2.5) { line(g, i, 8.5, i, 10.5); line(g, i, -8.5, i, -10.5); }
+  if (kind === 'cautious') { // round shield
+    g.fillStyle = '#b08a52'; g.strokeStyle = '#5a3d1c'; g.lineWidth = 1.5; circ(g, -2, -12, 6); g.fill(); g.stroke();
+    g.fillStyle = F.col; circ(g, -2, -12, 3.6); g.fill(); g.fillStyle = CREAM; circ(g, -2, -12, 1.3); g.fill();
+  }
+  if (kind === 'hunter') { // a long lance carried forward
+    g.strokeStyle = '#6b4a2a'; g.lineWidth = 2.2; line(g, -16, -8, 31, -8);
+    g.fillStyle = '#dfe3e8'; g.strokeStyle = '#4a4f58'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(31, -11); g.lineTo(40, -8); g.lineTo(31, -5); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = F.col; g.beginPath(); g.moveTo(27, -8); g.lineTo(23, -12); g.lineTo(23, -4); g.fill();
+  }
+  g.fillStyle = F.dark; ell(g, -3, 0, 4.6, 7.4); g.fill();
+  g.fillStyle = kind === 'player' ? '#f6f1e4' : F.light; g.strokeStyle = F.dark; g.lineWidth = 1.1;
+  circ(g, -2.5, 0, 4.4); g.fill(); g.stroke();
+  g.beginPath(); g.arc(-2.5, 0, 2.6, -1.2, 1.9); g.stroke();
+  ell(g, -7, 0.8, 1.8, 1.4); g.fill(); g.stroke();
+  const wv = Math.sin(t * 9 + f) * 2.2;
+  g.strokeStyle = '#5a3a1a'; g.lineWidth = 1.8; line(g, -6, 5, -12, 11);
+  g.fillStyle = F.col; g.strokeStyle = F.dark; g.lineWidth = 1.2; g.beginPath();
+  if (kind === 'player') { g.moveTo(-12, 8); g.lineTo(-27, 9 + wv); g.lineTo(-21, 12 + wv * 0.5); g.lineTo(-27, 15 + wv); g.lineTo(-12, 14.5); }
+  else if (kind === 'hunter') { g.moveTo(-12, 8); g.lineTo(-31, 11 + wv); g.lineTo(-12, 14.5); }
+  else if (kind === 'greedy') { g.moveTo(-12, 7.5); g.lineTo(-24, 7.5 + wv * 0.6); g.lineTo(-24, 15.5 + wv * 0.6); g.lineTo(-12, 15.5); }
+  else { g.moveTo(-12, 8.5); g.quadraticCurveTo(-23, 9 + wv, -20, 11.5 + wv); g.quadraticCurveTo(-23, 14 + wv, -12, 14); }
+  g.closePath(); g.fill(); g.stroke();
+  g.restore();
+}
+
+// ---- The game: grid rules ------------------------------------------------------------
+function setOwner(i, id) {
+  const o = own[i]; if (o === id) return;
+  if (o) counts[o]--;
+  own[i] = id;
+  if (id) {
+    counts[id]++;
+    const b = riders[id - 1].bb, x = i % N, y = (i / N) | 0;
+    if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y;
+  }
+}
+function paintCell(i) { // world canvas and minimap pixel from shown[]
+  const cx = i % N, cy = (i / N) | 0, o = shown[i], x = cx * CS, y = cy * CS;
+  if (!o) {
+    wctx.drawImage(sandTile, (cx % 12) * CS, (cy % 12) * CS, CS, CS, x, y, CS, CS);
+    wctx.fillStyle = 'rgba(110,70,25,0.24)';
+    if (cx > 0 && shown[i - 1]) wctx.fillRect(x, y, 4, CS);
+    if (cy > 0 && shown[i - N]) wctx.fillRect(x, y, CS, 4);
+    mctx.fillStyle = '#d9b77c';
+  } else {
+    const F = FACTIONS[o];
+    wctx.drawImage(rugTiles[o], (cx % RT) * CS, (cy % RT) * CS, CS, CS, x, y, CS, CS);
+    const up = cy === 0 || shown[i - N] !== o, dn = cy === N - 1 || shown[i + N] !== o;
+    const lf = cx === 0 || shown[i - 1] !== o, rt = cx === N - 1 || shown[i + 1] !== o;
+    wctx.fillStyle = F.dark;
+    if (up) wctx.fillRect(x, y, CS, 4); if (dn) wctx.fillRect(x, y + CS - 4, CS, 4);
+    if (lf) wctx.fillRect(x, y, 4, CS); if (rt) wctx.fillRect(x + CS - 4, y, 4, CS);
+    wctx.fillStyle = CREAM; // stitched border just inside the edge
+    for (let k = 1; k < CS; k += 5) {
+      if (up) wctx.fillRect(x + k, y + 5, 3, 1); if (dn) wctx.fillRect(x + k, y + CS - 6, 3, 1);
+      if (lf) wctx.fillRect(x + 5, y + k, 1, 3); if (rt) wctx.fillRect(x + CS - 6, y + k, 1, 3);
+    }
+    mctx.fillStyle = F.col;
+  }
+  mctx.fillRect(cx, cy, 1, 1);
+}
+function showCell(i) {
+  shown[i] = own[i]; paintCell(i);
+  const x = i % N;
+  if (x > 0) paintCell(i - 1); if (x < N - 1) paintCell(i + 1);
+  if (i >= N) paintCell(i - N); if (i < NN - N) paintCell(i + N);
+}
+function addBatch(cells, times, f) { batches.push({ cells, times, n: cells.length, k: 0, f }); }
+function updateReveal() {
+  const now = state.t;
+  for (const b of batches) while (b.k < b.n && b.times[b.k] <= now) showCell(b.cells[b.k++]);
+  if (batches.length && batches[0].k >= batches[0].n && now > batches[0].times[batches[0].n - 1] + 0.3) batches.shift();
+}
+function camp(r, cx, cy, instant) {
+  const R = tune.camp_radius, cells = [], times = [];
+  r.bb = [cx, cy, cx, cy];
+  for (let y = cy - R; y <= cy + R; y++) for (let x = cx - R; x <= cx + R; x++) {
+    const i = y * N + x; setOwner(i, r.id);
+    cells.push(i); times.push(state.t + Math.max(Math.abs(x - cx), Math.abs(y - cy)) * 0.08);
+  }
+  if (instant) for (const i of cells) shown[i] = own[i];
+  else addBatch(cells, times, r.id);
+}
+function pct(f) {
+  let b = 0; for (const o of oases) if (o.owner === f) b += tune.oasis_bonus;
+  return counts[f] * 100 / NN + b;
+}
+function enterCell(r, cx, cy) {
+  const i = cy * N + cx, t = trail[i];
+  if (t && t !== r.id) { const v = riders[t - 1]; if (v.alive) kill(v, r, 'cut'); }
+  if (own[i] === r.id) { if (r.trail.length) capture(r); return; }
+  if (t === r.id) { kill(r, r, 'self'); return; }
+  trail[i] = r.id; trailIx[i] = r.trail.length; r.trail.push(i); r.tdir.push((Math.round(r.a / (TAU / 8)) % 8 + 8) % 8);
+}
+function capture(r) { // trail becomes land, then flood from outside: what the flood cannot reach is enclosed
+  const id = r.id, tr = r.trail, before = pct(id), t0 = state.t;
+  for (const i of tr) { trail[i] = 0; setOwner(i, id); }
+  const x0 = Math.max(0, r.bb[0] - 1), y0 = Math.max(0, r.bb[1] - 1), x1 = Math.min(N - 1, r.bb[2] + 1), y1 = Math.min(N - 1, r.bb[3] + 1);
+  const V = ++visId; let qh = 0, qt = 0;
+  const seedc = i => { if (vis[i] !== V && own[i] !== id) { vis[i] = V; bfs[qt++] = i; } };
+  for (let x = x0; x <= x1; x++) { seedc(y0 * N + x); seedc(y1 * N + x); }
+  for (let y = y0; y <= y1; y++) { seedc(y * N + x0); seedc(y * N + x1); }
+  while (qh < qt) {
+    const i = bfs[qh++], x = i % N, y = (i / N) | 0;
+    if (x > x0) seedc(i - 1); if (x < x1) seedc(i + 1); if (y > y0) seedc(i - N); if (y < y1) seedc(i + N);
+  }
+  const M = ++visId, enclosed = [];
+  for (const i of tr) vis[i] = M;
+  let sx = 0, sy = 0;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const i = y * N + x;
+    if (own[i] !== id && vis[i] !== V) { setOwner(i, id); vis[i] = M; enclosed.push(i); sx += x; sy += y; }
+  }
+  // the rug unrolls from the trail inward: distance rings from the trail through the new cells
+  const D = ++visId; qh = 0; qt = 0;
+  for (const i of tr) { vis[i] = D; dist[i] = 0; bfs[qt++] = i; sx += i % N; sy += (i / N) | 0; }
+  while (qh < qt) {
+    const i = bfs[qh++], x = i % N;
+    const nb = [x > 0 ? i - 1 : -1, x < N - 1 ? i + 1 : -1, i >= N ? i - N : -1, i < NN - N ? i + N : -1];
+    for (const j of nb) if (j >= 0 && vis[j] === M) { vis[j] = D; dist[j] = dist[i] + 1; bfs[qt++] = j; }
+  }
+  const md = qt ? dist[bfs[qt - 1]] + 1 : 1;
+  for (const i of enclosed) if (vis[i] === M) { dist[i] = md; bfs[qt++] = i; }
+  const cells = bfs.slice(0, qt), times = new Float32Array(qt);
+  for (let k = 0; k < qt; k++) times[k] = t0 + dist[cells[k]] * tune.unroll_step;
+  addBatch(cells, times, id);
+  const n = tr.length + enclosed.length;
+  tr.length = 0; r.tdir.length = 0;
+  updateOases();
+  const gain = pct(id) - before;
+  events.push({ type: 'capture', who: id, cells: n, gain: +gain.toFixed(2) });
+  if (r.isPlayer) {
+    const cx = sx / Math.max(1, n) + 0.5, cy = sy / Math.max(1, n) + 0.5;
+    pops.push({ x: cx, y: cy, s: `+${gain.toFixed(1)}%`, col: '#ffe9a8', bg: hexA(FACTIONS[1].dark, 0.88), t: 0, life: 1.6, size: 40 });
+    sfx.capture(gain > 3);
+    if (!state.firstCap) { state.firstCap = true; say('أحسنت! ما داخل الحلقة صار سجادتك', '#ffe9a8', 3); }
+    for (let k = 0; k < 14; k++) parts.push(dust(r.x, r.y, FACTIONS[id].light, 4));
+  }
+  checkWipe(r);
+}
+function checkWipe(by) { for (const v of riders) if (v.alive && counts[v.id] === 0) kill(v, by, 'land'); }
+function kill(v, k, why) {
+  if (!v.alive) return;
+  const fin = pct(v.id);
+  v.alive = false; v.deadT = state.t;
+  for (const i of v.trail) trail[i] = 0;
+  v.trail.length = 0; v.tdir.length = 0;
+  const list = [];
+  for (let i = 0; i < NN; i++) if (own[i] === v.id) list.push(i);
+  const key = new Float32Array(NN);
+  for (const i of list) key[i] = Math.hypot(i % N + 0.5 - v.x, ((i / N) | 0) + 0.5 - v.y);
+  list.sort((a, b) => key[a] - key[b]);
+  for (const i of list) setOwner(i, 0);
+  addBatch(list, Float32Array.from(list, i => state.t + 0.25 + key[i] * 0.012), 0);
+  updateOases();
+  for (let j = 0; j < 26; j++) parts.push(dust(v.x, v.y, j & 1 ? FACTIONS[v.id].col : '#e9d2a0', 7));
+  for (let j = 0; j < 10; j++) parts.push(thread(v.x, v.y, FACTIONS[v.id].col));
+  events.push({ type: 'out', who: v.id, by: k ? k.id : 0, why });
+  if (v.isPlayer) {
+    state.alive = false; state.final = fin; state.endT = state.t + 1.4; state.why = why; state.killer = k ? k.id : 0;
+    state.shake = 14; sfx.die();
+  } else {
+    v.respawnT = state.t + tune.respawn_time;
+    if (k && k.isPlayer && why === 'cut') { state.kills++; sfx.cut(); say(`قطعتَ أثر ${FACTIONS[v.id].name}`, '#ffe9a8', 2.2); state.shake = 6; }
+    else if (k && k.isPlayer) { state.kills++; sfx.cut(); }
+    else sfx.far();
+  }
+}
+function updateOases() {
+  for (const o of oases) {
+    const w = own[o.i];
+    if (w !== o.owner) {
+      if (w === 1 && state.alive) { sfx.oasis(); say(`واحة لك  +${tune.oasis_bonus}%`, '#bfefff', 2.2); }
+      o.owner = w;
+    }
+  }
+}
+
+// ---- The game: moving ----------------------------------------------------------------
+function moveRider(r, dt) {
+  const d = angDiff(r.ta, r.a), m = tune.turn_rate * dt;
+  r.a += clamp(d, -m, m);
+  if (r.a > Math.PI) r.a -= TAU; else if (r.a < -Math.PI) r.a += TAU;
+  const sp = tune.speed * (r.isPlayer ? 1 : tune.bot_speed);
+  r.px = r.x; r.py = r.y;
+  const ca = Math.cos(r.a), sa = Math.sin(r.a);
+  r.x = clamp(r.x + ca * sp * dt, 0.5, N - 0.5); r.y = clamp(r.y + sa * sp * dt, 0.5, N - 0.5);
+  r.gait += sp * dt;
+  const ncx = r.x | 0, ncy = r.y | 0;
+  if (ncx !== r.cx || ncy !== r.cy) {
+    if (ncx !== r.cx && ncy !== r.cy) { // a corner crossing: walk through the side cell so trails stay 4-connected
+      if (Math.abs(ca) > Math.abs(sa)) enterCell(r, ncx, r.cy); else enterCell(r, r.cx, ncy);
+      if (!r.alive) return;
+    }
+    r.cx = ncx; r.cy = ncy; enterCell(r, ncx, ncy);
+  }
+}
+function playerInput(p) {
+  let dx = 0, dy = 0;
+  if (down.has('ArrowLeft') || down.has('KeyA')) dx--;
+  if (down.has('ArrowRight') || down.has('KeyD')) dx++;
+  if (down.has('ArrowUp') || down.has('KeyW')) dy--;
+  if (down.has('ArrowDown') || down.has('KeyS')) dy++;
+  if (dx || dy) { p.ta = Math.atan2(dy, dx); p.wait = false; }
+  if (ptr.id !== null && ptr.stick) {
+    const vx = ptr.x - ptr.ox, vy = ptr.y - ptr.oy, L = Math.hypot(vx, vy), R = tune.stick_radius;
+    if (L > R) { ptr.ox = ptr.x - vx / L * R; ptr.oy = ptr.y - vy / L * R; }
+    if (L > 12) { p.ta = Math.atan2(vy, vx); p.wait = false; }
+  }
+}
+
+// ---- The game: bots (labelled as bots everywhere) ---------------------------------------
+const loopMax = k => k === 'greedy' ? tune.greedy_loop : k === 'hunter' ? tune.hunter_loop : tune.cautious_loop;
+const fleeR = k => k === 'greedy' ? tune.greedy_flee : k === 'hunter' ? tune.hunter_flee : tune.cautious_flee;
+const maxTrail = k => k === 'greedy' ? tune.greedy_trail : k === 'hunter' ? tune.hunter_trail : tune.cautious_trail;
+function setMode(b, m) { b.mode = m; b.modeT = 0; b.think = 0; }
+function enemyNear(b) {
+  let d = 1e9;
+  const s = b.trail[0], sx = s % N + 0.5, sy = ((s / N) | 0) + 0.5;
+  for (const r of riders) if (r !== b && r.alive && !r.wait) {
+    d = Math.min(d, Math.hypot(r.x - b.x, r.y - b.y), Math.hypot(r.x - sx, r.y - sy));
+  }
+  return d;
+}
+function ownTrailAt(b, x, y, skip) {
+  if (x < 1 || y < 1 || x > N - 1 || y > N - 1) return true;
+  const i = (y | 0) * N + (x | 0);
+  return trail[i] === b.id && trailIx[i] < b.trail.length - skip;
+}
+function lineClear(b, tx, ty) {
+  const L = Math.hypot(tx - b.x, ty - b.y), n = Math.ceil(L * 2);
+  for (let k = 1; k < n; k++) if (ownTrailAt(b, lerp(b.x, tx, k / n), lerp(b.y, ty, k / n), 3)) return false;
+  return true;
+}
+function nearestOwn(b) {
+  const id = b.id; let fallback = null;
+  for (let r = 1; r < N; r++) {
+    let best = -1, bd = 1e9;
+    for (let dy = -r; dy <= r; dy++) {
+      const y = b.cy + dy; if (y < 0 || y >= N) continue;
+      const st = (dy === -r || dy === r) ? 1 : 2 * r;
+      for (let dx = -r; dx <= r; dx += st) {
+        const x = b.cx + dx; if (x < 0 || x >= N) continue;
+        const i = y * N + x; if (own[i] !== id) continue;
+        const d = dx * dx + dy * dy;
+        if (!fallback) fallback = [x + 0.5, y + 0.5];
+        if (d < bd && lineClear(b, x + 0.5, y + 0.5)) { bd = d; best = i; }
+      }
+    }
+    if (best >= 0) return [best % N + 0.5, ((best / N) | 0) + 0.5];
+    if (fallback && r > 40) break;
+  }
+  return fallback || [b.homeX, b.homeY];
+}
+function planLoop(b) {
+  const safe = state.t < tune.safe_time, K = b.kind;
+  const lmax = safe ? Math.min(8, loopMax(K)) : loopMax(K), lmin = Math.max(3, lmax * 0.45);
+  const inF = (x, y) => x > 2.5 && y > 2.5 && x < N - 2.5 && y < N - 2.5;
+  let best = null, bs = -1e9;
+  for (let k = 0; k < 10; k++) {
+    const a = rng() * TAU, dx = Math.cos(a), dy = Math.sin(a);
+    let ex = b.x, ey = b.y, s = 0;
+    while (s < 60 && inF(ex, ey) && own[(ey | 0) * N + (ex | 0)] === b.id) { ex += dx * 0.5; ey += dy * 0.5; s += 0.5; }
+    const L1 = lmin + rng() * (lmax - lmin), L2 = lmin + rng() * (lmax - lmin), side = rng() < 0.5 ? 1 : -1;
+    const p1 = [ex + dx * L1, ey + dy * L1];
+    const p2 = [p1[0] - dy * side * L2, p1[1] + dx * side * L2];
+    const p3 = [ex - dy * side * L2 * 0.9 - dx, ey + dx * side * L2 * 0.9 - dy];
+    if (!inF(...p1) || !inF(...p2) || !inF(...p3)) continue;
+    if (safe && (Math.hypot(p1[0] - b.homeX, p1[1] - b.homeY) > tune.safe_radius || Math.hypot(p2[0] - b.homeX, p2[1] - b.homeY) > tune.safe_radius)) continue;
+    let sc = rng() * 4;
+    for (let j = 1; j <= 6; j++) {
+      const x = lerp(p1[0], p2[0], j / 6), y = lerp(p1[1], p2[1], j / 6), o = own[(y | 0) * N + (x | 0)];
+      if (o !== b.id) sc += o && K === 'greedy' ? 1.2 : 0.8;
+    }
+    for (const r of riders) if (r !== b && r.alive) {
+      const d = Math.min(Math.hypot(r.x - p1[0], r.y - p1[1]), Math.hypot(r.x - p2[0], r.y - p2[1]));
+      if (d < 14) sc -= (14 - d) * (K === 'cautious' ? 1.5 : K === 'hunter' ? 0.3 : 0.5);
+    }
+    if (sc > bs) { bs = sc; best = [p1, p2, p3]; }
+  }
+  if (!best) { // boxed in: a small loop toward the middle of the map
+    const a = Math.atan2(N / 2 - b.y, N / 2 - b.x), dx = Math.cos(a), dy = Math.sin(a);
+    best = [[b.x + dx * 6, b.y + dy * 6], [b.x + dx * 6 - dy * 5, b.y + dy * 6 + dx * 5]];
+  }
+  b.wps = best;
+}
+function steer(b) {
+  const a0 = Math.atan2(b.ty - b.y, b.tx - b.x);
+  for (const o of [0, 0.35, -0.35, 0.7, -0.7, 1.1, -1.1, 1.6, -1.6, 2.2, -2.2, 3]) {
+    const a = a0 + o, c = Math.cos(a), s = Math.sin(a);
+    let ok = true;
+    for (let d = 0.8; d <= 3.3 && ok; d += 0.8) if (ownTrailAt(b, b.x + c * d, b.y + s * d, 3)) ok = false;
+    if (ok) { b.ta = a; return; }
+  }
+  b.ta = a0;
+}
+function botThink(b, dt) {
+  const T = state.t, K = b.kind, tl = b.trail.length, inLand = own[b.cy * N + b.cx] === b.id;
+  b.think -= dt; b.modeT += dt;
+  if (tl > 0 && (b.mode === 'out' || b.mode === 'home') && (enemyNear(b) < fleeR(K) || tl > maxTrail(K))) setMode(b, 'return');
+  if (K === 'hunter' && T >= b.huntAt && b.mode !== 'hunt' && T >= b.huntCool) {
+    let prey = null, pd = tune.hunt_range;
+    for (const r of riders) if (r !== b && r.alive && r.trail.length > tune.hunt_trail) {
+      const d = Math.hypot(r.x - b.x, r.y - b.y); if (d < pd) { pd = d; prey = r; }
+    }
+    if (prey) {
+      setMode(b, 'hunt'); b.prey = prey.id; b.huntEnd = T + tune.hunt_time;
+      events.push({ type: 'hunt', who: b.id, prey: prey.id });
+      if (prey.isPlayer) { sfx.warn(); say('الصيّاد يطارد أثرك! عُد إلى أرضك', '#ffb4a8', 2.6); }
+    }
+  }
+  switch (b.mode) {
+    case 'home':
+      planLoop(b); setMode(b, 'out');
+      // falls through: head for the first waypoint at once
+    case 'out': {
+      const w = b.wps[0];
+      if (!w || b.modeT > 22) { setMode(b, 'return'); break; }
+      b.tx = w[0]; b.ty = w[1];
+      if (Math.hypot(w[0] - b.x, w[1] - b.y) < 1.2) b.wps.shift();
+      if (!b.wps.length) setMode(b, tl ? 'return' : 'home');
+      break;
+    }
+    case 'return':
+      if (tl === 0 && inLand) { setMode(b, 'home'); break; }
+      if (b.think <= 0) { b.think = 0.25; const t = nearestOwn(b); b.tx = t[0]; b.ty = t[1]; }
+      break;
+    case 'hunt': {
+      const p = riders[b.prey - 1];
+      if (!p.alive || p.trail.length < 3 || T > b.huntEnd) { b.huntCool = T + 3; setMode(b, tl ? 'return' : 'home'); break; }
+      if (b.think <= 0) {
+        b.think = 0.15; let bd = 1e9;
+        for (let j = 0; j < p.trail.length; j += 2) {
+          const i = p.trail[j], x = i % N + 0.5, y = ((i / N) | 0) + 0.5, d = Math.hypot(x - b.x, y - b.y);
+          if (d < bd) { bd = d; b.tx = x; b.ty = y; }
+        }
+      }
+      break;
+    }
+  }
+  steer(b);
+}
+function findSpot() {
+  let best = [N / 2, N / 2], bs = -1e9;
+  for (let k = 0; k < 40; k++) {
+    const x = 8 + ((rng() * (N - 16)) | 0), y = 8 + ((rng() * (N - 16)) | 0);
+    let free = 0;
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const i = (y + dy) * N + x + dx; if (trail[i]) free -= 100; else if (!own[i]) free++; }
+    let md = 40; for (const r of riders) if (r.alive) md = Math.min(md, Math.hypot(r.x - x, r.y - y));
+    const sc = free * 2 + md;
+    if (sc > bs) { bs = sc; best = [x, y]; }
+  }
+  return best;
+}
+function placeRider(r, x, y) {
+  r.x = r.px = x + 0.5; r.y = r.py = y + 0.5; r.cx = x; r.cy = y; r.homeX = r.x; r.homeY = r.y;
+  r.trail = []; r.tdir = []; r.alive = true; r.wps = []; r.mode = 'home'; r.modeT = 0; r.think = 0;
+}
+function respawn(b) {
+  const s = findSpot();
+  placeRider(b, s[0], s[1]); b.a = b.ta = rng() * TAU;
+  camp(b, s[0], s[1], false); checkWipe(b);
+  for (let j = 0; j < 12; j++) parts.push(dust(b.x, b.y, '#f1dcae', 4));
+  events.push({ type: 'respawn', who: b.id });
+}
+
+// ---- The game: effects ---------------------------------------------------------------
+function dust(x, y, col, sp) { const a = rng() * TAU, v = sp * (0.3 + rng()); return { x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: 0.6 + rng() * 0.6, col, r: 4 + rng() * 6, k: 0 }; }
+function thread(x, y, col) { const a = rng() * TAU, v = 4 + rng() * 5; return { x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: 1 + rng() * 0.5, col, r: 8, k: 1, a: rng() * TAU }; }
+function updateParts(dt) {
+  for (const p of parts) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.94; p.vy *= 0.94; }
+  parts = parts.filter(p => p.t < p.life);
+  for (const p of pops) p.t += dt;
+  pops = pops.filter(p => p.t < p.life);
+}
+function say(s, col, dur) { state.msg = { s, col, until: state.t + dur }; }
+
+// ---- The game: round -----------------------------------------------------------------
+function loadBest() { try { return Number(localStorage.getItem('gamelab.sand-claim.best')) || 0; } catch (_) { return 0; } }
+function saveBest(v) { try { localStorage.setItem('gamelab.sand-claim.best', String(v)); } catch (_) { /* private mode */ } }
+function makeRider(id) {
+  const F = FACTIONS[id];
+  return { id, isPlayer: id === 1, kind: F.kind, x: 0, y: 0, px: 0, py: 0, cx: 0, cy: 0, a: 0, ta: 0, gait: 0, alive: true,
+    trail: [], tdir: [], bb: [0, 0, 0, 0], wait: id === 1, respawnT: 0, deadT: 0,
+    mode: 'home', modeT: 0, think: 0, wps: [], tx: 0, ty: 0, homeX: 0, homeY: 0, prey: 0, huntAt: 0, huntEnd: 0, huntCool: 0 };
+}
+function paintAll() {
+  wctx.fillStyle = wctx.createPattern(sandTile, 'repeat'); wctx.fillRect(0, 0, N * CS, N * CS);
+  mctx.fillStyle = '#d9b77c'; mctx.fillRect(0, 0, N, N);
+  for (let i = 0; i < NN; i++) if (shown[i] || (i % N && shown[i - 1]) || (i >= N && shown[i - N])) paintCell(i);
+}
+let scene, state;
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  own.fill(0); shown.fill(0); trail.fill(0); counts.fill(0);
+  batches = []; parts = []; pops = [];
+  state = { t: 0, score: 0, pct: 0, gained: '', kills: 0, best: loadBest(), alive: true, final: 0, firstCap: false,
+    endT: 0, why: '', killer: 0, result: null, msg: null, lookX: 0, lookY: 0, shake: 0, lastTick: -1, safeSaid: false };
+  riders = [];
+  for (let f = 1; f < FACTIONS.length; f++) riders.push(makeRider(f));
+  for (const r of riders) {
+    const [x, y] = FACTIONS[r.id].spawn;
+    placeRider(r, x, y); camp(r, x, y, true);
+    r.a = r.ta = r.isPlayer ? 0 : rng() * TAU;
+    r.huntAt = tune.hunt_start_min + rng() * Math.max(0, tune.hunt_start_max - tune.hunt_start_min);
+  }
+  oases = OASES.map(([x, y], k) => ({ x, y, i: (y | 0) * N + (x | 0), owner: 0, img: oasisImgs[k] }));
+  paintAll();
+}
+function startRound() { reset(); scene = 'play'; ptr.stick = false; sfx.start(); events.push({ type: 'start' }); }
+function endRound(reason, who = 0) {
+  const fin = state.alive ? pct(1) : state.final;
+  const stand = riders.map(r => ({ f: r.id, p: r.isPlayer ? fin : (r.alive ? pct(r.id) : 0) })).sort((a, b) => b.p - a.p);
+  const rank = stand.findIndex(s => s.f === 1) + 1;
+  const newBest = fin > state.best + 1e-9;
+  if (newBest) { state.best = fin; saveBest(fin); }
+  state.result = { reason, who, fin, stand, rank, newBest };
+  state.score = +fin.toFixed(1);
+  state.gained = `أرضك ${fin.toFixed(1)}%`;
+  scene = 'results';
+  if (reason === 'win' || (reason === 'time' && rank === 1)) sfx.win();
+  events.push({ type: 'end', reason, pct: +fin.toFixed(2), rank });
+}
+
+// ---- The game: drawing ---------------------------------------------------------------
+function drawWorld() {
+  const p = riders[0];
+  const px = lerp(p.px, p.x, ALPHA), py = lerp(p.py, p.y, ALPHA);
+  const sh = state.shake > 0.3 ? state.shake : 0;
+  const camX = px + state.lookX + (sh ? Math.sin(state.t * 61) * sh / CS : 0), camY = py + state.lookY + (sh ? Math.cos(state.t * 53) * sh / CS : 0);
+  const ox = W / 2 - camX * CS, oy = H / 2 - camY * CS;
+  ctx.save(); ctx.translate(ox, oy); ctx.fillStyle = oobPat; ctx.fillRect(-ox, -oy, W, H); ctx.restore();
+  const wx0 = Math.max(0, -ox), wy0 = Math.max(0, -oy), wx1 = Math.min(N * CS, W - ox), wy1 = Math.min(N * CS, H - oy);
+  if (wx1 > wx0 && wy1 > wy0) ctx.drawImage(world, wx0, wy0, wx1 - wx0, wy1 - wy0, wx0 + ox, wy0 + oy, wx1 - wx0, wy1 - wy0);
+  ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 6; ctx.strokeRect(ox - 3, oy - 3, N * CS + 6, N * CS + 6);
+  ctx.strokeStyle = '#e2c48a'; ctx.lineWidth = 2; ctx.setLineDash([10, 8]); ctx.strokeRect(ox - 3, oy - 3, N * CS + 6, N * CS + 6); ctx.setLineDash([]);
+  const onScr = (x, y, m) => x > -m && x < W + m && y > -m && y < H + m;
+  // rug fronts rolling out
+  const now = state.t;
+  for (const b of batches) if (b.f) {
+    for (let j = b.k - 1; j >= 0 && b.times[j] > now - 0.18; j--) {
+      const i = b.cells[j], sx = ox + (i % N) * CS + CS / 2, sy = oy + ((i / N) | 0) * CS + CS / 2;
+      if (!onScr(sx, sy, 20)) continue;
+      const age = clamp((now - b.times[j]) / 0.18, 0, 1), sz = CS * (1.45 - age * 0.55);
+      ctx.globalAlpha = 1 - age * 0.7; ctx.drawImage(rolls[b.f], sx - sz / 2, sy - sz / 2, sz, sz);
+    }
+  }
+  ctx.globalAlpha = 1;
+  // oases
+  for (const o of oases) {
+    const sx = ox + o.x * CS, sy = oy + o.y * CS;
+    if (!onScr(sx, sy, 110)) continue;
+    ctx.drawImage(o.img, sx - o.img.width / 2, sy - o.img.height / 2);
+    if (o.owner) {
+      ctx.strokeStyle = FACTIONS[o.owner].col; ctx.lineWidth = 5; ctx.setLineDash([12, 7]); ctx.lineDashOffset = -now * 12;
+      circ(ctx, sx, sy, 2.75 * CS); ctx.stroke(); ctx.setLineDash([]);
+    } else if (scene !== 'figures') pill(`+${tune.oasis_bonus}%`, sx, sy - 3.9 * CS, 24, '#dff6ff', 'rgba(20,60,95,0.82)');
+  }
+  // the first-move ghost loop
+  if (!state.firstCap && state.alive && now < 30) {
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const path = () => { ctx.beginPath(); GHOST.forEach(([x, y], k) => k ? ctx.lineTo(ox + x * CS, oy + y * CS) : ctx.moveTo(ox + x * CS, oy + y * CS)); };
+    ctx.setLineDash([3, 12]); ctx.lineDashOffset = -now * 40;
+    ctx.strokeStyle = 'rgba(22,58,134,0.55)'; ctx.lineWidth = 9; path(); ctx.stroke();
+    ctx.strokeStyle = '#eef3ff'; ctx.lineWidth = 5; path(); ctx.stroke(); ctx.setLineDash([]);
+    for (let k = 0; k < GHOST.length - 1; k++) {
+      const [x0, y0] = GHOST[k], [x1, y1] = GHOST[k + 1], a = Math.atan2(y1 - y0, x1 - x0);
+      const mx = ox + (x0 + x1) / 2 * CS, my = oy + (y0 + y1) / 2 * CS;
+      ctx.save(); ctx.translate(mx, my); ctx.rotate(a); ctx.fillStyle = '#eef3ff'; ctx.strokeStyle = FACTIONS[1].dark; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-7, -9); ctx.lineTo(-3, 0); ctx.lineTo(-7, 9); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+    pill('ارسم حلقة وعُد إلى مخيّمك', ox + 67 * CS, oy + 40.6 * CS, 26, '#fff', hexA(FACTIONS[1].dark, 0.88));
+  }
+  // trails: dotted footprints in each colour
+  let danger = false;
+  const pl = riders[0];
+  if (pl.alive && pl.trail.length) for (const r of riders) if (!r.isPlayer && r.alive && Math.hypot(r.x - pl.x, r.y - pl.y) < 10) danger = true;
+  for (const r of riders) {
+    if (!r.alive || !r.trail.length) continue;
+    const pr = prints[r.id];
+    if (r.isPlayer && danger) ctx.fillStyle = `rgba(230,40,30,${0.25 + 0.2 * Math.sin(now * 14)})`;
+    for (let j = 0; j < r.trail.length; j++) {
+      const i = r.trail[j], sx = ox + (i % N) * CS, sy = oy + ((i / N) | 0) * CS;
+      if (sx < -CS || sx > W || sy < -CS || sy > H) continue;
+      if (r.isPlayer && danger) ctx.fillRect(sx - 2, sy - 2, CS + 4, CS + 4);
+      ctx.drawImage(pr[r.tdir[j]][j & 1], sx, sy);
+    }
+  }
+  // riders
+  for (let k = riders.length - 1; k >= 0; k--) {
+    const r = riders[k]; if (!r.alive) continue;
+    const sx = ox + lerp(r.px, r.x, ALPHA) * CS, sy = oy + lerp(r.py, r.y, ALPHA) * CS;
+    if (!onScr(sx, sy, 60)) continue;
+    if (r.mode === 'hunt') { ctx.strokeStyle = `rgba(230,40,30,${0.5 + 0.4 * Math.sin(now * 12)})`; ctx.lineWidth = 4; circ(ctx, sx, sy, 30); ctx.stroke(); }
+    if (r.isPlayer && r.wait) { ctx.strokeStyle = `rgba(255,255,255,${0.5 + 0.4 * Math.sin(now * 5)})`; ctx.lineWidth = 3; circ(ctx, sx, sy, 34 + 4 * Math.sin(now * 5)); ctx.stroke(); }
+    drawRider(ctx, sx, sy, r.a, r.id, r.kind, r.gait, r.isPlayer ? 0.98 : 0.92, now);
+    pill(r.isPlayer ? 'أنت' : FACTIONS[r.id].name, sx, sy - 40, 24, '#fff', hexA(FACTIONS[r.id].dark, 0.86));
+  }
+  // dust and threads
+  for (const p of parts) {
+    const sx = ox + p.x * CS, sy = oy + p.y * CS, f = 1 - p.t / p.life;
+    ctx.globalAlpha = f;
+    if (p.k) { ctx.strokeStyle = p.col; ctx.lineWidth = 3; ctx.save(); ctx.translate(sx, sy); ctx.rotate(p.a + p.t * 6); line(ctx, -p.r, 0, p.r, 0); ctx.restore(); }
+    else { ctx.fillStyle = p.col; circ(ctx, sx, sy, p.r * (1.5 - f * 0.5)); ctx.fill(); }
+  }
+  ctx.globalAlpha = 1;
+  for (const p of pops) {
+    const f = p.t / p.life; ctx.globalAlpha = f > 0.75 ? (1 - f) * 4 : 1;
+    pill(p.s, ox + p.x * CS, oy + p.y * CS - f * 50, p.size, p.col, p.bg);
+  }
+  ctx.globalAlpha = 1;
+  // where is the hunter, when it chases you off screen
+  for (const r of riders) if (r.alive && r.mode === 'hunt' && r.prey === 1) {
+    const sx = ox + r.x * CS, sy = oy + r.y * CS;
+    if (onScr(sx, sy, -30)) continue;
+    const a = Math.atan2(sy - H / 2, sx - W / 2), ex = clamp(sx, 40, W - 40), ey = clamp(sy, 200, H - 230);
+    ctx.save(); ctx.translate(ex, ey); ctx.rotate(a); ctx.fillStyle = FACTIONS[r.id].col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(24, 0); ctx.lineTo(-12, -18); ctx.lineTo(-4, 0); ctx.lineTo(-12, 18); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  return { ox, oy, camX, camY };
+}
+function drawButton(b, kind) {
+  ctx.fillStyle = 'rgba(52,30,12,0.62)'; rr(ctx, b[0], b[1], b[2], b[3], 18); ctx.fill();
+  ctx.strokeStyle = 'rgba(245,232,200,0.55)'; ctx.lineWidth = 2; rr(ctx, b[0] + 3, b[1] + 3, b[2] - 6, b[3] - 6, 15); ctx.stroke();
+  const cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+  ctx.fillStyle = CREAM; ctx.strokeStyle = CREAM;
+  if (kind === 'pause') { rr(ctx, cx - 13, cy - 16, 9, 32, 3); ctx.fill(); rr(ctx, cx + 4, cy - 16, 9, 32, 3); ctx.fill(); }
+  else if (kind === 'mute') {
+    ctx.beginPath(); ctx.moveTo(cx - 20, cy - 7); ctx.lineTo(cx - 11, cy - 7); ctx.lineTo(cx, cy - 17); ctx.lineTo(cx, cy + 17); ctx.lineTo(cx - 11, cy + 7); ctx.lineTo(cx - 20, cy + 7); ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+    if (muted) { line(ctx, cx + 7, cy - 9, cx + 21, cy + 9); line(ctx, cx + 21, cy - 9, cx + 7, cy + 9); }
+    else { ctx.beginPath(); ctx.arc(cx + 2, cy, 9, -0.9, 0.9); ctx.stroke(); ctx.beginPath(); ctx.arc(cx + 2, cy, 17, -0.9, 0.9); ctx.stroke(); }
+  } else if (kind === 'home') {
+    ctx.beginPath(); ctx.moveTo(cx, cy - 22); ctx.lineTo(cx + 24, cy); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx + 17, cy + 20); ctx.lineTo(cx - 17, cy + 20); ctx.lineTo(cx - 17, cy); ctx.lineTo(cx - 24, cy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(52,30,12,0.9)'; ctx.fillRect(cx - 6, cy + 6, 12, 14);
+  }
+}
+function fmtTime(s) { s = Math.max(0, Math.ceil(s)); return `${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`; }
+function drawHUD(view) {
+  drawButton(BTN_PAUSE, 'pause'); drawButton(BTN_MUTE, 'mute');
+  const left = tune.round_time - state.t, hurry = left < 10;
+  ctx.fillStyle = 'rgba(52,30,12,0.66)'; rr(ctx, 188, 16, 192, 120, 20); ctx.fill();
+  text(fmtTime(left), 284, 56, 50, hurry ? '#ffb0a0' : '#fff', 'center', 'bold');
+  const mp = state.alive ? pct(1) : state.final;
+  text(`أرضك ${mp.toFixed(1)}%`, 284, 108, 28, FACTIONS[1].light, 'center', 'bold');
+  // live percent board for this round
+  const rows = riders.map(r => ({ r, p: r.alive ? pct(r.id) : (r.isPlayer ? state.final : 0) })).sort((a, b) => b.p - a.p);
+  const bx = 390, by = 16, bw = 314, rh = 38;
+  ctx.fillStyle = 'rgba(52,30,12,0.66)'; rr(ctx, bx, by, bw, 14 + rows.length * rh, 18); ctx.fill();
+  rows.forEach(({ r, p }, k) => {
+    const y = by + 7 + k * rh + rh / 2, F = FACTIONS[r.id];
+    if (r.isPlayer) { ctx.fillStyle = 'rgba(255,255,255,0.14)'; rr(ctx, bx + 6, y - rh / 2 + 2, bw - 12, rh - 4, 10); ctx.fill(); }
+    ctx.drawImage(rugTiles[r.id], 18, 18, 36, 36, bx + bw - 40, y - 13, 26, 26);
+    ctx.strokeStyle = F.dark; ctx.lineWidth = 2; ctx.strokeRect(bx + bw - 40, y - 13, 26, 26);
+    const name = r.isPlayer ? 'أنت' : `${F.name} · ${KIND_AR[r.kind]}`;
+    text(name, bx + bw - 50, y, 24, r.alive ? '#fff' : '#bba68a', 'right', r.isPlayer ? 'bold' : '');
+    text(r.alive ? `${p.toFixed(1)}%` : (r.isPlayer ? `${p.toFixed(1)}%` : 'خارج'), bx + 14, y, 24, r.alive ? '#ffe9a8' : '#bba68a', 'left', 'bold');
+  });
+  // minimap
+  const ms = 190, mx = W - ms - 16, my = H - ms - 16, sc = ms / N;
+  ctx.fillStyle = 'rgba(52,30,12,0.75)'; rr(ctx, mx - 8, my - 8, ms + 16, ms + 16, 14); ctx.fill();
+  ctx.imageSmoothingEnabled = false; ctx.drawImage(mini, mx, my, ms, ms); ctx.imageSmoothingEnabled = true;
+  for (const o of oases) { ctx.fillStyle = '#3b9ed1'; circ(ctx, mx + o.x * sc, my + o.y * sc, 4); ctx.fill(); }
+  for (const r of riders) if (r.alive) {
+    ctx.fillStyle = hexA(FACTIONS[r.id].col, 0.6);
+    for (const i of r.trail) ctx.fillRect(mx + (i % N) * sc, my + ((i / N) | 0) * sc, sc, sc);
+  }
+  for (const r of riders) if (r.alive) {
+    ctx.fillStyle = FACTIONS[r.id].dark; ctx.strokeStyle = '#fff'; ctx.lineWidth = r.isPlayer ? 3 : 1.5;
+    circ(ctx, mx + r.x * sc, my + r.y * sc, r.isPlayer ? 5.5 : 4); ctx.fill(); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(mx + (view.camX - W / 2 / CS) * sc, my + (view.camY - H / 2 / CS) * sc, W / CS * sc, H / CS * sc);
+  // message line
+  if (state.msg && state.t < state.msg.until) {
+    ctx.globalAlpha = clamp((state.msg.until - state.t) * 2, 0, 1);
+    pill(state.msg.s, W / 2, 300, 30, state.msg.col, 'rgba(40,20,8,0.84)');
+    ctx.globalAlpha = 1;
+  }
+  const pl = riders[0];
+  if (pl.wait && state.alive) pill('اسحب في أي اتجاه لتنطلق', W / 2, 960, 30, '#fff', 'rgba(40,20,8,0.8)');
+  // the touch stick
+  if (ptr.id !== null && ptr.stick && scene === 'play') {
+    const R = tune.stick_radius, vx = ptr.x - ptr.ox, vy = ptr.y - ptr.oy, L = Math.hypot(vx, vy), k = L > R ? R / L : 1;
+    ctx.fillStyle = 'rgba(255,246,225,0.22)'; circ(ctx, ptr.ox, ptr.oy, R); ctx.fill();
+    ctx.strokeStyle = 'rgba(60,35,15,0.55)'; ctx.lineWidth = 4; circ(ctx, ptr.ox, ptr.oy, R); ctx.stroke();
+    const kx = ptr.ox + vx * k, ky = ptr.oy + vy * k, g = ctx.createRadialGradient(kx - 8, ky - 8, 4, kx, ky, 36);
+    g.addColorStop(0, FACTIONS[1].light); g.addColorStop(1, FACTIONS[1].col);
+    ctx.fillStyle = g; circ(ctx, kx, ky, 34); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+  }
+}
+function drawSandBg() { ctx.fillStyle = sandPat; ctx.fillRect(0, 0, W, H); }
+function drawRug(x, y, w, h, f) {
+  ctx.fillStyle = 'rgba(90,55,20,0.3)'; ctx.fillRect(x + 8, y + 10, w, h);
+  ctx.save(); ctx.translate(x, y); ctx.fillStyle = ctx.createPattern(rugTiles[f], 'repeat'); ctx.fillRect(0, 0, w, h); ctx.restore();
+  ctx.strokeStyle = FACTIONS[f].dark; ctx.lineWidth = 8; ctx.strokeRect(x + 4, y + 4, w - 8, h - 8);
+  ctx.strokeStyle = CREAM; ctx.lineWidth = 2; ctx.setLineDash([6, 5]); ctx.strokeRect(x + 11, y + 11, w - 22, h - 22); ctx.setLineDash([]);
+  ctx.strokeStyle = CREAM; ctx.lineWidth = 3;
+  for (let k = x + 8; k < x + w - 4; k += 9) { line(ctx, k, y, k + (k % 2), y - 12); line(ctx, k, y + h, k - (k % 2), y + h + 12); }
+}
+
+// ---- Scenes ---------------------------------------------------------------------------
+const BTN_AGAIN = [150, 930, 420, 100], BTN_MENU = [210, 1052, 300, 84];
+const BTN_RESUME = [150, 540, 420, 100], BTN_RESTART = [150, 664, 420, 100], BTN_QUIT = [150, 788, 420, 100];
+function bigButton(b, s, main) {
+  ctx.fillStyle = 'rgba(30,15,5,0.35)'; rr(ctx, b[0] + 4, b[1] + 6, b[2], b[3], 24); ctx.fill();
+  ctx.save(); rr(ctx, b[0], b[1], b[2], b[3], 24); ctx.clip();
+  ctx.fillStyle = main ? ctx.createPattern(rugTiles[1], 'repeat') : '#6b4423'; ctx.fillRect(b[0], b[1], b[2], b[3]);
+  ctx.fillStyle = main ? 'rgba(22,58,134,0.55)' : 'rgba(0,0,0,0)'; ctx.fillRect(b[0], b[1], b[2], b[3]); ctx.restore();
+  ctx.strokeStyle = CREAM; ctx.lineWidth = 3; rr(ctx, b[0] + 5, b[1] + 5, b[2] - 10, b[3] - 10, 20); ctx.stroke();
+  text(s, b[0] + b[2] / 2, b[1] + b[3] / 2 + 2, main ? 38 : 32, '#fff', 'center', 'bold');
+}
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() {
+      drawSandBg();
+      text('شخصيات رمال وأشكالها', W / 2, 60, 36, '#3b2412', 'center', 'bold');
+      const cells = [[180, 250], [540, 250], [180, 560], [540, 560], [180, 870], [540, 870], [180, 1150], [540, 1150]];
+      const t = state.t;
+      const riderFig = (k, f, kind, label) => {
+        const [x, y] = cells[k];
+        ctx.fillStyle = 'rgba(255,245,220,0.35)'; rr(ctx, x - 165, y - 150, 330, 290, 24); ctx.fill();
+        drawRider(ctx, x, y - 20, -0.5, f, kind, t * 6, 3.0, t);
+        text(label, x, y + 115, 28, '#3b2412', 'center', 'bold');
+      };
+      riderFig(0, 1, 'player', 'أنت · راكب بعلم مشقوق');
+      riderFig(1, 2, 'hunter', 'بوت صيّاد · رمح طويل');
+      riderFig(2, 3, 'greedy', 'بوت طمّاع · خُرج ممتلئ');
+      riderFig(3, 4, 'cautious', 'بوت حذِر · ترس مستدير');
+      { // trail of footprints
+        const [x, y] = cells[4];
+        ctx.fillStyle = 'rgba(255,245,220,0.35)'; rr(ctx, x - 165, y - 150, 330, 290, 24); ctx.fill();
+        for (let j = 0; j < 7; j++) { ctx.save(); ctx.translate(x - 126 + j * 36, y - 40 + Math.sin(j) * 20); ctx.scale(2, 2); ctx.drawImage(prints[1][0][j & 1], -9, -9); ctx.restore(); }
+        text('أثر الأقدام', x, y + 115, 28, '#3b2412', 'center', 'bold');
+      }
+      { // oasis
+        const [x, y] = cells[5], img = oasisImgs[0];
+        ctx.fillStyle = 'rgba(255,245,220,0.35)'; rr(ctx, x - 165, y - 150, 330, 290, 24); ctx.fill();
+        ctx.drawImage(img, x - img.width * 0.6, y - 30 - img.height * 0.6, img.width * 1.2, img.height * 1.2);
+        text('واحة نخيل', x, y + 115, 28, '#3b2412', 'center', 'bold');
+      }
+      { // six rugs
+        const [x, y] = cells[6];
+        for (let f = 1; f <= 6; f++) drawRug(x - 160 + ((f - 1) % 3) * 110, y - 120 + ((f - 1) / 3 | 0) * 90, 96, 70, f);
+        text('سجاد كل فريق', x, y + 70, 28, '#3b2412', 'center', 'bold');
+      }
+      { // a rug front rolling
+        const [x, y] = cells[7];
+        drawRug(x - 150, y - 120, 200, 150, 1);
+        for (let j = 0; j < 6; j++) ctx.drawImage(rolls[1], x + 50, y - 120 + j * 25, 30, 30);
+        text('السجادة تنفرد', x, y + 70, 28, '#3b2412', 'center', 'bold');
+      }
+    },
+  },
+  title: {
+    update() {
+      for (const p of tapList) {
+        if (location.protocol.startsWith('http') && inRect(p, BTN_HOME)) { location.href = '../../'; return; }
+        startRound(); return;
+      }
+      if (pressed('Enter') || pressed('Space')) startRound();
+      state.t += STEP;
+    },
+    draw() {
+      drawSandBg();
+      if (location.protocol.startsWith('http')) drawButton(BTN_HOME, 'home');
+      const t = clock.now();
+      text(TITLE, W / 2, 190, 140, '#3b2412', 'center', 'bold');
+      text(TITLE_EN, W / 2, 300, 40, '#6b4423', 'center', 'bold');
+      drawRug(110, 360, 500, 270, 1);
+      for (let j = 0; j < 22; j++) { const a = j / 22 * TAU; drawPrint(ctx, 360 + Math.cos(a) * 300, 495 + Math.sin(a) * 172, a + Math.PI / 2, 1.8, j & 1, FACTIONS[1].dark); }
+      drawRider(ctx, 360, 495, -0.25, 1, 'player', t * 4, 3.0, t);
+      CONTROLS.forEach((c, i) => text(c, W / 2, 712 + i * 52, 28, '#3b2412', 'center', i === 1 ? 'bold' : ''));
+      text('المنافسون الخمسة بوتات وليسوا لاعبين حقيقيين', W / 2, 990, 26, '#6b4423', 'center');
+      if (state.best > 0) text(`أفضل نتيجة لك: ${state.best.toFixed(1)}%`, W / 2, 1050, 30, '#163a86', 'center', 'bold');
+      ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
+      pill('المس الشاشة للبدء', W / 2, 1160, 44, '#fff', hexA(FACTIONS[1].dark, 0.92));
+      ctx.globalAlpha = 1;
+    },
+  },
+  play: {
+    update(dt) {
+      if (pressed('KeyP') || pressed('Escape')) { scene = 'pause'; return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_PAUSE)) { scene = 'pause'; return; }
+        if (inRect(p, BTN_MUTE)) setMuted(!muted);
+      }
+      state.t += dt;
+      const pl = riders[0];
+      if (pl.alive) playerInput(pl);
+      for (const r of riders) {
+        if (!r.alive) { if (!r.isPlayer && state.t >= r.respawnT) respawn(r); continue; }
+        if (!r.isPlayer) botThink(r, dt);
+        if (r.wait) { r.px = r.x; r.py = r.y; continue; }
+        moveRider(r, dt);
+      }
+      updateOases(); updateReveal(); updateParts(dt);
+      if (pl.alive && !pl.wait) {
+        const k = 1 - Math.exp(-dt * 2.5);
+        state.lookX = lerp(state.lookX, Math.cos(pl.a) * 3, k); state.lookY = lerp(state.lookY, Math.sin(pl.a) * 3, k);
+      }
+      state.shake *= 0.9;
+      state.pct = state.alive ? pct(1) : state.final; state.score = +state.pct.toFixed(1);
+      if (!state.safeSaid && state.t >= tune.safe_time) { state.safeSaid = true; say('انتهى وقت الأمان: البوتات تتوسع الآن', '#ffe9a8', 2.6); }
+      const left = tune.round_time - state.t;
+      if (left < 10 && Math.ceil(left) !== state.lastTick) { state.lastTick = Math.ceil(left); sfx.tick(); }
+      if (!state.alive) { if (state.t >= state.endT) endRound('out'); return; }
+      if (pct(1) >= tune.win_percent) { endRound('win'); return; }
+      for (const r of riders) if (!r.isPlayer && r.alive && pct(r.id) >= tune.win_percent) { endRound('botwin', r.id); return; }
+      if (state.t >= tune.round_time) endRound('time');
+    },
+    draw() { const v = drawWorld(); drawHUD(v); },
+  },
+  pause: {
+    update() {
+      if (pressed('KeyP') || pressed('Escape') || pressed('Enter') || pressed('Space')) { scene = 'play'; return; }
+      if (pressed('KeyR')) { startRound(); return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_RESUME)) { scene = 'play'; return; }
+        if (inRect(p, BTN_RESTART)) { startRound(); return; }
+        if (inRect(p, BTN_QUIT)) { reset(); scene = 'title'; return; }
+      }
+    },
+    draw() {
+      const v = drawWorld(); drawHUD(v);
+      ctx.fillStyle = 'rgba(30,15,5,0.62)'; ctx.fillRect(0, 0, W, H);
+      text('استراحة', W / 2, 400, 72, '#fff', 'center', 'bold');
+      bigButton(BTN_RESUME, 'متابعة', true); bigButton(BTN_RESTART, 'جولة جديدة'); bigButton(BTN_QUIT, 'القائمة');
+      text('P أو Esc للمتابعة', W / 2, 950, 26, '#e9d6b0', 'center');
+    },
+  },
+  results: {
+    update() {
+      if (pressed('Enter') || pressed('Space') || pressed('KeyR')) { startRound(); return; }
+      if (pressed('Escape')) { reset(); scene = 'title'; return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_AGAIN)) { startRound(); return; }
+        if (inRect(p, BTN_MENU)) { reset(); scene = 'title'; return; }
+      }
+    },
+    draw() {
+      const v = drawWorld(); drawHUD(v);
+      ctx.fillStyle = 'rgba(30,15,5,0.66)'; ctx.fillRect(0, 0, W, H);
+      const R = state.result;
+      ctx.fillStyle = 'rgba(70,40,15,0.94)'; rr(ctx, 60, 150, 600, 1010, 30); ctx.fill();
+      ctx.strokeStyle = FACTIONS[1].col; ctx.lineWidth = 8; rr(ctx, 70, 160, 580, 990, 24); ctx.stroke();
+      let head, sub;
+      if (R.reason === 'win') { head = 'فزت بالجولة'; sub = `وصلت إلى ${tune.win_percent}% من الصحراء`; }
+      else if (R.reason === 'botwin') { head = 'انتهت الجولة'; sub = `${FACTIONS[R.who].name} وصل إلى ${tune.win_percent}%`; }
+      else if (R.reason === 'time') { head = R.rank === 1 ? 'فزت بالجولة' : 'انتهى الوقت'; sub = R.rank === 1 ? 'أرضك هي الأكبر' : `مركزك ${R.rank} من 6`; }
+      else {
+        head = 'خرجت من الجولة';
+        sub = state.why === 'self' ? 'قطعتَ أثرك بنفسك' : state.why === 'land' ? `${FACTIONS[state.killer].name} أخذ كل أرضك` : `${FACTIONS[state.killer].name} قطع أثرك`;
+      }
+      text(head, W / 2, 240, 56, '#fff', 'center', 'bold');
+      text(sub, W / 2, 310, 30, '#f3d9a6', 'center');
+      text(`أرضك ${R.fin.toFixed(1)}%`, W / 2, 390, 48, FACTIONS[1].light, 'center', 'bold');
+      text(R.newBest ? 'رقم شخصي جديد' : `أفضل نتيجة: ${state.best.toFixed(1)}%`, W / 2, 450, 28, R.newBest ? '#ffe08a' : '#e9d6b0', 'center', 'bold');
+      R.stand.forEach((s, k) => {
+        const y = 530 + k * 58, F = FACTIONS[s.f];
+        if (s.f === 1) { ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(ctx, 110, y - 26, 500, 52, 12); ctx.fill(); }
+        text(`${k + 1}`, 590, y, 30, '#e9d6b0', 'center', 'bold');
+        ctx.drawImage(rugTiles[s.f], 18, 18, 36, 36, 530, y - 17, 34, 34);
+        text(s.f === 1 ? 'أنت' : `${F.name} · ${KIND_AR[F.kind]}`, 515, y, 28, '#fff', 'right', s.f === 1 ? 'bold' : '');
+        text(`${s.p.toFixed(1)}%`, 130, y, 28, '#ffe9a8', 'left', 'bold');
+      });
+      text(`أثر قطعته: ${state.kills}`, W / 2, 890, 28, '#e9d6b0', 'center');
+      bigButton(BTN_AGAIN, 'العب مجددًا', true); bigButton(BTN_MENU, 'القائمة');
+    },
+  },
+};
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  tapList = taps.splice(0);
+  scenes[scene].update(STEP); hit.clear(); tapList = [];
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+document.addEventListener('visibilitychange', () => { if (document.hidden && scene === 'play') scene = 'pause'; });
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

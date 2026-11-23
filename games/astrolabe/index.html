@@ -1,0 +1,999 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: Do geared rings make alignment a real puzzle on a phone, and does a guaranteed par with a fair move budget remove the "impossible level" feeling? -->
+<!-- Date: 2026-11-23 -->
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#081230">
+<title>أسطرلاب · Astrolabe</title>
+<link rel="stylesheet" href="vendor/almarai.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #081230; overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; touch-action: none; user-select: none;
+    -webkit-user-select: none; -webkit-touch-callout: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
+<script src="config.js"></script>
+<script>
+'use strict';
+// The one-shot's starter: only what the checks read. Keep the fixed step, the clock hook,
+// window.game and the play and figures scenes. Everything else is the game's own.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 720, H = 1280;        // logical size: portrait phone canvas
+const PIXEL = false;
+const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
+const TITLE = 'أسطرلاب · Astrolabe';
+const CONTROLS = ['اسحب حلقة لتديرها · انقرها لتدور خطوة', 'المفاتيح: الأسهم · U تراجع · H تلميح · R إعادة · M'];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+let fxSeed = 77; // visual sparkle only (never gameplay): its own stream
+function fxr() {
+  fxSeed = (fxSeed + 0x6D2B79F5) | 0;
+  let t = Math.imul(fxSeed ^ (fxSeed >>> 15), fxSeed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+let ctx = canvas.getContext('2d');
+const mainCtx = ctx;
+let DPR = 1, bgCache = null;
+function fit() { // fills the window at any size and pixel ratio
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  canvas.style.imageRendering = PIXEL ? 'pixelated' : 'auto';
+  mainCtx.setTransform(r, 0, 0, r, 0, 0); mainCtx.imageSmoothingEnabled = !PIXEL;
+  DPR = r; bgCache = null;
+}
+addEventListener('resize', fit); fit();
+function clear(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, W, H); }
+const AR = /[؀-ۿ]/;
+function text(s, x, y, size, c, align = 'center', weight = '') {
+  ctx.fillStyle = c; ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.textBaseline = 'middle'; ctx.direction = AR.test(s) ? 'rtl' : 'ltr'; ctx.fillText(s, x, y);
+  ctx.direction = 'ltr';
+}
+
+// ---- Input: keys by position (event.code), OS key repeat ignored ------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code); // true for one step after the key goes down
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => down.clear());
+const pq = []; // pointer events in logical 720x1280 space, read on the fixed step
+function toLogical(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+addEventListener('pointerdown', e => { startAudio(); const p = toLogical(e); pq.push({ t: 'down', x: p.x, y: p.y }); if (e.target === canvas) e.preventDefault(); }, { passive: false });
+addEventListener('pointermove', e => { const p = toLogical(e); pq.push({ t: 'move', x: p.x, y: p.y }); });
+addEventListener('pointerup', e => { const p = toLogical(e); pq.push({ t: 'up', x: p.x, y: p.y }); });
+addEventListener('pointercancel', () => pq.push({ t: 'cancel', x: 0, y: 0 }));
+addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+addEventListener('gesturestart', e => e.preventDefault());
+addEventListener('contextmenu', e => e.preventDefault());
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)(); // a check may inject one
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3, delay = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur + 0.02);
+}
+function sStep() { tone(2200, 0.025, 'square', 0.035); tone(150, 0.07, 'triangle', 0.18); }
+function sGear() { tone(900, 0.03, 'sawtooth', 0.03, 0.03); tone(700, 0.03, 'sawtooth', 0.03, 0.06); }
+function sBloom(k) { tone([1046.5, 1318.5, 1568][k % 3], 0.9, 'sine', 0.11); tone([2093, 2637, 3136][k % 3], 0.5, 'sine', 0.04, 0.02); }
+function sWin() { [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => tone(f, 0.9, 'sine', 0.1, i * 0.09)); }
+function sFail() { tone(110, 0.3, 'triangle', 0.3); tone(82, 0.4, 'sine', 0.25, 0.08); }
+function sUndo() { tone(520, 0.06, 'triangle', 0.12); tone(390, 0.06, 'triangle', 0.1, 0.05); }
+function sHint() { tone(880, 0.3, 'sine', 0.12); tone(1174.66, 0.4, 'sine', 0.1, 0.12); }
+function sClick() { tone(660, 0.05, 'triangle', 0.1); }
+
+// ---- Save: personal bests -----------------------------------------------------------------
+const SAVE_KEY = 'astrolabe-v1';
+let save = { best: {} };
+try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && s.best) save = s; } catch (e) { /* plays without storage */ }
+function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
+const NLEV = () => tune.levels.length;
+function firstUnplayed() { for (let i = 0; i < NLEV(); i++) if (!save.best[i]) return i; return 0; }
+function totalStars() { let s = 0; for (const k in save.best) s += save.best[k].stars || 0; return s; }
+
+// ---- Helpers ------------------------------------------------------------------------------
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const ease = u => 1 - (1 - u) * (1 - u);
+const backOut = u => { const c = 1.9; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+const TAU = Math.PI * 2, STEPA = Math.PI / 6;
+function hash(i) { let t = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b); t ^= t >>> 13; t = Math.imul(t, 0xc2b2ae35); t ^= t >>> 16; return (t >>> 0) / 4294967296; }
+function rr(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+function inRect(p, b) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
+const posAngle = p => p * STEPA - Math.PI / 2; // position 0 is at the top, clockwise
+const cdist = (a, b) => { const d = Math.abs(a - b) % 12; return Math.min(d, 12 - d); };
+const mod12 = v => ((v % 12) + 12) % 12;
+
+// ---- Level maker: scramble a solved state; BFS over every ring position for the true par --------
+const P12 = [1, 12, 144, 1728, 20736, 248832];
+function makeLayout(L) {
+  const R = L.rings;
+  const sockets = [];
+  for (let g = 0; sockets.length < L.sockets && g < 200; g++) { const p = Math.floor(rng() * 12); if (sockets.every(q => cdist(p, q) >= 2)) sockets.push(p); }
+  const links = (L.fixed || []).map(f => ({ d: f[0], t: f[1], s: f[2] }));
+  const pairs = []; for (let i = 0; i < R - 1; i++) if (!links.some(l => Math.min(l.d, l.t) === i)) pairs.push(i);
+  for (let i = pairs.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; }
+  for (let k = 0; k < L.links && k < pairs.length; k++) {
+    const i = pairs[k], inner = rng() < 0.5;
+    links.push({ d: inner ? i : i + 1, t: inner ? i + 1 : i, s: rng() < L.opp ? -1 : 1 });
+  }
+  const solved = [], masks = [];
+  for (let i = 0; i < R; i++) {
+    const rs = Math.floor(rng() * 12); solved.push(rs);
+    const pos = sockets.slice();
+    const cnt = clamp(L.gaps[0] + Math.floor(rng() * (L.gaps[1] - L.gaps[0] + 1)), sockets.length, 3);
+    for (let g = 0; pos.length < cnt && g < 100; g++) { const p = Math.floor(rng() * 12); if (pos.every(q => cdist(p, q) >= 2)) pos.push(p); }
+    let m = 0; for (const p of pos) m |= 1 << mod12(p - rs); masks.push(m);
+  }
+  const eff = []; // what a single step of ring i does to every ring, the gear train included
+  for (let i = 0; i < R; i++) {
+    const e = new Int8Array(R); e[i] = 1; const st = [i];
+    while (st.length) { const x = st.pop(); for (const l of links) if (l.d === x && e[l.t] === 0) { e[l.t] = e[x] * l.s; st.push(l.t); } }
+    eff.push(e);
+  }
+  return { R, sockets, links, masks, solved, eff };
+}
+function winDigits(lv, dig) {
+  for (const p of lv.sockets) for (let i = 0; i < lv.R; i++) if (!(lv.masks[i] >> mod12(p - dig[i]) & 1)) return false;
+  return true;
+}
+/** Breadth-first search from every lit state outward: dist[state] = fewest single steps to light every socket. */
+function bfs(lv) {
+  const R = lv.R, N = P12[R], dist = new Int8Array(N).fill(-1), q = new Int32Array(N), dig = new Int32Array(R);
+  let qt = 0, qh = 0;
+  for (let s = 0; s < N; s++) {
+    let x = s; for (let j = 0; j < R; j++) { dig[j] = x % 12; x = (x / 12) | 0; }
+    if (winDigits(lv, dig)) { dist[s] = 0; q[qt++] = s; }
+  }
+  while (qh < qt) {
+    const s = q[qh++], d = dist[s] + 1;
+    let x = s; for (let j = 0; j < R; j++) { dig[j] = x % 12; x = (x / 12) | 0; }
+    for (let i = 0; i < R; i++) {
+      const e = lv.eff[i];
+      for (let dir = -1; dir <= 1; dir += 2) {
+        let t = 0; for (let j = R - 1; j >= 0; j--) t = t * 12 + (dig[j] + dir * e[j] + 12) % 12;
+        if (dist[t] < 0) { dist[t] = d; q[qt++] = t; }
+      }
+    }
+  }
+  return dist;
+}
+function encode(rot) { let s = 0; for (let j = rot.length - 1; j >= 0; j--) s = s * 12 + mod12(rot[j]); return s; }
+function stepCode(lv, rot, i, dir) { const r = rot.map((v, j) => v + dir * lv.eff[i][j]); return encode(r); }
+function scramble(lv, dist, L) {
+  const R = lv.R, rot = lv.solved.slice();
+  const rings = L.only === 'outer' ? [R - 1] : [...Array(R).keys()];
+  const want = L.par[0] + Math.floor(rng() * (L.par[1] - L.par[0] + 1)); // a par picked inside the level's range
+  let best = rot.slice(), bestOff = 1e9;
+  for (let k = 0; k < 400; k++) {
+    const cur = dist[encode(rot)];
+    const off = Math.abs(cur - want);
+    if (off < bestOff) { bestOff = off; best = rot.slice(); }
+    if (off === 0) break;
+    const opts = []; for (const i of rings) for (const dir of [1, -1]) opts.push([i, dir]);
+    const up = opts.filter(([i, dir]) => dist[stepCode(lv, rot, i, dir)] > cur);
+    const pool = up.length && rng() < 0.85 ? up : opts;
+    const [i, dir] = pool[Math.floor(rng() * pool.length)];
+    for (let j = 0; j < R; j++) rot[j] = mod12(rot[j] + dir * lv.eff[i][j]);
+  }
+  return best;
+}
+const genCache = {};
+function genLevel(li) {
+  if (genCache[li]) return genCache[li];
+  const L = tune.levels[li];
+  let best = null, bestOff = 1e9;
+  for (let a = 0; a < tune.gen_attempts; a++) {
+    seed = (baseSeed * 7919 + li * 104729 + a * 15485863) | 0;
+    const lv = makeLayout(L);
+    const dist = bfs(lv);
+    const start = scramble(lv, dist, L);
+    const par = dist[encode(start)];
+    const off = par < L.par[0] ? L.par[0] - par : par > L.par[1] ? par - L.par[1] : 0;
+    if (off < bestOff) { best = Object.assign(lv, { dist, start, par }); bestOff = off; }
+    if (off === 0) break;
+  }
+  const used = []; // each cog rides on its driver ring away from cut-outs and from the other cogs
+  for (const l of best.links) {
+    const m = best.masks[l.d]; let bq = 0, bs = -1e9;
+    for (let q = 0; q < 12; q++) {
+      let free = 0; for (let k = -1; k <= 2; k++) if (!(m >> mod12(q + k) & 1)) free++;
+      const at = q + 0.5 + best.start[l.d]; let sep = 6;
+      for (const u of used) { const d = Math.abs(at - u) % 12; sep = Math.min(sep, d, 12 - d); }
+      const sc = free * 2 + Math.min(sep, 4) * 1.5 + rng() * 0.3;
+      if (sc > bs) { bs = sc; bq = q; }
+    }
+    l.slot = bq; used.push(bq + 0.5 + best.start[l.d]);
+  }
+  events.push({ type: 'level', level: li + 1, rings: best.R, sockets: best.sockets.length, links: best.links.length, par: best.par, off: bestOff });
+  return (genCache[li] = best);
+}
+
+// ---- Scenes ------------------------------------------------------------------------------
+let scene, state;
+let baseSeed = Number(params.get('seed')) || CONFIG.seed;
+let pendingLevel = clamp((Number(params.get('level')) || (firstUnplayed() + 1)) - 1, 0, NLEV() - 1);
+let titleSel = pendingLevel;
+function reset() {
+  seed = baseSeed;
+  state = { t: 0, score: 0, gained: '', level: pendingLevel, helped: false, kb: false };
+  loadLevel(pendingLevel);
+}
+function geoFor(R) {
+  const outer = tune.outer_r, band = Math.min(tune.max_band, (outer - tune.core_r) / R);
+  return { cx: 360, cy: 640, R, band, core: outer - band * R, outer, limb0: outer + 8, limb1: outer + 46, sockR: outer + 27 };
+}
+const ringR = (g, i) => [g.core + i * g.band + 2.5, g.core + (i + 1) * g.band - 2.5];
+function loadLevel(li) {
+  const lv = genLevel(li), g = geoFor(lv.R);
+  seed = baseSeed + li;
+  Object.assign(state, {
+    level: li, lv, g, rot: lv.start.slice(), vis: lv.start.slice(), moves: [], par: lv.par,
+    budget: Math.round(lv.par * tune.budget_mult + tune.budget_add), phase: 'play', ptr: null, drag: null,
+    sel: lv.R - 1, hint: null, beams: lv.sockets.map(() => ({ r: g.core, bloomT: -1 })), again: -1,
+    msg: '', msgT: 0, winT: -1, parts: [], time: 0, win: null, resT: 0, flash: -1,
+  });
+}
+function say(m, t = 1.8) { state.msg = m; state.msgT = t; }
+const curCode = () => encode(state.rot);
+function applyMove(i, dir, record = true) {
+  const e = state.lv.eff[i];
+  for (let j = 0; j < e.length; j++) if (e[j]) state.rot[j] += dir * e[j];
+  if (record) state.moves.push([i, dir]);
+  state.hint = null; sStep();
+  if (e.some((v, j) => v && j !== i)) sGear();
+  events.push({ type: 'move', ring: i, dir });
+  if (state.lv.dist[curCode()] === 0) beginWin();
+  else if (state.moves.length >= state.budget) {
+    state.again = tune.again_s; state.ptr = null; state.drag = null; sFail();
+    say('نفدت الحركات، نعيد المرحلة مجاناً', 2.4);
+  }
+}
+function undo() {
+  if (state.phase !== 'play' || state.again >= 0 || !state.moves.length) return;
+  const [i, dir] = state.moves.pop(), e = state.lv.eff[i];
+  for (let j = 0; j < e.length; j++) if (e[j]) state.rot[j] -= dir * e[j];
+  state.hint = null; sUndo(); events.push({ type: 'undo' });
+}
+function restartLevel() {
+  const st = state.lv.start;
+  state.rot = st.map((v, j) => v + 12 * Math.round((state.vis[j] - v) / 12)); // spin back the short way
+  Object.assign(state, { moves: [], hint: null, phase: 'play', again: -1, ptr: null, drag: null, winT: -1, time: 0 });
+  sClick();
+}
+function doHint() {
+  if (state.phase !== 'play' || state.again >= 0) return;
+  const d = state.lv.dist[curCode()];
+  for (let i = state.lv.R - 1; i >= 0; i--) for (const dir of [1, -1]) {
+    if (state.lv.dist[stepCode(state.lv, state.rot, i, dir)] === d - 1) {
+      state.hint = { ring: i, dir, t0: state.t }; state.helped = true; state.sel = i; sHint();
+      say('التلميح مجاني، لكنه يحرمك النجمة الثالثة', 2.2);
+      events.push({ type: 'hint', ring: i, dir });
+      return;
+    }
+  }
+}
+function starsFor(m) {
+  let s = m <= state.par + tune.star3_over ? 3 : m <= state.par + tune.star2_over ? 2 : 1;
+  if (state.helped) s = Math.min(s, 2);
+  return s;
+}
+function beginWin() {
+  state.phase = 'win'; state.winT = 0; state.ptr = null; state.drag = null;
+  const m = state.moves.length, stars = starsFor(m), li = state.level, prev = save.best[li];
+  const newBest = !prev || stars > prev.stars || (stars === prev.stars && m < prev.moves);
+  save.best[li] = { stars: Math.max(stars, prev ? prev.stars : 0), moves: prev ? Math.min(m, prev.moves) : m };
+  persist();
+  state.win = { stars, moves: m, best: save.best[li], newBest };
+  state.score += stars; state.gained = `${stars}`;
+  events.push({ type: 'win', level: li + 1, stars, moves: m, par: state.par });
+}
+function ringAt(x, y) {
+  const g = state.g, d = Math.hypot(x - g.cx, y - g.cy);
+  if (d < g.core - 14) return -1;
+  if (d < g.core) return 0;
+  const i = Math.floor((d - g.core) / g.band);
+  if (i < g.R) return i;
+  return d < g.limb1 + 30 ? g.R - 1 : -1; // the limb grabs the outer ring: a bigger target
+}
+/** How far the starlight gets along socket position p, by the rings as drawn (inner ring first). */
+function beamReach(p) {
+  const lv = state.lv, half = tune.gap_deg / 2 - 1.5;
+  for (let i = 0; i < lv.R; i++) {
+    let open = false;
+    for (let b = 0; b < 12; b++) {
+      if (!(lv.masks[i] >> b & 1)) continue;
+      let d = p - state.vis[i] - b; d -= 12 * Math.round(d / 12);
+      if (Math.abs(d) * 30 < half) { open = true; break; }
+    }
+    if (!open) return i;
+  }
+  return lv.R;
+}
+
+// Layout
+const BTN = {
+  back: { x: 18, y: 18, w: 92, h: 92 }, mute: { x: 610, y: 18, w: 92, h: 92 },
+  undo: { x: 360 + 200 - 64, y: 1084, w: 128, h: 118 },
+  hint: { x: 360 - 64, y: 1084, w: 128, h: 118 },
+  restart: { x: 360 - 200 - 64, y: 1084, w: 128, h: 118 },
+  next: { x: 380, y: 1150, w: 270, h: 92 }, replay: { x: 70, y: 1150, w: 270, h: 92 },
+  play: { x: 200, y: 608, w: 320, h: 108 }, home: { x: 18, y: 18, w: 92, h: 92 },
+};
+function levelTile(i) { const col = i % 4, row = i / 4 | 0; return { x: 530 - col * 160, y: 772 + row * 128, w: 140, h: 116 }; }
+const TIPS = ['اسحب الحلقة الخارجية حتى يصل الضوء إلى المقبس', 'كل الحلقات يجب أن تفتح طريق الضوء معاً',
+  'ترسان على الحلقة الوسطى يديران جارتها بعكس الاتجاه', 'ترس واحد: نفس الاتجاه · ترسان: عكسه', 'أدر الحلقة الحاملة للترس أولاً', '',
+  'مقبسان: يجب أن يضيئا في وقت واحد', '', '', '', 'ثلاثة مقابس في وقت واحد'];
+
+function animate(dt) {
+  const lv = state.lv, R = lv.R, dr = state.drag;
+  for (let j = 0; j < R; j++) {
+    const target = state.rot[j] + (dr ? dr.res * lv.eff[dr.ring][j] : 0);
+    if (dr && lv.eff[dr.ring][j]) state.vis[j] = target;
+    else state.vis[j] += (target - state.vis[j]) * Math.min(1, dt * tune.snap_rate);
+  }
+  const g = state.g;
+  lv.sockets.forEach((p, k) => {
+    const b = state.beams[k], reach = beamReach(p);
+    const target = reach === R ? g.sockR : ringR(g, reach)[0];
+    const sp = tune.beam_speed * dt * (target < b.r ? 2 : 1);
+    b.r = b.r < target ? Math.min(target, b.r + sp) : Math.max(target, b.r - sp);
+    const full = b.r >= g.sockR - 0.5;
+    if (full && b.bloomT < 0) { b.bloomT = 0; sBloom(k); burst(k); }
+    else if (!full) b.bloomT = -1;
+    if (b.bloomT >= 0) b.bloomT += dt;
+  });
+  for (const p of state.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt; }
+  state.parts = state.parts.filter(p => p.life > 0);
+  if (state.msgT > 0) state.msgT -= dt;
+}
+function burst(k) {
+  const g = state.g, a = posAngle(state.lv.sockets[k]), x = g.cx + Math.cos(a) * g.sockR, y = g.cy + Math.sin(a) * g.sockR;
+  for (let i = 0; i < 14; i++) {
+    const an = fxr() * TAU, sp = 60 + fxr() * 220;
+    state.parts.push({ x, y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, life: 0.5 + fxr() * 0.6, s: 1.5 + fxr() * 2.5 });
+  }
+}
+function handlePlayPointer() {
+  const g = state.g;
+  for (const e of pq) {
+    if (e.t === 'down') {
+      if (inRect(e, BTN.back)) { sClick(); titleSel = state.level; scene = 'title'; return; }
+      if (inRect(e, BTN.mute)) { setMuted(!muted); continue; }
+      if (state.phase !== 'play' || state.again >= 0) continue;
+      if (inRect(e, BTN.undo)) { undo(); continue; }
+      if (inRect(e, BTN.hint)) { doHint(); continue; }
+      if (inRect(e, BTN.restart)) { restartLevel(); continue; }
+      const i = ringAt(e.x, e.y);
+      if (i < 0) continue;
+      const a = Math.atan2(e.y - g.cy, e.x - g.cx);
+      state.ptr = { ring: i, last: a, total: 0, sx: e.x, sy: e.y, dragging: false, committed: 0 };
+      state.sel = i; state.kb = false;
+    } else if (e.t === 'move' && state.ptr) {
+      const p = state.ptr, a = Math.atan2(e.y - g.cy, e.x - g.cx);
+      let d = a - p.last; d -= TAU * Math.round(d / TAU); p.last = a; p.total += d;
+      if (!p.dragging && (Math.abs(p.total) > tune.drag_dead_deg * Math.PI / 180 || Math.hypot(e.x - p.sx, e.y - p.sy) > tune.tap_max_px)) p.dragging = true;
+      if (p.dragging) {
+        const o = p.total / STEPA;
+        while (state.ptr && o - p.committed > 0.5) { p.committed++; applyMove(p.ring, 1); }
+        while (state.ptr && o - p.committed < -0.5) { p.committed--; applyMove(p.ring, -1); }
+        if (state.ptr) state.drag = { ring: p.ring, res: o - p.committed };
+      }
+    } else if (e.t === 'up' && state.ptr) {
+      const p = state.ptr; state.ptr = null; state.drag = null;
+      if (!p.dragging) applyMove(p.ring, 1);
+    } else if (e.t === 'cancel') { state.ptr = null; state.drag = null; }
+  }
+}
+
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() { drawFigures(); },
+  },
+  title: {
+    update(dt) {
+      state.t += dt;
+      for (const e of pq) {
+        if (e.t !== 'down') continue;
+        if (location.protocol.startsWith('http') && inRect(e, BTN.home)) { location.href = '../../'; return; }
+        if (inRect(e, BTN.mute)) { setMuted(!muted); continue; }
+        if (inRect(e, BTN.play)) { startLevel(titleSel); return; }
+        for (let i = 0; i < NLEV(); i++) if (inRect(e, levelTile(i))) { titleSel = i; startLevel(i); return; }
+      }
+      const n = NLEV();
+      if (pressed('ArrowLeft')) titleSel = (titleSel + 1) % n;
+      if (pressed('ArrowRight')) titleSel = (titleSel + n - 1) % n;
+      if (pressed('ArrowDown')) titleSel = Math.min(n - 1, titleSel + 4);
+      if (pressed('ArrowUp')) titleSel = Math.max(0, titleSel - 4);
+      if (pressed('Enter') || pressed('Space')) startLevel(titleSel);
+    },
+    draw() { drawTitle(); },
+  },
+  play: {
+    update(dt) {
+      state.t += dt;
+      if (pressed('Escape')) { titleSel = state.level; scene = 'title'; return; }
+      handlePlayPointer();
+      if (scene !== 'play') return;
+      if (state.phase === 'play' && state.again < 0) {
+        const R = state.lv.R;
+        if (pressed('ArrowUp')) { state.kb = true; state.sel = Math.min(R - 1, state.sel + 1); }
+        if (pressed('ArrowDown')) { state.kb = true; state.sel = Math.max(0, state.sel - 1); }
+        if (pressed('ArrowRight') || pressed('Space')) { state.kb = true; applyMove(state.sel, 1); }
+        else if (pressed('ArrowLeft')) { state.kb = true; applyMove(state.sel, -1); }
+        if (pressed('KeyU')) undo();
+        if (pressed('KeyH')) doHint();
+        if (pressed('KeyR')) restartLevel();
+      }
+      animate(dt);
+      if (state.phase === 'play') state.time += dt;
+      if (state.again >= 0) {
+        state.again -= dt;
+        if (state.again < 0) { restartLevel(); say('نفدت الحركات، نعيد المرحلة مجاناً', 1.6); }
+      }
+      if (state.phase === 'win') {
+        if (state.winT === 0) sWin();
+        state.winT += dt;
+        const allBloom = state.beams.every(b => b.bloomT > 0.3);
+        if (allBloom && state.winT > tune.win_hold_s) { scene = 'results'; state.resT = 0; }
+      }
+    },
+    draw() { drawPlay(); },
+  },
+  results: {
+    update(dt) {
+      state.t += dt; state.resT += dt; animate(dt);
+      for (const e of pq) {
+        if (e.t !== 'down') continue;
+        if (inRect(e, BTN.mute)) { setMuted(!muted); continue; }
+        if (inRect(e, BTN.back)) { titleSel = state.level; scene = 'title'; return; }
+        if (inRect(e, BTN.next)) { nextLevel(); return; }
+        if (inRect(e, BTN.replay)) { startLevel(state.level); return; }
+      }
+      if (pressed('Enter') || pressed('Space')) nextLevel();
+      else if (pressed('KeyR')) startLevel(state.level);
+      else if (pressed('Escape')) { titleSel = state.level; scene = 'title'; }
+    },
+    draw() { drawPlay(); drawResults(); },
+  },
+};
+function startLevel(li) { sClick(); pendingLevel = li; reset(); scene = 'play'; }
+function nextLevel() {
+  if (state.level + 1 < NLEV()) startLevel(state.level + 1);
+  else { titleSel = 0; scene = 'title'; sClick(); }
+}
+
+// ---- Drawing --------------------------------------------------------------------------------
+const GOLD = '#f3e2b4', GOLD2 = '#bda774', NAVY = '#081230';
+const BRASS = [
+  { l: '#f2d084', m: '#b9832e', d: '#4a2c06' }, // deep bronze
+  { l: '#fff7da', m: '#eccb78', d: '#7a5518' }, // pale gold
+];
+function withCanvas(w, h, fn) {
+  const oc = document.createElement('canvas');
+  oc.width = Math.max(1, Math.ceil(w * DPR)); oc.height = Math.max(1, Math.ceil(h * DPR));
+  const o = oc.getContext('2d'); o.scale(DPR, DPR);
+  const keep = ctx; ctx = o; try { fn(); } finally { ctx = keep; }
+  return oc;
+}
+function drawBackground() {
+  if (!bgCache) bgCache = withCanvas(W, H, () => {
+    const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0c1a40'); g.addColorStop(0.6, '#081230'); g.addColorStop(1, '#040918');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 260; i++) {
+      const x = hash(i * 3) * W, y = hash(i * 3 + 1) * H, r = 0.5 + hash(i * 3 + 2) * 1.3;
+      ctx.fillStyle = `rgba(230,236,255,${0.25 + hash(i * 7) * 0.6})`; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    }
+    const groups = [[90, 260], [620, 220], [80, 1010], [640, 1080], [600, 520], [110, 640]];
+    groups.forEach(([gx, gy], gi) => { // faint drawn constellations
+      const pts = []; const n = 4 + (gi % 3);
+      for (let k = 0; k < n; k++) pts.push([gx + (hash(gi * 31 + k) - 0.5) * 150, gy + (hash(gi * 57 + k) - 0.5) * 150]);
+      ctx.strokeStyle = 'rgba(160,185,240,0.22)'; ctx.lineWidth = 1.2; ctx.beginPath();
+      pts.forEach((p, k) => k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
+      for (const [x, y] of pts) {
+        ctx.fillStyle = 'rgba(235,240,255,0.75)'; ctx.beginPath(); ctx.arc(x, y, 2.3, 0, TAU); ctx.fill();
+        ctx.strokeStyle = 'rgba(235,240,255,0.35)'; ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y); ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6); ctx.stroke();
+      }
+    });
+  });
+  ctx.drawImage(bgCache, 0, 0, W, H);
+  for (let i = 0; i < 10; i++) { // a few twinkles
+    const x = hash(i * 11 + 5) * W, y = hash(i * 13 + 3) * H, a = 0.5 + 0.5 * Math.sin(state.t * (1 + i * 0.3) + i);
+    ctx.strokeStyle = `rgba(255,245,220,${a * 0.6})`; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(x - 5 * a, y); ctx.lineTo(x + 5 * a, y); ctx.moveTo(x, y - 5 * a); ctx.lineTo(x, y + 5 * a); ctx.stroke();
+  }
+}
+function annulus(cx, cy, r0, r1, a0, a1) { ctx.beginPath(); ctx.arc(cx, cy, r1, a0, a1); ctx.arc(cx, cy, r0, a1, a0, true); ctx.closePath(); }
+function ringArcs(mask, rot) {
+  const hw = tune.gap_deg / 2 * Math.PI / 180, gaps = [];
+  for (let b = 0; b < 12; b++) if (mask >> b & 1) gaps.push(posAngle(b + rot));
+  gaps.sort((a, b) => a - b);
+  if (!gaps.length) return [[0, TAU]];
+  return gaps.map((g, k) => [g + hw, (k + 1 < gaps.length ? gaps[k + 1] : gaps[0] + TAU) - hw]);
+}
+/** One engraved brass ring with its cut-outs, turned rot steps (float). */
+function drawRingShape(cx, cy, r0, r1, mask, rot, k, opts = {}) {
+  const arcs = ringArcs(mask, rot), br = BRASS[k % 2], A = rot * STEPA;
+  ctx.save(); ctx.translate(0, 4);
+  for (const [a0, a1] of arcs) { annulus(cx, cy, r0, r1, a0, a1); ctx.fillStyle = 'rgba(0,0,8,0.45)'; ctx.fill(); }
+  ctx.restore();
+  const gr = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
+  gr.addColorStop(0, br.d); gr.addColorStop(0.18, br.m); gr.addColorStop(0.45, br.l); gr.addColorStop(0.75, br.m); gr.addColorStop(1, br.d);
+  for (const [a0, a1] of arcs) { annulus(cx, cy, r0, r1, a0, a1); ctx.fillStyle = gr; ctx.fill(); ctx.strokeStyle = br.d; ctx.lineWidth = 1.5; ctx.stroke(); }
+  const rm = (r0 + r1) / 2, bw = r1 - r0;
+  ctx.strokeStyle = 'rgba(70,42,6,0.55)'; ctx.lineWidth = 1;
+  for (const [a0, a1] of arcs) { // engraved borders
+    ctx.beginPath(); ctx.arc(cx, cy, r0 + 4, a0 + 0.02, a1 - 0.02); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, r1 - 4, a0 + 0.02, a1 - 0.02); ctx.stroke();
+  }
+  const pat = opts.pattern !== undefined ? opts.pattern : k % 4;
+  ctx.strokeStyle = 'rgba(70,42,6,0.6)'; ctx.fillStyle = 'rgba(70,42,6,0.6)';
+  for (const [a0, a1] of arcs) {
+    if (pat === 0) { // decorative dash engraving
+      ctx.setLineDash([7, 6]); ctx.lineWidth = 2.2; ctx.beginPath(); ctx.arc(cx, cy, rm, a0 + 0.05, a1 - 0.05); ctx.stroke(); ctx.setLineDash([]);
+    } else if (pat === 1) { // tick marks, long ones every 30 degrees of the ring's own scale
+      ctx.lineWidth = 1.4; ctx.beginPath();
+      const s0 = Math.ceil((a0 - A + 0.03) / (Math.PI / 30)), s1 = Math.floor((a1 - A - 0.03) / (Math.PI / 30));
+      for (let s = s0; s <= s1; s++) {
+        const a = A + s * Math.PI / 30, L = s % 5 === 0 ? bw * 0.42 : bw * 0.2;
+        ctx.moveTo(cx + Math.cos(a) * (r1 - 5), cy + Math.sin(a) * (r1 - 5)); ctx.lineTo(cx + Math.cos(a) * (r1 - 5 - L), cy + Math.sin(a) * (r1 - 5 - L));
+      }
+      ctx.stroke();
+    } else if (pat === 2) { // a row of punched dots
+      const st = 10 / rm, s0 = Math.ceil((a0 - A + 0.04) / st), s1 = Math.floor((a1 - A - 0.04) / st);
+      for (let s = s0; s <= s1; s++) { const a = A + s * st; ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rm, cy + Math.sin(a) * rm, 1.8, 0, TAU); ctx.fill(); }
+    } else { // a zigzag band
+      const st = 9 / rm, s0 = Math.ceil((a0 - A + 0.04) / st), s1 = Math.floor((a1 - A - 0.04) / st), h = bw * 0.18;
+      ctx.lineWidth = 1.5; ctx.beginPath();
+      for (let s = s0; s <= s1; s++) { const a = A + s * st, r = rm + (s % 2 ? h : -h); const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r; s === s0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+      ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = 'rgba(255,250,225,0.55)'; ctx.lineWidth = 1.5; // top light
+  for (const [a0, a1] of arcs) { ctx.beginPath(); ctx.arc(cx, cy, r1 - 1.5, a0 + 0.01, a1 - 0.01); ctx.stroke(); }
+  if (opts.teeth) { // a toothed rim on the edge a cog meshes with; the teeth turn with the ring
+    const r = opts.teeth === 'in' ? r0 + 3 : r1 - 3;
+    ctx.strokeStyle = br.d; ctx.lineWidth = 6; ctx.setLineDash([3.2, 3.6]); ctx.lineDashOffset = -rot * STEPA * r;
+    for (const [a0, a1] of arcs) { ctx.beginPath(); ctx.arc(cx, cy, r, a0 + 0.03, a1 - 0.03); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.lineDashOffset = 0;
+  }
+  if (opts.glow) {
+    ctx.strokeStyle = opts.glow; ctx.lineWidth = 4;
+    for (const [a0, a1] of arcs) { annulus(cx, cy, r0, r1, a0, a1); ctx.stroke(); }
+  }
+  return arcs;
+}
+function drawCog(x, y, r, teeth, ang) {
+  ctx.beginPath();
+  for (let k = 0; k < teeth; k++) {
+    const a = ang + k * TAU / teeth, w = Math.PI / teeth;
+    const P = (aa, rr2) => ctx.lineTo(x + Math.cos(aa) * rr2, y + Math.sin(aa) * rr2);
+    P(a - w * 0.95, r * 0.76); P(a - w * 0.45, r); P(a + w * 0.45, r); P(a + w * 0.95, r * 0.76);
+  }
+  ctx.closePath();
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 1, x, y, r); g.addColorStop(0, '#fff4c8'); g.addColorStop(0.6, '#d7a648'); g.addColorStop(1, '#7a5214');
+  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.fillStyle = '#4a2f07';
+  for (let k = 0; k < 3; k++) { const a = ang + k * TAU / 3 + 0.5; ctx.beginPath(); ctx.arc(x + Math.cos(a) * r * 0.48, y + Math.sin(a) * r * 0.48, r * 0.12, 0, TAU); ctx.fill(); }
+  ctx.beginPath(); ctx.arc(x, y, r * 0.24, 0, TAU); ctx.fillStyle = '#3d2604'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x - r * 0.05, y - r * 0.05, r * 0.1, 0, TAU); ctx.fillStyle = '#fff1c0'; ctx.fill();
+}
+/** A gear link: one cog (same way) or two meshed cogs (opposite way), carried on the driver ring by a brass arm. */
+function drawLink(g, l, vis, cx = g.cx, cy = g.cy) {
+  const [d0, d1] = ringR(g, l.d), out = l.t > l.d, rb = out ? d1 + 2.5 : d0 - 2.5;
+  const a = posAngle(l.slot + 0.5 + vis[l.d]), rc = clamp(g.band * 0.32, 13, 28), toward = out ? 1 : -1;
+  const spin = (vis[l.t] - vis[l.d]) * STEPA * rb / rc;
+  const arm = (x, y) => {
+    const ax = cx + Math.cos(a) * (d0 + d1) / 2, ay = cy + Math.sin(a) * (d0 + d1) / 2;
+    ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(x, y); ctx.stroke();
+    ctx.strokeStyle = '#c99a3e'; ctx.lineWidth = 4; ctx.stroke();
+    ctx.beginPath(); ctx.arc(ax, ay, 4, 0, TAU); ctx.fillStyle = '#fff1c0'; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1; ctx.stroke();
+  };
+  if (l.s > 0) {
+    const x = cx + Math.cos(a) * rb, y = cy + Math.sin(a) * rb;
+    arm(x, y); drawCog(x, y, rc, 10, spin);
+  } else {
+    const da = rc * 0.95 / rb, ra = rb - toward * rc * 0.55, rb2 = rb + toward * rc * 0.4;
+    const x1 = cx + Math.cos(a - da) * ra, y1 = cy + Math.sin(a - da) * ra, x2 = cx + Math.cos(a + da) * rb2, y2 = cy + Math.sin(a + da) * rb2;
+    arm(x1, y1); arm(x2, y2); drawCog(x1, y1, rc * 0.92, 9, spin); drawCog(x2, y2, rc * 0.92, 9, -spin + 0.3);
+  }
+}
+function drawPlate(g) {
+  const { cx, cy } = g;
+  const pg = ctx.createRadialGradient(cx, cy, 10, cx, cy, g.outer + 4);
+  pg.addColorStop(0, '#1d2f63'); pg.addColorStop(1, '#0b1532');
+  ctx.beginPath(); ctx.arc(cx, cy, g.outer + 4, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+  ctx.strokeStyle = 'rgba(240,210,140,0.16)'; ctx.lineWidth = 1;
+  for (let r = g.core + 14; r < g.outer; r += 18) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke(); }
+  for (let p = 0; p < 12; p++) { // the twelve ray lines engraved on the plate, seen through the cut-outs
+    const a = posAngle(p), sock = state.lv && state.lv.sockets.includes(p);
+    ctx.strokeStyle = sock ? 'rgba(255,225,150,0.6)' : 'rgba(240,210,140,0.18)'; ctx.lineWidth = sock ? 2.5 : 1;
+    ctx.setLineDash(sock ? [10, 6] : [3, 6]); ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * g.core, cy + Math.sin(a) * g.core); ctx.lineTo(cx + Math.cos(a) * g.outer, cy + Math.sin(a) * g.outer); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+function drawLimb(g, sockets, beams, t) { // the fixed outer ring with its star sockets
+  const { cx, cy } = g;
+  ctx.save(); ctx.translate(0, 5); ctx.beginPath(); ctx.arc(cx, cy, g.limb1, 0, TAU); ctx.arc(cx, cy, g.limb0, TAU, 0, true); ctx.fillStyle = 'rgba(0,0,8,0.5)'; ctx.fill(); ctx.restore();
+  const gr = ctx.createRadialGradient(cx, cy, g.limb0, cx, cy, g.limb1);
+  gr.addColorStop(0, '#5a3a0a'); gr.addColorStop(0.3, '#c8923a'); gr.addColorStop(0.55, '#f6dc94'); gr.addColorStop(0.85, '#b5822c'); gr.addColorStop(1, '#4e3208');
+  ctx.beginPath(); ctx.arc(cx, cy, g.limb1, 0, TAU); ctx.arc(cx, cy, g.limb0, TAU, 0, true); ctx.fillStyle = gr; ctx.fill('evenodd');
+  ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, g.limb1, 0, TAU); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, g.limb0, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = 'rgba(60,36,4,0.7)'; ctx.lineWidth = 1.2; ctx.beginPath();
+  for (let k = 0; k < 72; k++) { const a = k * TAU / 72, L = k % 6 === 0 ? 10 : 5; ctx.moveTo(cx + Math.cos(a) * (g.limb1 - 3), cy + Math.sin(a) * (g.limb1 - 3)); ctx.lineTo(cx + Math.cos(a) * (g.limb1 - 3 - L), cy + Math.sin(a) * (g.limb1 - 3 - L)); }
+  ctx.stroke();
+  for (let p = 0; p < 12; p++) {
+    const a = posAngle(p), x = cx + Math.cos(a) * g.sockR, y = cy + Math.sin(a) * g.sockR;
+    const k = sockets.indexOf(p);
+    if (k < 0) { ctx.fillStyle = 'rgba(60,36,4,0.75)'; ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x + 4, y); ctx.lineTo(x, y + 4); ctx.lineTo(x - 4, y); ctx.closePath(); ctx.fill(); continue; }
+    drawSocket(x, y, beams ? beams[k].bloomT : -1, t);
+  }
+}
+function drawSocket(x, y, bloomT, t) {
+  if (bloomT < 0) { // a waiting socket breathes a faint ring so the target reads
+    ctx.strokeStyle = `rgba(255,225,150,${0.25 + 0.2 * Math.sin(t * 3)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 25, 0, TAU); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(x, y, 20, 0, TAU);
+  const g = ctx.createRadialGradient(x - 4, y - 4, 2, x, y, 20); g.addColorStop(0, '#fff0c0'); g.addColorStop(1, '#8a5a14');
+  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, 12, 0, TAU); ctx.fillStyle = '#0a1230'; ctx.fill();
+  if (bloomT < 0) { // an unlit socket: a dim star-shaped hollow
+    starPath(x, y, 9.5, 0.45, 0); ctx.strokeStyle = 'rgba(240,210,140,0.6)'; ctx.lineWidth = 1.3; ctx.stroke(); return;
+  }
+  const u = clamp(bloomT / 0.5, 0, 1), s = backOut(u);
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const hg = ctx.createRadialGradient(x, y, 2, x, y, 64 * s); hg.addColorStop(0, 'rgba(255,236,170,0.75)'); hg.addColorStop(1, 'rgba(255,200,90,0)');
+  ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(x, y, 64 * s, 0, TAU); ctx.fill(); ctx.restore();
+  starPath(x, y, 38 * s, 0.42, t * 0.6);
+  const sg = ctx.createRadialGradient(x, y, 1, x, y, 38 * s); sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.45, '#fff0b0'); sg.addColorStop(1, '#e0a42a');
+  ctx.fillStyle = sg; ctx.fill(); ctx.strokeStyle = 'rgba(120,70,0,0.7)'; ctx.lineWidth = 1.2; ctx.stroke();
+}
+function starPath(x, y, R, ri, rot) { // eight-pointed star
+  ctx.beginPath();
+  for (let k = 0; k < 16; k++) { const a = rot + k * Math.PI / 8 - Math.PI / 2, r = k % 2 ? R * ri : R; k ? ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r) : ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+  ctx.closePath();
+}
+function drawCore(x, y, R, glow) { // the faceted lapis gem in its bezel
+  if (glow > 0) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const hg = ctx.createRadialGradient(x, y, R * 0.5, x, y, R * 1.9); hg.addColorStop(0, `rgba(255,225,150,${0.35 * glow})`); hg.addColorStop(1, 'rgba(255,200,100,0)');
+    ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(x, y, R * 1.9, 0, TAU); ctx.fill(); ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU);
+  const bz = ctx.createRadialGradient(x, y, R * 0.7, x, y, R); bz.addColorStop(0, '#6e4a10'); bz.addColorStop(0.5, '#f1d48a'); bz.addColorStop(1, '#5e3d0b');
+  ctx.fillStyle = bz; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1.5; ctx.stroke();
+  const r = R * 0.8, ri = r * 0.5, shades = ['#2c5fd0', '#1a3f9a', '#3a70e0', '#132f7a'];
+  for (let k = 0; k < 8; k++) {
+    const a0 = k * TAU / 8 + Math.PI / 8, a1 = a0 + TAU / 8;
+    ctx.beginPath(); ctx.moveTo(x + Math.cos(a0) * r, y + Math.sin(a0) * r); ctx.lineTo(x + Math.cos(a1) * r, y + Math.sin(a1) * r);
+    ctx.lineTo(x + Math.cos(a1) * ri, y + Math.sin(a1) * ri); ctx.lineTo(x + Math.cos(a0) * ri, y + Math.sin(a0) * ri); ctx.closePath();
+    ctx.fillStyle = shades[k % 4]; ctx.fill(); ctx.strokeStyle = 'rgba(10,20,60,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  ctx.beginPath(); for (let k = 0; k < 8; k++) { const a = k * TAU / 8 + Math.PI / 8; k ? ctx.lineTo(x + Math.cos(a) * ri, y + Math.sin(a) * ri) : ctx.moveTo(x + Math.cos(a) * ri, y + Math.sin(a) * ri); }
+  ctx.closePath(); ctx.fillStyle = '#2756c0'; ctx.fill(); ctx.strokeStyle = 'rgba(10,20,60,0.6)'; ctx.stroke();
+  ctx.fillStyle = '#f3d27a'; // gold flecks of pyrite in the lapis
+  for (let k = 0; k < 9; k++) { const a = hash(k + 40) * TAU, d = hash(k + 90) * r * 0.85; ctx.beginPath(); ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, 0.8 + hash(k) * 1.4, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.ellipse(x - ri * 0.35, y - ri * 0.45, ri * 0.35, ri * 0.15, -0.6, 0, TAU); ctx.fill();
+}
+function drawKursi(x, y) { // the throne and suspension ring at the top of the astrolabe
+  ctx.beginPath(); ctx.arc(x, y - 52, 15, 0, TAU); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 9; ctx.stroke(); ctx.strokeStyle = '#e8c06a'; ctx.lineWidth = 5; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 46, y + 6); ctx.quadraticCurveTo(x - 40, y - 18, x - 18, y - 22); ctx.quadraticCurveTo(x - 10, y - 40, x, y - 38);
+  ctx.quadraticCurveTo(x + 10, y - 40, x + 18, y - 22); ctx.quadraticCurveTo(x + 40, y - 18, x + 46, y + 6); ctx.closePath();
+  const g = ctx.createLinearGradient(x, y - 40, x, y + 6); g.addColorStop(0, '#fbe3a0'); g.addColorStop(1, '#a8741e');
+  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y - 14, 7, 0, TAU); ctx.fillStyle = '#1a3f9a'; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.stroke();
+}
+function drawBeam(cx, cy, a, r0, r1, strength, t) {
+  if (r1 <= r0 + 1) return;
+  const x0 = cx + Math.cos(a) * r0, y0 = cy + Math.sin(a) * r0, x1 = cx + Math.cos(a) * r1, y1 = cy + Math.sin(a) * r1;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+  for (const [w, c] of [[38, 'rgba(255,180,80,0.13)'], [21, 'rgba(255,210,130,0.28)'], [10, 'rgba(255,232,180,0.6)'], [4, 'rgba(255,255,245,1)']]) {
+    ctx.globalAlpha = strength; ctx.strokeStyle = c; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+  if (strength < 0.9) { // a blocked beam splashes warm light where it meets brass
+    const hg = ctx.createRadialGradient(x1, y1, 1, x1, y1, 22); hg.addColorStop(0, 'rgba(255,230,160,0.7)'); hg.addColorStop(1, 'rgba(255,200,100,0)');
+    ctx.globalAlpha = 1; ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(x1, y1, 22, 0, TAU); ctx.fill();
+  }
+  for (let k = 0; k < 4; k++) { // motes of starlight running outward
+    const u = (t * 1.3 + k / 4) % 1, x = x0 + (x1 - x0) * u, y = y0 + (y1 - y0) * u;
+    ctx.globalAlpha = strength * (1 - u) * 0.9; ctx.fillStyle = '#fffbe8'; ctx.beginPath(); ctx.arc(x, y, 3, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawAstrolabe() {
+  const g = state.g, lv = state.lv, { cx, cy } = g;
+  drawKursi(cx, cy - g.limb1 - 2);
+  drawPlate(g);
+  const litCount = state.beams.filter(b => b.bloomT >= 0).length;
+  lv.sockets.forEach((p, k) => { // beams first: they show through the cut-outs
+    const b = state.beams[k];
+    drawBeam(cx, cy, posAngle(p), g.core - 4, b.r, b.bloomT >= 0 ? 1 : 0.6, state.t);
+  });
+  const teeth = {}; for (const l of lv.links) teeth[l.t] = l.d > l.t ? 'out' : 'in';
+  for (let i = 0; i < lv.R; i++) {
+    const [r0, r1] = ringR(g, i);
+    let glow = null;
+    if (state.drag && state.drag.ring === i) glow = 'rgba(255,246,210,0.9)';
+    else if (state.kb && state.sel === i && state.phase === 'play') glow = `rgba(255,246,210,${0.55 + 0.35 * Math.sin(state.t * 6)})`;
+    else if (state.hint && state.hint.ring === i) glow = `rgba(140,230,255,${0.5 + 0.4 * Math.sin(state.t * 7)})`;
+    drawRingShape(cx, cy, r0, r1, lv.masks[i], state.vis[i], i, { teeth: teeth[i], glow });
+  }
+  lv.sockets.forEach((p, k) => { // the beam again over the cut-out edges so the light reads on top
+    const b = state.beams[k];
+    if (b.bloomT >= 0) drawBeam(cx, cy, posAngle(p), g.core - 4, b.r, 0.5, state.t);
+  });
+  for (const l of lv.links) drawLink(g, l, state.vis);
+  drawCore(cx, cy, g.core - 4, litCount / Math.max(1, lv.sockets.length) + 0.25);
+  drawLimb(g, lv.sockets, state.beams, state.t);
+  if (state.hint && state.phase === 'play') drawHintArrow(g, state.hint.ring, state.hint.dir, state.t);
+  for (const p of state.parts) {
+    ctx.globalAlpha = clamp(p.life * 2, 0, 1); ctx.fillStyle = '#fff3c4';
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawHintArrow(g, i, dir, t) {
+  const [r0, r1] = ringR(g, i), rm = (r0 + r1) / 2, a0 = -Math.PI / 2 - 0.45, a1 = -Math.PI / 2 + 0.45;
+  const pulse = 0.8 + 0.2 * Math.sin(t * 7), { cx, cy } = g;
+  ctx.save(); ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(10,20,50,0.8)'; ctx.lineWidth = 12; ctx.beginPath(); ctx.arc(cx, cy, rm, a0, a1); ctx.stroke();
+  ctx.strokeStyle = `rgba(170,235,255,${pulse})`; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(cx, cy, rm, a0, a1); ctx.stroke();
+  const ae = dir > 0 ? a1 : a0, tx = -Math.sin(ae) * dir, ty = Math.cos(ae) * dir, x = cx + Math.cos(ae) * rm, y = cy + Math.sin(ae) * rm;
+  ctx.beginPath(); ctx.moveTo(x + tx * 20, y + ty * 20); ctx.lineTo(x - ty * 15, y + tx * 15); ctx.lineTo(x + ty * 15, y - tx * 15); ctx.closePath();
+  ctx.fillStyle = `rgba(170,235,255,${pulse})`; ctx.fill(); ctx.strokeStyle = 'rgba(10,20,50,0.8)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.restore();
+}
+function tileButton(b, on = false) {
+  ctx.fillStyle = 'rgba(0,0,10,0.35)'; rr(b.x + 2, b.y + 5, b.w, b.h, 18); ctx.fill();
+  const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h); g.addColorStop(0, on ? '#3a4f8c' : '#1d2b55'); g.addColorStop(1, on ? '#25366a' : '#111b3a');
+  ctx.fillStyle = g; rr(b.x, b.y, b.w, b.h, 18); ctx.fill();
+  ctx.strokeStyle = on ? '#f3d27a' : '#a98a46'; ctx.lineWidth = on ? 3.5 : 2; ctx.stroke();
+}
+function iconUndo(x, y, s) {
+  ctx.strokeStyle = GOLD; ctx.lineWidth = s * 0.09; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x + s * 0.04, y + s * 0.06, s * 0.26, Math.PI * 1.05, Math.PI * 2.15); ctx.stroke();
+  const a = Math.PI * 1.05, ex = x + s * 0.04 + Math.cos(a) * s * 0.26, ey = y + s * 0.06 + Math.sin(a) * s * 0.26;
+  ctx.fillStyle = GOLD; ctx.beginPath(); ctx.moveTo(ex - s * 0.16, ey - s * 0.02); ctx.lineTo(ex + s * 0.08, ey - s * 0.14); ctx.lineTo(ex + s * 0.06, ey + s * 0.12); ctx.closePath(); ctx.fill();
+}
+function iconHint(x, y, s) { // an alidade: the astrolabe's sighting rule
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.6);
+  ctx.beginPath(); ctx.moveTo(-s * 0.42, 0); ctx.lineTo(0, -s * 0.08); ctx.lineTo(s * 0.42, 0); ctx.lineTo(0, s * 0.08); ctx.closePath();
+  ctx.fillStyle = '#e4bd62'; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1.5; ctx.stroke();
+  for (const sx of [-1, 1]) { ctx.fillStyle = '#c99a3e'; ctx.fillRect(sx * s * 0.3 - s * 0.03, -s * 0.13, s * 0.06, s * 0.26); }
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(x, y, s * 0.08, 0, TAU); ctx.fillStyle = '#fff1c0'; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.stroke();
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; starPath(x + s * 0.3, y - s * 0.24, s * 0.12, 0.42, 0); ctx.fillStyle = '#fff3c4'; ctx.fill(); ctx.restore();
+}
+function iconRestart(x, y, s) {
+  ctx.strokeStyle = GOLD; ctx.lineWidth = s * 0.09; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x, y, s * 0.28, -Math.PI * 0.35, Math.PI * 1.35); ctx.stroke();
+  const a = -Math.PI * 0.35, ex = x + Math.cos(a) * s * 0.28, ey = y + Math.sin(a) * s * 0.28;
+  ctx.beginPath(); ctx.moveTo(ex + s * 0.16, ey - s * 0.02); ctx.lineTo(ex - s * 0.04, ey - s * 0.14); ctx.lineTo(ex - s * 0.02, ey + s * 0.1); ctx.closePath(); ctx.fillStyle = GOLD; ctx.fill();
+}
+function iconMute(x, y, s, off) {
+  ctx.fillStyle = GOLD; ctx.beginPath(); ctx.moveTo(x - s * 0.3, y - s * 0.1); ctx.lineTo(x - s * 0.14, y - s * 0.1); ctx.lineTo(x + s * 0.06, y - s * 0.28);
+  ctx.lineTo(x + s * 0.06, y + s * 0.28); ctx.lineTo(x - s * 0.14, y + s * 0.1); ctx.lineTo(x - s * 0.3, y + s * 0.1); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = GOLD; ctx.lineWidth = s * 0.06; ctx.lineCap = 'round';
+  if (off) { ctx.strokeStyle = '#ff8a7a'; ctx.beginPath(); ctx.moveTo(x + s * 0.14, y - s * 0.14); ctx.lineTo(x + s * 0.34, y + s * 0.14); ctx.moveTo(x + s * 0.34, y - s * 0.14); ctx.lineTo(x + s * 0.14, y + s * 0.14); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.arc(x + s * 0.06, y, s * 0.16, -0.8, 0.8); ctx.stroke(); ctx.beginPath(); ctx.arc(x + s * 0.06, y, s * 0.3, -0.8, 0.8); ctx.stroke(); }
+}
+function iconLevels(x, y, s) { // a tiny astrolabe face
+  ctx.strokeStyle = GOLD; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, s * 0.32, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, s * 0.18, 0.4, TAU - 0.4); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, s * 0.07, 0, TAU); ctx.fillStyle = '#2c5fd0'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y - s * 0.42, s * 0.07, 0, TAU); ctx.stroke();
+}
+function iconHome(x, y, s) {
+  ctx.fillStyle = '#c99a3e'; ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.34, y - s * 0.02); ctx.lineTo(x, y - s * 0.34); ctx.lineTo(x + s * 0.34, y - s * 0.02); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = GOLD; ctx.beginPath(); ctx.rect(x - s * 0.24, y - s * 0.02, s * 0.48, s * 0.32); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#1a3f9a'; ctx.beginPath(); ctx.rect(x - s * 0.07, y + s * 0.1, s * 0.14, s * 0.2); ctx.fill();
+}
+function rateStar(x, y, R, on) {
+  starPath(x, y, R, 0.45, 0);
+  if (on) { const g = ctx.createRadialGradient(x, y, 1, x, y, R); g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#ffe9a0'); g.addColorStop(1, '#d99a22'); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#6e4a10'; ctx.lineWidth = 1.5; ctx.stroke(); }
+  else { ctx.fillStyle = 'rgba(30,45,90,0.8)'; ctx.fill(); ctx.strokeStyle = 'rgba(200,180,120,0.6)'; ctx.lineWidth = 1.5; ctx.stroke(); }
+}
+function drawPlay() {
+  drawBackground();
+  drawAstrolabe();
+  drawHud();
+}
+function drawHud() {
+  tileButton(BTN.back); iconLevels(BTN.back.x + 46, BTN.back.y + 50, 80);
+  tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
+  text(`المرحلة ${state.level + 1} من ${NLEV()}`, W / 2, 50, 38, GOLD, 'center', 'bold');
+  const m = state.moves.length, left = state.budget - m;
+  text(`الحركات ${m} من ${state.budget} · الأمثل ${state.par}`, W / 2, 110, 30, left <= 2 ? '#ffb4a0' : GOLD2);
+  const s = state.phase === 'play' ? starsFor(m) : state.win ? state.win.stars : starsFor(m);
+  for (let k = 0; k < 3; k++) rateStar(W / 2 + (k - 1) * 46, 162, 17, k < s);
+  const tip = state.msgT > 0 ? state.msg : (state.phase === 'play' ? TIPS[state.level] || '' : '');
+  if (tip && scene !== 'results') {
+    ctx.font = `30px ${FONT}`; const tw = Math.min(690, ctx.measureText(tip).width + 50);
+    ctx.fillStyle = state.msgT > 0 ? 'rgba(120,60,20,0.92)' : 'rgba(16,26,60,0.85)'; rr(W / 2 - tw / 2, 1014, tw, 54, 27); ctx.fill();
+    ctx.strokeStyle = 'rgba(243,210,122,0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+    text(tip, W / 2, 1042, 28, '#fff3d6');
+  }
+  if (scene !== 'results') {
+    tileButton(BTN.undo); iconUndo(BTN.undo.x + 64, BTN.undo.y + 48, 92); text('تراجع', BTN.undo.x + 64, BTN.undo.y + 96, 26, GOLD);
+    const hl = !!state.hint;
+    tileButton(BTN.hint, hl); iconHint(BTN.hint.x + 64, BTN.hint.y + 48, 92); text('تلميح', BTN.hint.x + 64, BTN.hint.y + 96, 26, GOLD);
+    tileButton(BTN.restart); iconRestart(BTN.restart.x + 64, BTN.restart.y + 48, 92); text('إعادة', BTN.restart.x + 64, BTN.restart.y + 96, 26, GOLD);
+    if (state.helped) text('بمساعدة: أقصى النجوم 2', W / 2, 1236, 24, GOLD2);
+  }
+}
+function drawResults() {
+  const w = state.win, u = clamp(state.resT / 0.35, 0, 1), py = 966 + (1 - ease(u)) * 320;
+  ctx.fillStyle = 'rgba(0,0,10,0.4)'; rr(30, py + 8, 660, 300, 30); ctx.fill();
+  const g = ctx.createLinearGradient(0, py, 0, py + 300); g.addColorStop(0, '#1f2f62'); g.addColorStop(1, '#0f1838');
+  ctx.fillStyle = g; rr(30, py, 660, 300, 30); ctx.fill(); ctx.strokeStyle = '#f3d27a'; ctx.lineWidth = 3; ctx.stroke();
+  const last = state.level + 1 >= NLEV();
+  text(last ? 'أضأت كل الأسطرلابات!' : 'أضاءت النجوم!', W / 2, py + 44, 44, GOLD, 'center', 'bold');
+  for (let i = 0; i < 3; i++) {
+    const k = clamp((state.resT - 0.3 - i * 0.22) / 0.3, 0, 1);
+    rateStar(W / 2 + (1 - i) * 92, py + 108, 32 * (i < w.stars ? 0.7 + 0.3 * backOut(k) : 1), i < w.stars && k > 0);
+  }
+  text(`الحركات ${w.moves} · الأمثل ${state.par} · الأفضل ${w.best.moves}${w.newBest ? ' · رقم جديد' : ''}`, W / 2, py + 166, 28, GOLD2);
+  BTN.next.y = py + 196; BTN.replay.y = py + 196;
+  tileButton(BTN.next, true); text(last ? 'إلى البداية' : 'التالي', BTN.next.x + BTN.next.w / 2, BTN.next.y + 46, 34, GOLD, 'center', 'bold');
+  tileButton(BTN.replay); text('إعادة', BTN.replay.x + BTN.replay.w / 2, BTN.replay.y + 46, 34, GOLD);
+  if (last) text(`مجموع النجوم ${totalStars()} من ${NLEV() * 3}`, W / 2, 236, 30, GOLD, 'center', 'bold');
+}
+
+// ---- Drawing: the title ------------------------------------------------------------------
+function drawTitle() {
+  drawBackground();
+  text('أسطرلاب', W / 2, 92, 88, GOLD, 'center', 'bold');
+  text('Astrolabe', W / 2, 158, 34, GOLD2);
+  const g = { cx: 360, cy: 428, R: 3, band: 30, core: 50, outer: 140, limb0: 146, limb1: 170, sockR: 158 };
+  const vis = [Math.sin(state.t * 0.5) * 2, -state.t * 0.35, state.t * 0.25];
+  drawKursi(g.cx, g.cy - g.limb1 - 2);
+  ctx.beginPath(); ctx.arc(g.cx, g.cy, g.outer + 4, 0, TAU); ctx.fillStyle = '#132250'; ctx.fill();
+  const reach = 0.5 + 0.5 * Math.sin(state.t * 1.2);
+  drawBeam(g.cx, g.cy, -Math.PI / 2, g.core, g.core + (g.sockR - g.core) * reach, 0.8, state.t);
+  [0b10000100001, 0b10001, 0b1000001].forEach((m, i) => drawRingShape(g.cx, g.cy, g.core + i * g.band + 2, g.core + (i + 1) * g.band - 2, m, vis[i], i));
+  drawLink(g, { d: 1, t: 2, s: -1, slot: 3 }, vis);
+  drawCore(g.cx, g.cy, g.core - 4, 0.6);
+  drawLimb(g, [0], [{ bloomT: reach > 0.98 ? 0.6 : -1 }], state.t);
+  tileButton(BTN.play, true);
+  text('ابدأ', W / 2, BTN.play.y + 40, 46, GOLD, 'center', 'bold');
+  text(`المرحلة ${titleSel + 1}`, W / 2, BTN.play.y + 84, 26, GOLD2);
+  text(`النجوم ${totalStars()} من ${NLEV() * 3}`, W / 2, 744, 26, GOLD2);
+  for (let i = 0; i < NLEV(); i++) {
+    const b = levelTile(i), best = save.best[i];
+    tileButton(b, i === titleSel);
+    text(`${i + 1}`, b.x + b.w / 2, b.y + 40, 40, GOLD, 'center', 'bold');
+    for (let k = 0; k < 3; k++) rateStar(b.x + b.w / 2 + (1 - k) * 34, b.y + 88, 13, best && k < best.stars);
+  }
+  CONTROLS.forEach((c, i) => text(c, W / 2, 1184 + i * 46, i ? 24 : 28, i ? GOLD2 : GOLD));
+  if (location.protocol.startsWith('http')) { tileButton(BTN.home); iconHome(BTN.home.x + 46, BTN.home.y + 48, 80); }
+  tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
+}
+
+// ---- Drawing: the figures sheet (every piece, its name under it) -----------------------------
+function drawFigures() {
+  drawBackground();
+  text('أشكال اللعبة', W / 2, 46, 40, GOLD, 'center', 'bold');
+  const label = (s, x, y) => text(s, x, y, 24, GOLD);
+  const cell = (x, y, w, h) => { ctx.fillStyle = 'rgba(20,32,70,0.75)'; rr(x, y, w, h, 14); ctx.fill(); ctx.strokeStyle = 'rgba(243,210,122,0.35)'; ctx.lineWidth = 1.5; ctx.stroke(); };
+  const rings = [[0b1, 'حلقة بفتحة'], [0b1000001, 'حلقة بفتحتين'], [0b100010001, 'حلقة بثلاث فتحات']];
+  rings.forEach(([m, n], i) => { const x = 125 + i * 235; cell(x - 110, 80, 220, 240); drawRingShape(x, 190, 52, 92, m, 0, i, { pattern: [0, 1, 3][i] }); label(n, x, 300); });
+  cell(15, 340, 165, 200); drawCore(97, 425, 56, 0.8); label('جوهرة اللازورد', 97, 515);
+  cell(190, 340, 165, 200); drawSocket(272, 425, -1, 0); label('مقبس مطفأ', 272, 515);
+  cell(365, 340, 165, 200); drawSocket(447, 425, 0.6, 0); label('نجمة متفتحة', 447, 515);
+  cell(540, 340, 165, 200); drawBeam(622, 470, -Math.PI / 2, 0, 110, 1, 0.3); label('شعاع النجم', 622, 515);
+  const gFig = (cy) => ({ cx: 0, cy, R: 2, band: 46, core: 40, outer: 132 });
+  cell(15, 560, 340, 250);
+  { const g = gFig(0); ctx.save(); ctx.translate(185, 800); ctx.scale(1.3, 1.3); ctx.beginPath(); ctx.rect(-130, -180, 260, 160); ctx.clip();
+    drawRingShape(0, 0, 42.5, 83.5, 0, 0, 0, {}); drawRingShape(0, 0, 88.5, 129.5, 0, 0, 1, { teeth: 'in' }); drawLink(g, { d: 0, t: 1, s: 1, slot: 11.5 }, [0, 0], 0, 0); ctx.restore(); }
+  label('ترس واحد: نفس الاتجاه', 185, 790);
+  cell(365, 560, 340, 250);
+  { const g = gFig(0); ctx.save(); ctx.translate(535, 800); ctx.scale(1.3, 1.3); ctx.beginPath(); ctx.rect(-130, -180, 260, 160); ctx.clip();
+    drawRingShape(0, 0, 42.5, 83.5, 0, 0, 0, {}); drawRingShape(0, 0, 88.5, 129.5, 0, 0, 1, { teeth: 'in' }); drawLink(g, { d: 0, t: 1, s: -1, slot: 11.5 }, [0, 0], 0, 0); ctx.restore(); }
+  label('ترسان: عكس الاتجاه', 535, 790);
+  cell(15, 830, 220, 200); drawKursi(125, 960); label('العروة', 125, 1005);
+  cell(250, 830, 220, 200);
+  { const g = { cx: 360, cy: 1060, R: 1, band: 60, core: 80, outer: 140 }; ctx.save(); ctx.beginPath(); ctx.rect(250, 830, 220, 160); ctx.clip();
+    drawRingShape(360, 1060, 82, 138, 0b1000, 0, 1, { glow: 'rgba(140,230,255,0.9)' }); drawHintArrow(g, 0, 1, 0.2); ctx.restore(); }
+  label('سهم التلميح', 360, 1005);
+  cell(485, 830, 220, 200); rateStar(595, 920, 34, true); label('نجمة التقييم', 595, 1005);
+  const icons = [['تراجع', (x, y) => iconUndo(x, y, 80)], ['تلميح', (x, y) => iconHint(x, y, 80)], ['إعادة', (x, y) => iconRestart(x, y, 80)],
+    ['الصوت', (x, y) => iconMute(x, y, 70, false)], ['المراحل', (x, y) => iconLevels(x, y, 70)], ['البيت', (x, y) => iconHome(x, y, 70)]];
+  icons.forEach(([n, f], i) => { const x = 68 + i * 117; cell(x - 54, 1050, 108, 200); f(x, 1130); label(n, x, 1215); });
+}
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  scenes[scene].update(STEP); hit.clear(); pq.length = 0;
+}
+let last, acc = 0, ALPHA = 1; // ALPHA: how far the frame is between the last two steps
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now; // a stall never fast-forwards the game
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { ctx = mainCtx; scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+// A headless browser on a time budget runs timers but almost no animation frames: a timer
+// ticks when no frame has come for 100 ms on a visible page; a hidden tab stays paused.
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; }, // the loop steps; a check empties it
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

@@ -1,0 +1,1269 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: Do ten original trick riddles, each with a different kind of trick, feel clever rather than cheap, with free timed hints instead of ads? -->
+<!-- Date: 2026-11-23 -->
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>فكّر برّا الصندوق · Think Outside</title>
+<link rel="stylesheet" href="vendor/almarai.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #fbf7ea; overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
+<script src="config.js"></script>
+<script>
+'use strict';
+// فكّر برّا الصندوق · Think Outside: ten original trick riddles on a doodle notebook page.
+// Every riddle is new and uses a different trick; wrong taps are free, hints cost only time.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 720, H = 1280;        // logical size: portrait phone
+const PIXEL = false;
+const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
+const HAND = FONT; // the question: a handwritten-feel Arabic face where the phone has one
+const TITLE = 'فكّر برّا الصندوق · Think Outside';
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let RATIO = 1;
+function fit() { // fills the window at any size and pixel ratio
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  RATIO = r;
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  ctx.setTransform(r, 0, 0, r, 0, 0);
+}
+addEventListener('resize', fit); fit();
+const AR = /[؀-ۿ]/;
+function text(s, x, y, size, c, align = 'center', weight = '600', font = FONT) {
+  ctx.fillStyle = c; ctx.font = `${weight} ${size}px ${font}`; ctx.textAlign = align;
+  ctx.direction = AR.test(s) ? 'rtl' : 'ltr'; ctx.textBaseline = 'middle'; ctx.fillText(s, x, y); ctx.direction = 'ltr';
+}
+
+// ---- Input: keys by position (event.code), OS key repeat ignored ------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code); // true for one step after the key goes down
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('pointerdown', () => startAudio());
+addEventListener('blur', () => down.clear());
+const ptrQ = []; // pointer events, read on the fixed step
+function toLogical(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height }; }
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault(); startAudio();
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* fine */ }
+  const p = toLogical(e); ptrQ.push({ t: 'down', x: p.x, y: p.y, id: e.pointerId });
+});
+canvas.addEventListener('pointermove', e => { const p = toLogical(e); ptrQ.push({ t: 'move', x: p.x, y: p.y, id: e.pointerId }); });
+canvas.addEventListener('pointerup', e => { const p = toLogical(e); ptrQ.push({ t: 'up', x: p.x, y: p.y, id: e.pointerId }); });
+canvas.addEventListener('pointercancel', e => ptrQ.push({ t: 'cancel', x: 0, y: 0, id: e.pointerId }));
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    try {
+      const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)();
+      const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+      out.connect(ac.destination); audio = { ac, out };
+    } catch (_) { return; }
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3, delay = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur);
+}
+function sweep(f0, f1, dur, type = 'sine', vol = 0.2, delay = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur);
+}
+const sfx = {
+  pick() { tone(520, 0.05, 'triangle', 0.12); },
+  drop() { tone(300, 0.06, 'triangle', 0.1); },
+  wrong() { sweep(330, 220, 0.18, 'triangle', 0.16); },
+  tap() { tone(760, 0.04, 'sine', 0.1); },
+  solve() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.22, 'triangle', 0.2, i * 0.08)); },
+  hint() { tone(880, 0.1, 'sine', 0.18); tone(1320, 0.14, 'sine', 0.14, 0.08); },
+  reveal() { tone(1200, 0.08, 'sine', 0.16); tone(1600, 0.12, 'sine', 0.14, 0.07); },
+  meow() { sweep(700, 420, 0.35, 'sawtooth', 0.08); },
+  crack() { tone(1800, 0.03, 'square', 0.08); tone(1400, 0.03, 'square', 0.06, 0.04); },
+  peep() { sweep(1800, 2600, 0.08, 'sine', 0.16); sweep(1800, 2700, 0.08, 'sine', 0.16, 0.14); },
+  whistle() { sweep(1500, 1900, 0.35, 'sine', 0.12); },
+  song() { [1568, 1760, 2093, 1760, 2349, 2093, 1568, 2637].forEach((f, i) => tone(f, 0.12, 'sine', 0.15, i * 0.11)); },
+  click() { tone(140, 0.03, 'square', 0.15); },
+  splash() { sweep(400, 900, 0.15, 'triangle', 0.14); },
+  drip() { sweep(1200, 500, 0.12, 'sine', 0.14); },
+};
+
+// ---- Helpers: hashing and the boiling ink -------------------------------------------------
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+function hash(n) { // cosmetic wobble only, never gameplay
+  n = Math.imul((n | 0) ^ 0x9e3779b9, 0x85ebca6b); n ^= n >>> 13; n = Math.imul(n, 0xc2b2ae35); n ^= n >>> 16;
+  return (n >>> 0) / 4294967296;
+}
+const INK = '#21408f';
+let BOIL = 0, JAMP = 1.5;
+const jit = k => (hash(k * 31 + BOIL * 7919) - 0.5) * 2 * JAMP;
+/** Traces a jittered, smoothed path through flat points [x0,y0,x1,y1,...]. */
+function trace(pts, closed, sharp, salt) {
+  const n = pts.length >> 1, P = new Array(pts.length);
+  const base = ((pts[0] * 7 + pts[1] * 13) | 0) + salt * 977;
+  for (let i = 0; i < pts.length; i++) P[i] = pts[i] + jit(base + i);
+  ctx.beginPath();
+  if (sharp || n < 3) { ctx.moveTo(P[0], P[1]); for (let i = 1; i < n; i++) ctx.lineTo(P[2 * i], P[2 * i + 1]); if (closed) ctx.closePath(); return; }
+  if (closed) {
+    ctx.moveTo((P[2 * n - 2] + P[0]) / 2, (P[2 * n - 1] + P[1]) / 2);
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; ctx.quadraticCurveTo(P[2 * i], P[2 * i + 1], (P[2 * i] + P[2 * j]) / 2, (P[2 * i + 1] + P[2 * j + 1]) / 2); }
+    ctx.closePath();
+  } else {
+    ctx.moveTo(P[0], P[1]);
+    for (let i = 1; i < n - 1; i++) ctx.quadraticCurveTo(P[2 * i], P[2 * i + 1], (P[2 * i] + P[2 * i + 2]) / 2, (P[2 * i + 1] + P[2 * i + 3]) / 2);
+    ctx.lineTo(P[2 * n - 2], P[2 * n - 1]);
+  }
+}
+/** Draws a doodle shape: a marker fill (slightly off-register) and a blue ink outline. */
+function ink(pts, o = {}) {
+  const closed = !o.open, sharp = !!o.sharp;
+  if (o.fill) { trace(pts, closed, sharp, 3); ctx.globalAlpha = o.alpha == null ? 0.9 : o.alpha; ctx.fillStyle = o.fill; ctx.fill(); ctx.globalAlpha = 1; }
+  if (o.stroke !== false) {
+    trace(pts, closed, sharp, 0); ctx.strokeStyle = o.stroke || INK; ctx.lineWidth = o.lw || 4;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+  }
+}
+const sh = {
+  circ(cx, cy, r, n = 22) { const a = []; for (let i = 0; i < n; i++) { const t = i / n * TAU; a.push(cx + Math.cos(t) * r, cy + Math.sin(t) * r); } return a; },
+  ell(cx, cy, rx, ry, rot = 0, n = 24) {
+    const a = [], c = Math.cos(rot), s = Math.sin(rot);
+    for (let i = 0; i < n; i++) { const t = i / n * TAU, x = Math.cos(t) * rx, y = Math.sin(t) * ry; a.push(cx + x * c - y * s, cy + x * s + y * c); }
+    return a;
+  },
+  arc(cx, cy, r, a0, a1, n = 12) { const a = []; for (let i = 0; i <= n; i++) { const t = a0 + (a1 - a0) * i / n; a.push(cx + Math.cos(t) * r, cy + Math.sin(t) * r); } return a; },
+  rect(x, y, w, h) { return [x, y, x + w / 2, y, x + w, y, x + w, y + h / 2, x + w, y + h, x + w / 2, y + h, x, y + h, x, y + h / 2]; },
+  line(x0, y0, x1, y1) { return [x0, y0, (2 * x0 + x1) / 3, (2 * y0 + y1) / 3, (x0 + 2 * x1) / 3, (y0 + 2 * y1) / 3, x1, y1]; },
+};
+const ln = (x0, y0, x1, y1, lw = 4, col) => ink(sh.line(x0, y0, x1, y1), { open: true, lw, stroke: col });
+function rrect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+function inkText(s, x, y, size, col = INK, weight = '700', font = HAND, align = 'center') {
+  const k = (s.length * 7 + (x | 0)) | 0;
+  text(s, x + jit(k) * 0.6, y + jit(k + 1) * 0.6, size, col, align, weight, font);
+}
+const fmtTime = s => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+// ---- Doodles: every figure drawn in code, in local coordinates around (0, 0) ----------------
+const D = {
+  star(x, y, r, fill = '#ffd93d') {
+    const a = []; for (let i = 0; i < 10; i++) { const t = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; a.push(x + Math.cos(t) * rr, y + Math.sin(t) * rr); }
+    ink(a, { fill, sharp: true, lw: 3.5 });
+  },
+  house(col) {
+    ink([-18, 0, 0, -17, 18, 0], { open: true, sharp: true, stroke: col, lw: 4.5 });
+    ink([-12, -3, -12, 16, -3, 16, -3, 6, 3, 6, 3, 16, 12, 16, 12, -3], { open: true, sharp: true, stroke: col, lw: 4.5 });
+  },
+  speaker(on) {
+    ink([-20, -8, -9, -8, 3, -19, 3, 19, -9, 8, -20, 8], { fill: '#ffd93d', sharp: true, lw: 3.5 });
+    if (on) { ink(sh.arc(5, 0, 10, -0.9, 0.9, 6), { open: true, lw: 3.5 }); ink(sh.arc(5, 0, 18, -0.9, 0.9, 8), { open: true, lw: 3.5 }); }
+    else { ln(10, -9, 22, 9, 4, '#e34b4b'); ln(22, -9, 10, 9, 4, '#e34b4b'); }
+  },
+  bulb(lit, k) { // the hint button
+    if (lit) { ctx.fillStyle = 'rgba(255,217,61,0.45)'; ctx.beginPath(); ctx.arc(0, -4, 30 + Math.sin(k * 6) * 3, 0, TAU); ctx.fill(); }
+    ink(sh.circ(0, -7, 15, 14), { fill: lit ? '#ffd93d' : '#e8e4d8', lw: 3.5 });
+    ink(sh.rect(-8, 7, 16, 11), { fill: '#b9b9c4', lw: 3 });
+    ln(-8, 12, 8, 12, 2.5);
+    if (lit) { ln(-26, -18, -21, -14, 3); ln(26, -18, 21, -14, 3); ln(0, -32, 0, -27, 3); }
+  },
+  skip() {
+    ink([10, -14, -4, 0, 10, 14], { open: true, sharp: true, lw: 5 });
+    ink([-2, -14, -16, 0, -2, 14], { open: true, sharp: true, lw: 5 });
+  },
+  tick(p) { // p: 0..1 drawn so far
+    const pts = [-110, 0, -40, 75, 120, -110], segs = [[0, 1], [1, 2]], L = [106, 245], tot = L[0] + L[1];
+    let rem = p * tot;
+    ctx.strokeStyle = '#2bb673'; ctx.lineWidth = 30; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(pts[0] + jit(1), pts[1] + jit(2));
+    for (let s = 0; s < 2 && rem > 0; s++) {
+      const a = segs[s][0], b = segs[s][1], f = Math.min(1, rem / L[s]);
+      ctx.lineTo(pts[2 * a] + (pts[2 * b] - pts[2 * a]) * f + jit(3 + s), pts[2 * a + 1] + (pts[2 * b + 1] - pts[2 * a + 1]) * f + jit(5 + s));
+      rem -= L[s];
+    }
+    ctx.stroke();
+    ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke();
+  },
+  cat(happy, mouth) {
+    ink([-20, 130, -10, 160, 30, 175, 75, 150, 95, 110], { open: true, lw: 9, stroke: '#e58e3b' }); // tail
+    ink(sh.ell(0, 70, 78, 95), { fill: '#ffb36b' });
+    ink(sh.circ(0, -50, 62), { fill: '#ffb36b' });
+    ink([-52, -80, -48, -128, -14, -104], { fill: '#ffb36b' }); ink([52, -80, 48, -128, 14, -104], { fill: '#ffb36b' });
+    if (happy) { ink(sh.arc(-22, -52, 10, Math.PI, TAU, 6), { open: true }); ink(sh.arc(22, -52, 10, Math.PI, TAU, 6), { open: true }); }
+    else { ink(sh.circ(-22, -55, 8, 10), { fill: '#21408f' }); ink(sh.circ(22, -55, 8, 10), { fill: '#21408f' }); }
+    ink([-8, -32, 8, -32, 0, -24], { fill: '#ff7aa2', lw: 3 });
+    if (mouth) ink(sh.ell(0, -12, 10, 8 * mouth), { fill: '#a0303d', lw: 3 });
+    else ink([-12, -16, 0, -22, 12, -16], { open: true, lw: 3 });
+    for (const s of [-1, 1]) { ln(s * 20, -26, s * 62, -34, 2.5); ln(s * 20, -20, s * 62, -16, 2.5); }
+    ink(sh.ell(-30, 150, 26, 14), { fill: '#ffb36b' }); ink(sh.ell(30, 150, 26, 14), { fill: '#ffb36b' });
+  },
+  fish(col = '#ff9f43', s = 1) {
+    ink(sh.ell(0, 0, 42 * s, 22 * s), { fill: col });
+    ink([-38 * s, 0, -66 * s, -20 * s, -64 * s, 20 * s], { fill: col, sharp: true });
+    ink(sh.circ(22 * s, -5 * s, 4.5 * s, 8), { fill: INK, lw: 2 });
+    ink(sh.arc(4 * s, 0, 14 * s, -1, 1, 5), { open: true, lw: 2.5 });
+  },
+  plate() { ink(sh.ell(0, 0, 95, 26), { fill: '#ffffff' }); ink(sh.ell(0, -2, 62, 14), { fill: '#e9f1fb', lw: 3 }); },
+  bowl(t) {
+    ink(sh.rect(-50, 62, 100, 16), { fill: '#b9b9c4' });
+    ink(sh.ell(0, 6, 72, 66), { fill: '#bfe3ff', alpha: 0.75 });
+    ctx.save(); ctx.translate(Math.sin(t * 1.4) * 18, 10 + Math.sin(t * 2.3) * 6); ctx.scale(Math.cos(t * 1.4) >= 0 ? 0.7 : -0.7, 0.7); D.fish('#ff8a3d'); ctx.restore();
+    ink(sh.ell(0, -58, 50, 9), { lw: 3 });
+    ink(sh.circ(-30, -20, 4, 6), { lw: 2 }); ink(sh.circ(-22, -36, 3, 6), { lw: 2 });
+  },
+  rod() {
+    ln(-30, 160, 40, -160, 6, '#8a5a2b'); ink(sh.circ(-18, 110, 14, 10), { fill: '#b9b9c4', lw: 3 });
+    ink([40, -160, 60, -60, 58, 40], { open: true, lw: 2 }); ink([58, 40, 52, 56, 62, 60], { open: true, lw: 3 });
+  },
+  door(open) {
+    ink(sh.rect(-85, -165, 170, 330), { fill: open ? '#2b2440' : '#c88a4a' });
+    if (open) {
+      ctx.fillStyle = 'rgba(255,230,150,0.55)'; ctx.fillRect(-80, -160, 160, 320);
+      ink([-85, -165, -130, -140, -130, 188, -85, 165], { fill: '#c88a4a', sharp: true });
+      return;
+    }
+    ink(sh.rect(-62, -140, 124, 110), { lw: 3 }); ink(sh.rect(-62, -5, 124, 140), { lw: 3 });
+    ink(sh.circ(-58, 22, 11, 10), { fill: '#ffd93d', lw: 3 });
+    ink(sh.circ(-58, 50, 6, 8), { fill: INK, lw: 2 }); ink([-61, 50, -58, 64, -55, 50], { fill: INK, sharp: true, lw: 2 });
+  },
+  mat() {
+    ink(sh.rect(-110, -22, 220, 44), { fill: '#6bcb77' });
+    for (let i = -3; i <= 3; i++) ln(i * 30 - 6, -16, i * 30 + 6, 16, 2.5, '#2d7a3a');
+  },
+  key(rot = 0) {
+    ctx.save(); ctx.rotate(rot);
+    ink(sh.circ(-28, 0, 16, 12), { fill: '#ffd93d' }); ink(sh.circ(-28, 0, 6, 8), { lw: 2.5 });
+    ink(sh.rect(-12, -5, 52, 10), { fill: '#ffd93d', lw: 3 });
+    ink([26, 5, 26, 16, 34, 16, 34, 5], { open: true, sharp: true, lw: 3 });
+    ink([16, 5, 16, 13], { open: true, lw: 3 });
+    ctx.restore();
+  },
+  flowerPot() {
+    ink([-48, 0, 48, 0, 36, 70, -36, 70], { fill: '#e07a47', sharp: true });
+    ink(sh.rect(-54, -12, 108, 16), { fill: '#e07a47' });
+    ln(0, -12, 0, -70, 4, '#2d7a3a');
+    ink(sh.ell(-22, -46, 22, 10, -0.5), { fill: '#6bcb77' }); ink(sh.ell(22, -60, 22, 10, 0.5), { fill: '#6bcb77' });
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; ink(sh.circ(Math.cos(a) * 14, -82 + Math.sin(a) * 14, 9, 8), { fill: '#ff7aa2', lw: 2.5 }); }
+    ink(sh.circ(0, -82, 8, 8), { fill: '#ffd93d', lw: 2.5 });
+  },
+  window() {
+    ink(sh.rect(-75, -75, 150, 150), { fill: '#bfe3ff' });
+    ln(0, -75, 0, 75, 4); ln(-75, 0, 75, 0, 4);
+    ink(sh.rect(-90, 75, 180, 14), { fill: '#c88a4a' });
+  },
+  nest() {
+    ink(sh.ell(0, 0, 120, 40), { fill: '#c08552' });
+    for (let i = 0; i < 9; i++) { const x = -100 + i * 25; ink([x, -18, x + 30, 8, x + 14, 26], { open: true, lw: 2.5, stroke: '#6b4423' }); }
+  },
+  egg(cracks, wob) {
+    ctx.save(); ctx.rotate(wob);
+    ink(sh.ell(0, -10, 58, 76), { fill: '#fff8e1' });
+    const zz = [[-40, -40, 6], [-10, -70, 5], [20, -30, 6]];
+    for (let c = 0; c < cracks && c < 3; c++) {
+      const [x, y, n] = zz[c], p = [];
+      for (let i = 0; i < n; i++) p.push(x + i * 9, y + (i % 2 ? 10 : -6));
+      ink(p, { open: true, sharp: true, lw: 3 });
+    }
+    ctx.restore();
+  },
+  chick(t) {
+    ink(sh.ell(0, 0, 55, 50), { fill: '#ffe066' });
+    ink(sh.circ(0, -62, 36), { fill: '#ffe066' });
+    ink(sh.circ(-12, -68, 5, 8), { fill: INK, lw: 2 }); ink(sh.circ(12, -68, 5, 8), { fill: INK, lw: 2 });
+    ink([-8, -55, 8, -55, 0, -44 + Math.sin(t * 12) * 3], { fill: '#ff9f43', sharp: true, lw: 3 });
+    ink(sh.ell(-48, 0, 16, 26, 0.5 + Math.sin(t * 10) * 0.3), { fill: '#ffd43b' }); ink(sh.ell(48, 0, 16, 26, -0.5 - Math.sin(t * 10) * 0.3), { fill: '#ffd43b' });
+  },
+  shell() {
+    ink([-60, 0, -55, 40, -20, 62, 20, 62, 55, 40, 60, 0, 40, 12, 22, -4, 2, 14, -18, -2, -38, 14], { fill: '#fff8e1', sharp: true });
+  },
+  hammer() {
+    ink(sh.rect(-80, -8, 130, 16), { fill: '#c88a4a' });
+    ink(sh.rect(40, -30, 44, 60), { fill: '#b9b9c4' });
+  },
+  clock(t) {
+    ink(sh.circ(0, 0, 55), { fill: '#ffffff' });
+    for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; ln(Math.cos(a) * 44, Math.sin(a) * 44, Math.cos(a) * 50, Math.sin(a) * 50, 2.5); }
+    const a1 = t * 0.6, a2 = t * 0.05;
+    ln(0, 0, Math.cos(a1 - Math.PI / 2) * 40, Math.sin(a1 - Math.PI / 2) * 40, 3, '#e34b4b');
+    ln(0, 0, Math.cos(a2 - Math.PI / 2) * 26, Math.sin(a2 - Math.PI / 2) * 26, 5);
+  },
+  labelJar(word) {
+    ink([-44, -50, 44, -50, 54, -20, 54, 70, -54, 70, -54, -20], { fill: '#d8f0ff', alpha: 0.8 });
+    ink(sh.rect(-36, -72, 72, 22), { fill: '#e07a47' });
+    ink(sh.rect(-40, -6, 80, 46), { fill: '#ffffff', lw: 3 }); inkText(word, 0, 17, 32);
+  },
+  book(word) {
+    ink(sh.rect(-50, -62, 100, 124), { fill: '#4d96ff' }); ln(-38, -62, -38, 62, 3);
+    ink(sh.rect(-32, -24, 76, 46), { fill: '#ffffff', lw: 3 }); inkText(word, 6, -1, 27);
+  },
+  box(word) {
+    ink(sh.rect(-75, -50, 150, 100), { fill: '#c08552' }); ln(-75, -20, 75, -20, 3);
+    ink(sh.rect(-44, -10, 88, 46), { fill: '#ffffff', lw: 3 }); inkText(word, 0, 13, 32);
+  },
+  poster(word) {
+    ink(sh.rect(-70, -70, 140, 140), { fill: '#ffe8a3' }); ink(sh.circ(0, -78, 6, 8), { fill: '#e34b4b', lw: 2.5 });
+    ink(sh.circ(-30, -30, 16, 10), { fill: '#ffd93d', lw: 2.5 }); ln(-60, 0, 60, 0, 2.5);
+    inkText(word, 10, 36, 40);
+  },
+  cup(word) {
+    ink([-44, -46, 44, -46, 34, 50, -34, 50], { fill: '#f9a8d4', sharp: true });
+    ink(sh.arc(48, 0, 20, -1.5, 1.5, 8), { open: true, lw: 4 }); inkText(word, 0, 4, 28);
+  },
+  moonPic() {
+    ink(sh.rect(-64, -64, 128, 128), { fill: '#2b2f5e' });
+    ctx.save(); trace(sh.circ(6, 0, 38), true, false, 9); ctx.clip();
+    ink(sh.circ(6, 0, 38), { fill: '#ffe066', lw: 3 }); ink(sh.circ(26, -12, 34), { fill: '#2b2f5e', stroke: false, alpha: 1 }); ctx.restore();
+    D.star(-36, -36, 8, '#ffffff'); D.star(38, 40, 6, '#ffffff');
+  },
+  numberBtn(n, hot) {
+    ink(sh.circ(0, 0, 42), { fill: hot ? '#ffd93d' : '#ffffff' }); inkText(`${n}`, 0, 2, 44, INK, '800', FONT);
+  },
+  orange(col) {
+    ink(sh.circ(0, 0, 125, 28), { fill: col || null, stroke: INK, lw: 5 });
+    if (col) for (let i = 0; i < 8; i++) ink(sh.circ(-60 + hash(i) * 120, -60 + hash(i + 9) * 120, 3, 6), { lw: 2, stroke: '#c96a12' });
+    ln(0, -122, 6, -150, 6, '#6b4423'); ink(sh.ell(36, -142, 34, 14, -0.4), { fill: '#6bcb77' });
+    if (col) ink(sh.ell(-50, -50, 20, 30, 0.6), { fill: '#ffffff', stroke: false, alpha: 0.45 });
+  },
+  paintPot(col) {
+    ink([-54, -40, 54, -40, 46, 60, -46, 60], { fill: '#e8e4d8', sharp: true });
+    ink(sh.ell(0, -40, 54, 16), { fill: col });
+    ink([-30, -36, -26, 0, -20, -36], { fill: col, sharp: true, lw: 2.5 });
+    ink(sh.rect(-30, 0, 60, 34), { fill: col, lw: 3 });
+  },
+  bird(open, t) {
+    ink([60, 10, 110, -10, 104, 26], { fill: '#4d96ff', sharp: true });
+    ink(sh.ell(0, 0, 74, 56), { fill: '#4d96ff' });
+    ink(sh.ell(12, 10, 40, 22, 0.3), { fill: '#3a7bd5' });
+    ink(sh.circ(-40, -22, 9, 10), { fill: '#ffffff', lw: 2.5 }); ink(sh.circ(-42, -22, 4, 6), { fill: INK, lw: 1.5 });
+    const o = open * 14;
+    ink([-66, -14, -104, -10 - o * 0.4, -68, -2], { fill: '#ff9f43', sharp: true, lw: 3 });
+    ink([-66, -2, -100, 4 + o, -68, 8], { fill: '#ff9f43', sharp: true, lw: 3 });
+    ln(-10, 54, -16, 72, 3); ln(14, 54, 18, 72, 3);
+  },
+  branch() {
+    ink([380, 90, 200, 70, 40, 60, -150, 72], { open: true, lw: 16, stroke: '#8a5a2b' });
+    for (const [x, y, r] of [[300, 60, 0.4], [140, 50, -0.4], [-60, 60, 0.6], [220, 96, 2.6]]) ink(sh.ell(x, y - 16, 34, 14, r), { fill: '#6bcb77' });
+  },
+  whistle() {
+    ink(sh.circ(18, 4, 26), { fill: '#b9b9c4' }); ink(sh.rect(-54, -18, 60, 26), { fill: '#b9b9c4' });
+    ink(sh.rect(-24, -24, 22, 10), { fill: '#e34b4b', lw: 2.5 });
+  },
+  seeds() {
+    ink([-64, -14, 64, -14, 46, 30, -46, 30], { fill: '#c08552', sharp: true });
+    for (let i = 0; i < 9; i++) ink(sh.ell(-48 + i * 12, -20 - (i % 3) * 5, 5, 3.5, 0.5, 8), { fill: '#ffe066', lw: 1.5 });
+  },
+  note(x, y, s) {
+    ink(sh.ell(x, y, 12 * s, 9 * s, -0.4), { fill: INK, lw: 2 });
+    ln(x + 10 * s, y - 3 * s, x + 10 * s, y - 46 * s, 3.5);
+    ink([x + 10 * s, y - 46 * s, x + 26 * s, y - 36 * s, x + 22 * s, y - 26 * s], { open: true, lw: 3.5 });
+  },
+  ceilLamp(on) {
+    ln(0, -140, 0, -50, 3);
+    if (on) { ctx.fillStyle = 'rgba(255,230,120,0.35)'; ctx.beginPath(); ctx.moveTo(-60, -20); ctx.lineTo(60, -20); ctx.lineTo(200, 300); ctx.lineTo(-200, 300); ctx.closePath(); ctx.fill(); }
+    ink([-25, -50, 25, -50, 62, -10, -62, -10], { fill: '#4d96ff', sharp: true });
+    ink(sh.circ(0, -4, 16, 12), { fill: on ? '#fff3a0' : '#d9d6cc', lw: 3 });
+  },
+  switchPlate(on) {
+    ink(sh.rect(-36, -52, 72, 104), { fill: '#ffffff' });
+    ink(sh.rect(-14, on ? -34 : 2, 28, 32), { fill: on ? '#6bcb77' : '#b9b9c4', lw: 3 });
+  },
+  deskLamp(on) {
+    if (on) { ctx.fillStyle = 'rgba(255,230,120,0.4)'; ctx.beginPath(); ctx.moveTo(30, -60); ctx.lineTo(90, -40); ctx.lineTo(150, 130); ctx.lineTo(-40, 130); ctx.closePath(); ctx.fill(); }
+    ink(sh.ell(0, 90, 50, 12), { fill: '#e34b4b' });
+    ln(0, 88, -20, 0, 6); ln(-20, 0, 30, -60, 6);
+    ink([10, -84, 70, -70, 100, -30, 40, -40], { fill: '#e34b4b', sharp: true });
+    ink(sh.circ(64, -40, 12, 10), { fill: on ? '#fff3a0' : '#d9d6cc', lw: 3 });
+  },
+  socket() { ink(sh.rect(-38, -38, 76, 76), { fill: '#ffffff' }); ink(sh.circ(-12, 0, 6, 8), { fill: INK, lw: 2 }); ink(sh.circ(12, 0, 6, 8), { fill: INK, lw: 2 }); },
+  plug() { ink(sh.rect(-26, -22, 52, 44), { fill: '#3d3d4a' }); ln(-10, -22, -10, -38, 4); ln(10, -22, 10, -38, 4); },
+  moth(t, sleep) {
+    const f = sleep ? 0.15 : Math.abs(Math.sin(t * 22));
+    ink(sh.ell(-22, -6, 26, 18 * (0.4 + 0.6 * f), -0.4), { fill: '#f9a8d4' }); ink(sh.ell(22, -6, 26, 18 * (0.4 + 0.6 * f), 0.4), { fill: '#f9a8d4' });
+    ink(sh.ell(0, 0, 8, 22), { fill: '#c08552' });
+    ink([-3, -20, -12, -38], { open: true, lw: 2.5 }); ink([3, -20, 12, -38], { open: true, lw: 2.5 });
+  },
+  vaseFlower() {
+    ink([-30, 0, 30, 0, 40, 60, 24, 100, -24, 100, -40, 60], { fill: '#4d96ff' });
+    ln(0, 0, -6, -70, 4, '#2d7a3a'); ink(sh.ell(-22, -40, 18, 8, -0.5), { fill: '#6bcb77' });
+    for (let i = 0; i < 5; i++) { const a = i / 5 * TAU; ink(sh.circ(-6 + Math.cos(a) * 16, -84 + Math.sin(a) * 16, 11, 8), { fill: '#ffd93d', lw: 2.5 }); }
+    ink(sh.circ(-6, -84, 9, 8), { fill: '#e07a47', lw: 2.5 });
+  },
+  rose(bloom, k) {
+    ink([-48, 30, 48, 30, 38, 120, -38, 120], { fill: '#e07a47', sharp: true });
+    const lean = bloom ? 0 : 1 - k;
+    const hx = 60 * lean, hy = -130 + 60 * lean;
+    ink([0, 30, 4, -40, hx * 0.6, hy + 20 * lean, hx, hy], { open: true, lw: 5, stroke: '#2d7a3a' });
+    ink(sh.ell(-4, -20, 22, 9, -0.6), { fill: '#6bcb77' });
+    const col = bloom ? '#e8364f' : '#b36a74';
+    ink(sh.circ(hx, hy, 28), { fill: col });
+    ink(sh.arc(hx, hy, 14, 0, 4.5, 8), { open: true, lw: 3 });
+    if (bloom) for (let i = 0; i < 5; i++) { const a = i / 5 * TAU; ink(sh.ell(hx + Math.cos(a) * 30, hy + Math.sin(a) * 30, 14, 10, a), { fill: col, lw: 3 }); }
+  },
+  ice(s) {
+    ink(sh.rect(-38 * s, -38 * s, 76 * s, 76 * s), { fill: '#bfe3ff' });
+    ln(-24 * s, -24 * s, -6 * s, -24 * s, 3, '#ffffff');
+    ink([-38 * s, -38 * s, -26 * s, -50 * s, 50 * s, -50 * s, 38 * s, -38 * s], { fill: '#dff1ff', sharp: true, lw: 3 });
+  },
+  candle(t) {
+    ctx.fillStyle = 'rgba(255,200,80,0.25)'; ctx.beginPath(); ctx.arc(0, -96, 46 + Math.sin(t * 9) * 4, 0, TAU); ctx.fill();
+    ink(sh.rect(-22, -70, 44, 140), { fill: '#ffffff' });
+    ln(0, -70, 0, -84, 3);
+    const f = Math.sin(t * 13) * 3;
+    ink([-12, -86, 0, -128 + f, 12, -86, 0, -78], { fill: '#ff9f43', lw: 3 });
+    ink([-5, -86, 0, -108 + f, 5, -86], { fill: '#ffe066', stroke: false, alpha: 1 });
+  },
+  glass() { ink([-34, -60, 34, -60, 26, 60, -26, 60], { fill: '#e9f6ff', sharp: true, alpha: 0.6 }); ln(-20, -40, -16, 30, 3, '#ffffff'); },
+  drop() { ink([0, -40, 26, 0, 22, 22, 0, 32, -22, 22, -26, 0], { fill: '#4d96ff' }); ln(-10, 0, -8, 14, 3, '#ffffff'); },
+  saucer() { ink(sh.ell(0, 0, 70, 16), { fill: '#ffffff' }); },
+  table(x0, x1, y) { ink(sh.rect(x0, y, x1 - x0, 18), { fill: '#c08552' }); ln(x0 + 20, y + 18, x0 + 26, y + 120, 6, '#8a5a2b'); ln(x1 - 20, y + 18, x1 - 26, y + 120, 6, '#8a5a2b'); },
+};
+// The painting for riddle 9: drawn in its own frame coordinates (0..440 x 0..320)
+function paintingScene() {
+  ink(sh.rect(0, 0, 440, 320), { fill: '#bfe3ff', lw: 3 });
+  ink(sh.circ(320, 150, 52), { fill: '#ffd93d' });
+  ink([0, 250, 90, 190, 190, 240, 300, 180, 440, 240, 440, 320, 0, 320], { fill: '#6bcb77' });
+  ln(80, 260, 80, 190, 8, '#8a5a2b'); ink(sh.circ(80, 170, 40), { fill: '#2d9a4a' });
+  ink([180, 60, 200, 50, 220, 60], { open: true, lw: 3 }); ink([220, 80, 236, 72, 252, 80], { open: true, lw: 3 });
+}
+const HOLE = { x: 270, y: 100, s: 110 }; // in painting coordinates: covers the sun's left part
+function piecePath(s) { // a jigsaw piece around (0,0): a square with a knob and a notch
+  const h = s / 2, k = s * 0.16;
+  ctx.beginPath(); ctx.moveTo(-h, -h); ctx.lineTo(-k, -h); ctx.arc(0, -h, k, Math.PI, 0, false); ctx.lineTo(h, -h);
+  ctx.lineTo(h, h); ctx.lineTo(k, h); ctx.arc(0, h, k, 0, Math.PI, true); ctx.lineTo(-h, h); ctx.closePath();
+}
+
+// ---- The riddles ------------------------------------------------------------------------------
+// Each riddle: q (the question), trick, hints, setup, draw, and what taps and drops do.
+// A handler returns a string to say a kind word, true when it handled the action, or nothing.
+const KIND = ['فكرة لطيفة… جرّب غيرها', 'ليس هذا، لكنك قريب', 'همم… فكّر بطريقة أخرى', 'لا بأس، المحاولة مجانية', 'أوشكت! جرّب شيئًا آخر'];
+const RIDDLES = [
+  { // 1 · read the riddle literally: "the dot" is the full stop
+    q: 'اضغط على النقطة.', trick: 'اقرأ حرفيًا', answer: 'النقطة في آخر السؤال',
+    hints: ['النقطة أصغر بكثير مما تظن.', 'انظر إلى آخر سطر السؤال.'],
+    setup(R) {
+      R.add({ id: 'circle', x: 210, y: 560, r: 90 }); R.add({ id: 'square', x: 500, y: 560, w: 170, h: 170 });
+      R.add({ id: 'tri', x: 220, y: 860, w: 200, h: 180 }); R.add({ id: 'line', x: 500, y: 860, w: 220, h: 110 });
+    },
+    draw(R) {
+      R.at('circle', () => ink(sh.circ(0, 0, 88, 26), { fill: '#ffd93d' }));
+      R.at('square', () => ink(sh.rect(-82, -82, 164, 164), { fill: '#4d96ff' }));
+      R.at('tri', () => ink([0, -85, 95, 80, -95, 80], { fill: '#ff6b6b', sharp: true }));
+      R.at('line', () => ink(sh.line(-100, 45, 100, -45), { open: true, lw: 7 }));
+      if (R.solved) { const t = R.tok('.'); const k = Math.min(1, R.solveT * 3); ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(t.x, t.y + 10, 6 + k * 40, 0, TAU); ctx.fill(); }
+    },
+    tap(R, o) { return { circle: 'هذه دائرة، لا نقطة!', square: 'هذا مربّع.', tri: 'هذا مثلّث.', line: 'هذا خط.' }[o.id]; },
+    tapTok(R, t) {
+      if (t.text === '.') { R.solve(); return true; }
+      if (t.text === 'النقطة') return 'في هذه الكلمة نقاط… لكن أين «النقطة»؟';
+    },
+  },
+  { // 2 · something hidden behind something else: the key under the mat
+    q: 'افتح الباب.', trick: 'شيء مخبّأ خلف شيء', answer: 'المفتاح تحت ممسحة الأرجل',
+    hints: ['أين يخبّئ الناس مفتاح البيت عادةً؟', 'اسحب ممسحة الأرجل جانبًا.'],
+    setup(R) {
+      R.add({ id: 'window', x: 170, y: 620, w: 180, h: 180 }); R.add({ id: 'door', x: 410, y: 785, w: 170, h: 330 });
+      R.add({ id: 'key', x: 410, y: 975, w: 96, h: 60, drag: true, vis: false });
+      R.add({ id: 'mat', x: 410, y: 975, w: 220, h: 60, drag: true }); R.add({ id: 'pot', x: 600, y: 930, w: 120, h: 170, drag: true });
+    },
+    draw(R) {
+      ink(sh.rect(50, 400, 600, 600), { fill: '#ffe0b3' });
+      ink([30, 410, 350, 300, 670, 410], { fill: '#e07a47', sharp: true });
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) ln(70 + c * 180 + (r % 2) * 60, 440 + r * 140, 130 + c * 180 + (r % 2) * 60, 440 + r * 140, 3, '#e0a868');
+      ln(30, 1000, 690, 1000, 5);
+      R.at('window', () => D.window());
+      R.at('door', () => D.door(R.solved));
+      R.at('key', () => D.key(-0.2));
+      R.at('mat', () => { D.mat(); inkText('أهلًا', 0, 2, 26, '#1d5e29'); });
+      R.at('pot', () => { ctx.translate(0, 10); D.flowerPot(); });
+    },
+    tap(R, o) {
+      if (o.id === 'door') { R.shake(o); return 'الباب مقفل!'; }
+      return { window: 'النافذة مغلقة أيضًا.', key: 'إلى أين يأخذك هذا المفتاح؟', mat: 'ممسحة أرجل… ثقيلة قليلًا.', pot: 'أصيص ورد جميل.' }[o.id];
+    },
+    drop(R, o) {
+      if (o.id === 'mat') {
+        const k = R.o.key;
+        if (!k.vis && Math.hypot(o.x - k.home.x, o.y - k.home.y) > 110) { k.vis = true; sfx.reveal(); R.say('ما هذا اللامع؟'); }
+        return true;
+      }
+      if (o.id === 'pot') { if (!R.st.potSaid) { R.st.potSaid = true; R.say('لا شيء تحت الأصيص.'); } return true; }
+      if (o.id === 'key' && R.inside(o, R.o.door)) { R.solve(); return true; }
+    },
+  },
+  { // 3 · drag a word of the question: the only fish is the word
+    q: 'القطة تريد سمكة، لكن الصحن فارغ.', trick: 'اسحب كلمة من السؤال', answer: 'اسحب كلمة «سمكة» إلى الصحن',
+    hints: ['السمكة التي تحتاجها ليست في الرسم.', 'اسحب كلمة «سمكة» من السؤال إلى الصحن.'],
+    setup(R) {
+      R.add({ id: 'cat', x: 200, y: 760, w: 220, h: 300 }); R.add({ id: 'plate', x: 420, y: 960, w: 200, h: 80 });
+      R.add({ id: 'bowl', x: 545, y: 610, w: 160, h: 150, drag: true }); R.add({ id: 'rod', x: 640, y: 850, w: 90, h: 320 });
+    },
+    draw(R) {
+      D.table(450, 650, 690); ln(30, 1010, 690, 1010, 5);
+      R.at('rod', () => D.rod());
+      R.at('bowl', () => D.bowl(R.t));
+      R.at('cat', () => D.cat(R.solved, R.st.meow > 0 ? Math.min(1, R.st.meow * 3) : R.solved ? Math.abs(Math.sin(R.t * 8)) * 0.6 : 0));
+      R.at('plate', () => { D.plate(); if (R.st.fish) { ctx.translate(0, -18); D.fish('#ff9f43', 0.9); } });
+    },
+    update(R, dt) { if (R.st.meow > 0) R.st.meow -= dt; },
+    tap(R, o) {
+      if (o.id === 'cat') { R.st.meow = 0.6; sfx.meow(); return 'مياو… أنا جائعة!'; }
+      return { bowl: 'سمكة زينة، ليست للأكل.', rod: 'لا يوجد ماء هنا لنصطاد.', plate: 'الصحن فارغ تمامًا.' }[o.id];
+    },
+    drop(R, o) { if (o.id === 'bowl' && (R.near(o, R.o.cat) || R.near(o, R.o.plate))) return 'لا! هذه صديقتها.'; },
+    dropTok(R, t) {
+      if (t.text === 'سمكة' && (R.near(t, R.o.plate) || R.near(t, R.o.cat))) { t.vis = false; R.st.fish = true; R.solve(); return true; }
+      if (t.text === 'الصحن' && R.near(t, R.o.cat)) return 'تريد ما في الصحن، لا الصحن!';
+    },
+  },
+  { // 4 · wait, do nothing: the chick hatches only in quiet
+    q: 'ساعد الكتكوت على الخروج من البيضة.', trick: 'انتظر ولا تفعل شيئًا', answer: 'لا تلمس شيئًا وانتظر',
+    hints: ['بعض الأشياء تحتاج إلى صبر.', `لا تلمس شيئًا… وانتظر بضع ثوانٍ.`],
+    setup(R) {
+      R.add({ id: 'clock', x: 140, y: 440, r: 60 }); R.add({ id: 'egg', x: 360, y: 700, w: 130, h: 170 });
+      R.add({ id: 'hammer', x: 560, y: 960, w: 180, h: 90, drag: true });
+      R.st.quiet = 0;
+    },
+    draw(R) {
+      ln(30, 1010, 690, 1010, 5);
+      R.at('clock', () => D.clock(R.t));
+      ctx.save(); ctx.translate(360, 780); D.nest(); ctx.restore();
+      const c = Math.min(3, Math.floor(R.st.quiet / (tune.eggWait / 3.6)));
+      if (R.solved) { ctx.save(); ctx.translate(360, 700); D.chick(R.t); ctx.restore(); ctx.save(); ctx.translate(360, 770); D.shell(); ctx.restore(); }
+      else R.at('egg', () => D.egg(c, c > 0 ? Math.sin(R.t * 16) * 0.05 * c : Math.sin(R.t * 3) * 0.03));
+      R.at('hammer', () => D.hammer());
+    },
+    update(R, dt) {
+      if (R.solved) return;
+      const before = Math.floor(R.st.quiet / (tune.eggWait / 3.6));
+      R.st.quiet += dt;
+      if (Math.floor(R.st.quiet / (tune.eggWait / 3.6)) > before) sfx.crack();
+      if (R.st.quiet >= tune.eggWait) { sfx.peep(); R.solve(); }
+    },
+    anyDown(R, target) { if (!target || !target.hud) { if (R.st.quiet > 1.5 && !R.solved) R.say('صه! أخفتَه.'); R.st.quiet = 0; } },
+    tap(R, o) {
+      if (o.id === 'egg') { R.shake(o); return 'صه! أنت تُزعجه.'; }
+      if (o.id === 'clock') return 'الوقت يمضي… تك، تك.';
+      return 'صه…';
+    },
+    drop(R, o) { if (o.id === 'hammer' && R.near(o, R.o.egg)) return 'لا! هذا خطر عليه.'; },
+  },
+  { // 5 · count things, the question included
+    q: 'كم مرة كُتبت كلمة «قمر» في هذه الصفحة؟', trick: 'عُدّ مع السؤال نفسه', answer: '4: ثلاث في الرسم وواحدة في السؤال',
+    hints: ['اضغط على كل كلمة «قمر» تراها لتضع عليها علامة.', 'السؤال نفسه مكتوب في الصفحة أيضًا.'],
+    setup(R) {
+      R.add({ id: 'jar', x: 150, y: 528, w: 120, h: 150, word: 'قمر' }); R.add({ id: 'book', x: 340, y: 537, w: 110, h: 130, word: 'شمس' });
+      R.add({ id: 'box', x: 530, y: 549, w: 160, h: 110, word: 'قمر' });
+      R.add({ id: 'moonpic', x: 160, y: 764, w: 140, h: 140 }); R.add({ id: 'poster', x: 380, y: 758, w: 150, h: 150, word: 'قمر' });
+      R.add({ id: 'cup', x: 575, y: 779, w: 120, h: 110, word: 'نجمة' });
+      for (let n = 1; n <= 6; n++) R.add({ id: 'n' + n, n, x: 622 - (n - 1) * 105, y: 965, r: 44 });
+      R.st.marks = {};
+    },
+    draw(R) {
+      ink(sh.rect(50, 600, 620, 18), { fill: '#c08552' }); ink(sh.rect(50, 830, 620, 18), { fill: '#c08552' });
+      R.at('jar', () => D.labelJar('قمر')); R.at('book', () => D.book('شمس')); R.at('box', () => D.box('قمر'));
+      R.at('moonpic', () => D.moonPic()); R.at('poster', () => D.poster('قمر')); R.at('cup', () => D.cup('نجمة'));
+      for (let n = 1; n <= 6; n++) R.at('n' + n, () => D.numberBtn(n, R.solved && n === 4));
+      for (const id in R.st.marks) {
+        const o = R.o[id] || R.toks.find(t => t.id === id); if (!o) continue;
+        ink(sh.ell(o.x, o.y, Math.max(o.w || 60, 60) * 0.62, Math.max(o.h || 50, 50) * 0.62), { lw: 5, stroke: '#e34b4b' });
+      }
+    },
+    answer(R, n) {
+      if (n === 4) { R.solve(); return true; }
+      R.shake(R.o['n' + n]);
+      return n === 3 ? 'قريب جدًا! عُدّ الصفحة كلها.' : 'عُدّ مرة أخرى بهدوء.';
+    },
+    update(R) { for (let n = 1; n <= 6; n++) if (pressed('Digit' + n) && !R.solved) { const m = this.answer(R, n); if (typeof m === 'string') R.say(m); } },
+    tap(R, o) {
+      if (o.n) return this.answer(R, o.n);
+      if (o.id === 'moonpic') return 'هذا قمر مرسوم، لا مكتوب.';
+      if (o.word === 'قمر') { R.st.marks[o.id] = !R.st.marks[o.id]; if (!R.st.marks[o.id]) delete R.st.marks[o.id]; sfx.tap(); return true; }
+      if (o.word) return `هذه كلمة «${o.word}».`;
+    },
+    tapTok(R, t) { if (t.text.includes('قمر')) { R.st.marks[t.id] = !R.st.marks[t.id]; if (!R.st.marks[t.id]) delete R.st.marks[t.id]; sfx.tap(); return true; } },
+  },
+  { // 6 · combine two objects: mix red and yellow
+    q: 'لوّن البرتقالة.', trick: 'ادمج شيئين', answer: 'اخلط الأحمر بالأصفر ثم لوّن',
+    hints: ['لا يوجد لون برتقالي هنا… لكن يمكنك أن تصنعه.', 'اسحب علبة الأحمر إلى علبة الأصفر.'],
+    setup(R) {
+      R.add({ id: 'fruit', x: 360, y: 580, r: 130 });
+      R.add({ id: 'red', x: 560, y: 950, w: 130, h: 140, drag: true, col: 'red' });
+      R.add({ id: 'yellow', x: 360, y: 950, w: 130, h: 140, drag: true, col: 'yellow' });
+      R.add({ id: 'blue', x: 160, y: 950, w: 130, h: 140, drag: true, col: 'blue' });
+    },
+    draw(R) {
+      ln(30, 1010, 690, 1010, 5);
+      R.at('fruit', () => D.orange(R.solved ? '#ff9f43' : null));
+      for (const id of ['red', 'yellow', 'blue']) R.at(id, () => D.paintPot(COLORS[R.o[id].col]));
+    },
+    update(R, dt) {
+      if (R.st.resetT > 0) {
+        R.st.resetT -= dt;
+        if (R.st.resetT <= 0) { for (const id of ['red', 'yellow', 'blue']) { const o = R.o[id]; o.col = id; o.vis = true; o.x = o.home.x; o.y = o.home.y; } R.say('لنبدأ من جديد.'); }
+      }
+    },
+    tap(R, o) { if (o.id === 'fruit') return 'برتقالة بلا لون…'; return `لون ${CNAME[o.col]}.`; },
+    drop(R, o) {
+      if (R.near(o, R.o.fruit)) {
+        if (o.col === 'orange') { R.solve(); o.vis = false; return true; }
+        const m = { red: 'حمراء؟ هذه ليست طماطم!', yellow: 'صفراء؟ هذه ليست ليمونة!', blue: 'زرقاء؟! لا يوجد برتقال أزرق.', green: 'خضراء؟ لم تنضج بعد!', purple: 'بنفسجية؟ أبدًا!' }[o.col];
+        const pots = ['red', 'yellow', 'blue'].map(id => R.o[id]).filter(p => p.vis);
+        const can = pots.some(p => p.col === 'orange') || (pots.some(p => p.col === 'red') && pots.some(p => p.col === 'yellow'));
+        if (!can) R.st.resetT = 1.4;
+        return m;
+      }
+      for (const id of ['red', 'yellow', 'blue']) {
+        const b = R.o[id];
+        if (b === o || !b.vis || !R.near(o, b)) continue;
+        const m = MIX[[o.col, b.col].sort().join('+')];
+        if (!m) return 'لون غريب… جرّب غيره.';
+        b.col = m; o.vis = false; sfx.splash(); R.say(`صار عندك ${CNAME[m]}!`);
+        const left = ['red', 'yellow', 'blue'].map(id => R.o[id]).filter(p => p.vis);
+        if (m !== 'orange' && !(left.some(p => p.col === 'red') && left.some(p => p.col === 'yellow'))) R.st.resetT = 1.8;
+        return true;
+      }
+    },
+  },
+  { // 7 · use the HUD: the sound button gives the bird its voice
+    q: 'العصفور يفتح فمه، لكننا لا نسمع شيئًا.', trick: 'استعمل أزرار الشاشة', answer: 'اسحب زر الصوت إلى العصفور',
+    hints: ['الصوت موجود على الشاشة… لكن ليس في الرسم.', 'اسحب زر الصوت من أعلى الشاشة إلى العصفور.'],
+    hudDrag: true,
+    setup(R) {
+      R.add({ id: 'bird', x: 400, y: 628, w: 200, h: 150 });
+      R.add({ id: 'whistle', x: 170, y: 940, w: 140, h: 80, drag: true }); R.add({ id: 'seeds', x: 400, y: 950, w: 150, h: 80, drag: true });
+    },
+    draw(R) {
+      ctx.save(); ctx.translate(330, 640); D.branch(); ctx.restore();
+      ln(30, 1000, 690, 1000, 5);
+      R.at('bird', () => D.bird(Math.abs(Math.sin(R.t * (R.solved ? 9 : 4))), R.t));
+      R.at('whistle', () => D.whistle()); R.at('seeds', () => D.seeds());
+      if (R.solved) for (let i = 0; i < 4; i++) { const k = (R.solveT * 0.6 + i * 0.25) % 1; ctx.globalAlpha = 1 - k; D.note(300 - i * 40 + Math.sin(k * 6 + i) * 20, 560 - k * 220, 1.1); ctx.globalAlpha = 1; }
+    },
+    tap(R, o) {
+      if (o.id === 'bird') return 'يغنّي… لكن بلا صوت!';
+      if (o.id === 'whistle') { sfx.whistle(); return 'هذا صوت الصفّارة، لا العصفور.'; }
+      if (o.id === 'seeds') return 'حَبّ لذيذ للعصافير.';
+    },
+    drop(R, o) {
+      if (o.id === 'whistle' && R.near(o, R.o.bird)) return 'العصفور لا يعرف الصفير بها!';
+      if (o.id === 'seeds' && R.near(o, R.o.bird)) return 'شبع… لكنه ما زال صامتًا.';
+    },
+    dropHud(R, o) { if (o.id === 'mute' && R.near(o, R.o.bird)) { if (muted) setMuted(false); sfx.song(); R.solve(); } },
+  },
+  { // 8 · turn something off: both lights, one of them by its plug
+    q: 'الفراشة لا تستطيع أن تنام.', trick: 'أطفئ شيئًا', answer: 'أطفئ المصباح العلوي واسحب قابس المصباح الصغير',
+    hints: ['الفراشات تحب الضوء… أطفئ كل الأضواء.', 'المصباح الصغير بلا زر. اسحب قابسه من الحائط.'],
+    setup(R) {
+      R.add({ id: 'ceil', x: 300, y: 470, w: 140, h: 120 }); R.add({ id: 'switch', x: 610, y: 600, w: 90, h: 120 });
+      R.add({ id: 'desk', x: 180, y: 800, w: 170, h: 210 }); R.add({ id: 'vase', x: 440, y: 910, w: 110, h: 180 });
+      R.add({ id: 'socket', x: 590, y: 950, w: 80, h: 80 }); R.add({ id: 'plug', x: 590, y: 958, w: 80, h: 80, drag: true });
+      R.add({ id: 'moth', x: 300, y: 560, r: 50 });
+      R.st.ceil = true; R.st.desk = true; R.st.sleepT = 0;
+    },
+    draw(R) {
+      D.table(60, 300, 892); ln(30, 1010, 690, 1010, 5);
+      R.at('ceil', () => D.ceilLamp(R.st.ceil));
+      R.at('switch', () => D.switchPlate(R.st.ceil));
+      R.at('desk', () => D.deskLamp(R.st.desk));
+      R.at('socket', () => D.socket());
+      const p = R.o.plug;
+      ink([180, 892, 220, 1000, 400, 1005, p.x - 40, 1000, p.x, p.y + 30], { open: true, lw: 4, stroke: '#3d3d4a' });
+      R.at('plug', () => D.plug());
+      R.at('vase', () => D.vaseFlower());
+      const dark = (R.st.ceil ? 0 : 0.28) + (R.st.desk ? 0 : 0.22);
+      if (dark) { ctx.fillStyle = `rgba(20,24,60,${dark})`; ctx.fillRect(0, 300, W, 760); }
+      R.at('moth', () => D.moth(R.t, R.solved));
+      if (R.solved) for (let i = 0; i < 3; i++) D.star(470 + i * 34, 740 - i * 30, 9 + i * 2, '#fff3a0');
+    },
+    update(R, dt) {
+      const m = R.o.moth;
+      if (!R.st.ceil && !R.st.desk) {
+        R.st.sleepT += dt; m.x += (434 - m.x) * 0.06; m.y += (818 - m.y) * 0.06;
+        if (R.st.sleepT > 1.2 && !R.solved) R.solve();
+      } else {
+        R.st.sleepT = 0;
+        const c = R.st.ceil ? { x: 300, y: 500, r: 90 } : { x: 245, y: 740, r: 70 };
+        m.x += (c.x + Math.cos(R.t * 3.1) * c.r - m.x) * 0.08; m.y += (c.y + Math.sin(R.t * 4.3) * c.r * 0.6 - m.y) * 0.08;
+      }
+    },
+    tap(R, o) {
+      if (o.id === 'switch') { R.st.ceil = !R.st.ceil; sfx.click(); return !R.st.ceil && R.st.desk ? 'ما زال هناك ضوء…' : true; }
+      if (o.id === 'desk') { R.shake(o); return 'لا يوجد زر!'; }
+      if (o.id === 'moth') return 'الفراشات تحبّ الضوء.';
+      if (o.id === 'ceil') return 'المصباح عالٍ جدًا.';
+      if (o.id === 'vase') return 'زهرة… مكان جميل للنوم.';
+      if (o.id === 'socket') return 'مقبس في الحائط.';
+    },
+    drop(R, o) {
+      if (o.id !== 'plug') return;
+      const s = R.o.socket, inS = Math.hypot(o.x - s.x, o.y - s.y) < 60;
+      if (inS) { o.x = s.x; o.y = s.y + 8; R.st.desk = true; sfx.click(); return true; }
+      if (R.st.desk) { R.st.desk = false; sfx.click(); if (R.st.ceil) R.say('ما زال هناك ضوء…'); }
+      return true;
+    },
+  },
+  { // 9 · look outside the frame: the missing piece sits at the screen's edge
+    q: 'أكمِل اللوحة.', trick: 'انظر خارج الإطار', answer: 'القطعة على حافة الشاشة اليمنى، ثم أدِرها',
+    hints: ['ليست كل القطع داخل الإطار… ولا داخل الصفحة.', 'انظر إلى الحافة اليمنى للشاشة.'],
+    setup(R) {
+      R.add({ id: 'painting', x: 360, y: 540, w: 470, h: 350 });
+      R.add({ id: 'decoy', x: 230, y: 880, w: 110, h: 110, drag: true, rot: 0 });
+      R.add({ id: 'piece', x: 742, y: 840, w: 110, h: 110, hw: 84, drag: true, rot: Math.PI, rotShow: Math.PI });
+      R.st.placed = false;
+    },
+    holeCenter() { return { x: 360 - 220 + HOLE.x + HOLE.s / 2, y: 540 - 160 + HOLE.y + HOLE.s / 2 }; },
+    draw(R) {
+      D.table(120, 340, 940); ln(30, 1040, 690, 1040, 5);
+      R.at('painting', () => {
+        ink(sh.rect(-235, -175, 470, 350), { fill: '#c88a4a', lw: 5 });
+        ctx.save(); ctx.translate(-220, -160); paintingScene();
+        ctx.fillStyle = '#fbf7ea'; ctx.save(); ctx.translate(HOLE.x + HOLE.s / 2, HOLE.y + HOLE.s / 2); piecePath(HOLE.s); ctx.fill();
+        ctx.setLineDash([8, 8]); ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+        ctx.restore();
+      });
+      R.at('decoy', () => { ctx.save(); piecePath(110); ctx.fillStyle = '#4d96ff'; ctx.fill(); ctx.clip(); ctx.translate(0, 8); D.fish('#ffd93d', 0.7); ctx.restore(); piecePath(110); ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.stroke(); });
+      const p = R.o.piece;
+      p.rotShow += (p.rot - p.rotShow) * 0.25;
+      R.at('piece', () => {
+        ctx.rotate(p.rotShow);
+        ctx.save(); piecePath(HOLE.s); ctx.clip(); ctx.translate(-HOLE.x - HOLE.s / 2, -HOLE.y - HOLE.s / 2); paintingScene(); ctx.restore();
+        piecePath(HOLE.s); ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.stroke();
+      });
+    },
+    tap(R, o) {
+      if (o.id === 'piece' && R.st.placed) {
+        o.rot += Math.PI / 2; sfx.tap();
+        if (Math.abs(Math.round(o.rot / (Math.PI / 2)) % 4) === 0) { R.solve(); return true; }
+        return true;
+      }
+      if (o.id === 'painting') return R.st.placed ? 'القطعة مقلوبة!' : 'ينقصها شيء…';
+      if (o.id === 'decoy') return 'قطعة من لغز آخر؟';
+      if (o.id === 'piece') return 'قطعة! اسحبها إلى مكانها.';
+    },
+    drop(R, o) {
+      const hc = this.holeCenter();
+      const at = Math.hypot(o.x - hc.x, o.y - hc.y) < tune.dropReach;
+      if (o.id === 'decoy' && at) return 'لا تُناسب.';
+      if (o.id === 'piece' && at) {
+        o.x = hc.x; o.y = hc.y; o.drag = false; R.st.placed = true; sfx.drop();
+        R.say('مقلوبة! اضغط عليها لتديرها.'); return true;
+      }
+    },
+  },
+  { // 10 · change an object's state by dragging it somewhere: melt the ice by the flame
+    q: 'اسقِ الوردة.', trick: 'غيّر حالة الشيء', answer: 'قرّب الثلج من الشمعة ليذوب، ثم اسقِ الوردة',
+    hints: ['الماء هنا… لكنه متجمّد.', 'قرّب مكعب الثلج من لهب الشمعة.'],
+    setup(R) {
+      R.add({ id: 'saucer', x: 150, y: 920, w: 140, h: 40 }); R.add({ id: 'ice', x: 150, y: 880, w: 96, h: 96, drag: true });
+      R.add({ id: 'candle', x: 340, y: 870, w: 80, h: 180, drag: true }); R.add({ id: 'rose', x: 540, y: 820, w: 150, h: 280 });
+      R.add({ id: 'glass', x: 640, y: 880, w: 80, h: 130, drag: true });
+      R.add({ id: 'drop', x: 0, y: 0, w: 80, h: 90, drag: true, vis: false });
+      R.st.melt = 0;
+    },
+    draw(R) {
+      D.table(60, 680, 940); ln(30, 1060, 690, 1060, 5);
+      R.at('saucer', () => D.saucer());
+      R.at('candle', () => D.candle(R.t));
+      R.at('rose', () => D.rose(R.solved, Math.min(1, R.solveT * 2)));
+      R.at('glass', () => D.glass());
+      if (R.o.ice.vis) R.at('ice', () => { const k = 1 - Math.min(1, R.st.melt / tune.meltTime); D.ice(0.35 + 0.65 * k); if (R.st.melt > 0) ink(sh.ell(0, 40, 50 * (1 - k) + 10, 8), { fill: '#bfe3ff', lw: 2 }); });
+      R.at('drop', () => D.drop());
+    },
+    update(R, dt) {
+      if (R.st.melt > 0 && R.o.ice.vis) {
+        R.st.melt += dt;
+        if (R.st.melt >= tune.meltTime) { const i = R.o.ice, d = R.o.drop; i.vis = false; d.vis = true; d.x = d.home.x = i.x; d.y = d.home.y = i.y; sfx.drip(); R.say('ذاب الثلج!'); }
+      }
+    },
+    flameNear(R, o) { const c = R.o.candle; return Math.hypot(o.x - c.x, o.y - (c.y - 100)) < tune.dropReach; },
+    tap(R, o) { return { rose: 'عطشى…', ice: 'بارد جدًا!', candle: 'حارّة! انتبه.', glass: 'الكأس فارغة.', saucer: 'صحن صغير.', drop: 'قطرة ماء!' }[o.id]; },
+    drop(R, o) {
+      const rose = R.o.rose;
+      if (o.id === 'ice') {
+        if (R.near(o, rose)) return 'ثلج؟ الوردة ستتجمّد!';
+        if (this.flameNear(R, o) && !R.st.melt) { R.st.melt = 0.001; o.home = { x: o.x, y: o.y }; return true; }
+      }
+      if (o.id === 'candle') {
+        if (R.near(o, rose)) return 'ستحترق الوردة!';
+        const i = R.o.ice;
+        if (i.vis && !R.st.melt && Math.hypot(o.x - i.x, o.y - 100 - i.y) < tune.dropReach) { R.st.melt = 0.001; R.say('يذوب…'); return; }
+      }
+      if (o.id === 'glass' && R.near(o, rose)) return 'الكأس فارغة.';
+      if (o.id === 'drop' && R.near(o, rose)) { o.vis = false; R.solve(); return true; }
+    },
+  },
+];
+const COLORS = { red: '#ff5252', yellow: '#ffd93d', blue: '#4d96ff', orange: '#ff9f43', green: '#6bcb77', purple: '#a06cd5' };
+const CNAME = { red: 'أحمر', yellow: 'أصفر', blue: 'أزرق', orange: 'برتقالي', green: 'أخضر', purple: 'بنفسجي' };
+const MIX = { 'red+yellow': 'orange', 'blue+yellow': 'green', 'blue+red': 'purple' };
+
+// ---- The riddle runtime ----------------------------------------------------------------------
+const QRIGHT = 650, QLEFT = 50, QTOP = 168, QLINE = 64, QSIZE = 42;
+function layoutQuestion(q) {
+  ctx.save(); ctx.font = `700 ${QSIZE}px ${HAND}`; ctx.direction = 'rtl';
+  const toks = [];
+  for (const w of q.split(' ')) {
+    const m = w.match(/^(.*?)([.،؟!]*)$/);
+    if (m[1]) toks.push({ text: m[1], punct: false });
+    for (const c of m[2]) toks.push({ text: c, punct: true });
+  }
+  const sp = ctx.measureText(' ').width || 12;
+  let x = QRIGHT, y = QTOP;
+  toks.forEach((t, i) => {
+    t.w = ctx.measureText(t.text).width;
+    if (!t.punct && i > 0) x -= sp;
+    if (!t.punct && x - t.w < QLEFT) { x = QRIGHT; y += QLINE; }
+    t.x = x - t.w / 2; t.y = y; x -= t.w;
+    Object.assign(t, { id: 'tok' + i, h: QSIZE * 1.4, isTok: true, drag: true, vis: true, home: { x: t.x, y: t.y }, shakeT: 0 });
+  });
+  ctx.restore();
+  return toks;
+}
+const HUD = { mute: { x: 64, y: 60, r: 44 }, hint: { x: 172, y: 60, r: 44 }, skip: { x: 280, y: 60, r: 44 } };
+const NEXT = { x: 200, y: 1146, w: 320, h: 96 };
+let run = null, R = null;
+let best = null;
+try { best = JSON.parse(localStorage.getItem('think-outside.v1')); } catch (_) { best = null; }
+if (!best || typeof best !== 'object') best = { time: 0, hints: 0, done: false, reached: 0 };
+function saveBest() { try { localStorage.setItem('think-outside.v1', JSON.stringify(best)); } catch (_) { /* fine */ } }
+
+/** Starts riddle i: a fresh page, its own objects, the hint clock at zero. */
+function startRiddle(i) {
+  const def = RIDDLES[i];
+  R = {
+    i, def, t: 0, objs: [], o: {}, toks: layoutQuestion(def.q), st: {}, hints: 0, hint1At: 0, msg: '', msgT: 0, hintText: '',
+    solved: false, solveT: 0, kindN: 0, pageShake: 0, press: null,
+    mute: { id: 'mute', hud: true, x: HUD.mute.x, y: HUD.mute.y, r: 44, drag: !!def.hudDrag, vis: true, home: { x: HUD.mute.x, y: HUD.mute.y }, shakeT: 0 },
+    add(o) { o.vis = o.vis !== false; o.home = { x: o.x, y: o.y }; o.shakeT = 0; this.objs.push(o); this.o[o.id] = o; return o; },
+    at(id, fn) {
+      const o = this.o[id]; if (!o || !o.vis) return;
+      const s = o.shakeT > 0 ? Math.sin(o.shakeT * 60) * 9 * (o.shakeT / tune.shakeTime) : 0;
+      ctx.save(); ctx.translate(o.x + s, o.y); fn(); ctx.restore();
+    },
+    tok(text) { return this.toks.find(t => t.text === text); },
+    say(m) { this.msg = m; this.msgT = tune.msgTime; },
+    shake(o) { if (o) o.shakeT = tune.shakeTime; },
+    near(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) < tune.dropReach + Math.max(b.r || 0, Math.min(b.w || 0, b.h || 0) / 2) * 0.5; },
+    inside(a, b) { return Math.abs(a.x - b.x) < (b.w || 2 * b.r) / 2 + 20 && Math.abs(a.y - b.y) < (b.h || 2 * b.r) / 2 + 20; },
+    solve() {
+      if (this.solved) return;
+      this.solved = true; this.solveT = 0; this.msg = ''; sfx.solve();
+      run.solved[this.i] = true; run.times[this.i] = this.t;
+      events.push({ type: 'solved', riddle: this.i + 1, t: this.t });
+    },
+  };
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  def.setup(R);
+  best.reached = Math.max(best.reached || 0, i); saveBest();
+  scene = 'play';
+  events.push({ type: 'riddle', riddle: i + 1 });
+}
+function newRun(practice = -1) {
+  run = { practice, totalT: 0, hints: 0, skips: 0, solved: new Array(10).fill(false), times: new Array(10).fill(0) };
+  startRiddle(practice >= 0 ? practice : 0);
+}
+function hintReady() {
+  if (R.hints === 0) return R.t >= tune.hintDelay;
+  if (R.hints === 1) return R.t - R.hint1At >= tune.hint2Delay;
+  return false;
+}
+function hintWait() { return Math.ceil(R.hints === 0 ? tune.hintDelay - R.t : tune.hint2Delay - (R.t - R.hint1At)); }
+function useHint() {
+  if (R.solved) return;
+  if (R.hints >= 2) { R.say(R.def.hints[1]); return; }
+  if (!hintReady()) { R.say(`التلميح يُفتح بعد ${hintWait()} ثانية`); return; }
+  R.hintText = R.def.hints[R.hints]; R.hints++; run.hints++;
+  if (R.hints === 1) R.hint1At = R.t;
+  sfx.hint(); events.push({ type: 'hint', riddle: R.i + 1, n: R.hints });
+}
+function nextRiddle() {
+  if (run.practice >= 0) { scene = 'results'; return; }
+  if (R.i < 9) startRiddle(R.i + 1);
+  else finishRun();
+}
+function skipRiddle() { run.skips++; events.push({ type: 'skip', riddle: R.i + 1 }); nextRiddle(); }
+function finishRun() {
+  const fresh = !best.done || run.totalT < best.time;
+  best.time = fresh ? run.totalT : best.time;
+  best.hints = !best.done ? run.hints : Math.min(best.hints, run.hints);
+  best.done = true; saveBest();
+  run.newBest = fresh;
+  scene = 'results'; events.push({ type: 'finished', time: run.totalT, hints: run.hints });
+}
+function hitTest(p) {
+  const hudHit = (b) => Math.hypot(p.x - b.x, p.y - b.y) <= b.r + 6;
+  if (R.def.hudDrag && R.mute.vis && Math.hypot(p.x - R.mute.x, p.y - R.mute.y) <= 50) return R.mute;
+  if (!R.def.hudDrag && hudHit(HUD.mute)) return { hud: true, id: 'mute' };
+  if (hudHit(HUD.hint)) return { hud: true, id: 'hint' };
+  if (R.hints >= 2 && hudHit(HUD.skip)) return { hud: true, id: 'skip' };
+  // question words: the nearest whose box (at least 72 px) holds the point
+  let bestTok = null, bd = 1e9;
+  for (const t of R.toks) {
+    if (!t.vis) continue;
+    const hw = Math.max(36, t.w / 2 + 4), hh = Math.max(36, t.h / 2);
+    if (Math.abs(p.x - t.x) <= hw && Math.abs(p.y - t.y) <= hh) { const d = Math.hypot(p.x - t.x, p.y - t.y); if (d < bd) { bd = d; bestTok = t; } }
+  }
+  if (bestTok) return bestTok;
+  for (let i = R.objs.length - 1; i >= 0; i--) {
+    const o = R.objs[i];
+    if (!o.vis) continue;
+    if (o.r) { if (Math.hypot(p.x - o.x, p.y - o.y) <= Math.max(36, o.r)) return o; continue; }
+    const hw = Math.max(36, (o.hw || o.w / 2)), hh = Math.max(36, o.h / 2);
+    if (Math.abs(p.x - o.x) <= hw && Math.abs(p.y - o.y) <= hh) return o;
+  }
+  return null;
+}
+function kindWord() { R.say(KIND[R.kindN++ % KIND.length]); sfx.wrong(); }
+function handleTap(target, p) {
+  const def = R.def;
+  if (target && target.hud) {
+    if (target.id === 'mute') { setMuted(!muted); return; }
+    if (target.id === 'hint') { useHint(); return; }
+    if (target.id === 'skip') { skipRiddle(); return; }
+  }
+  let res;
+  if (target && target.isTok) res = def.tapTok ? def.tapTok(R, target) : undefined;
+  else if (target) res = def.tap ? def.tap.call(def, R, target) : undefined;
+  if (typeof res === 'string') { R.say(res); if (!R.solved) sfx.wrong(); if (target) R.shake(target); return; }
+  if (res) return;
+  if (target) R.shake(target); else R.pageShake = tune.shakeTime;
+  kindWord();
+}
+function handleDrop(o, p) {
+  const def = R.def;
+  let res;
+  if (o.hud) res = def.dropHud ? def.dropHud(R, o) : undefined;
+  else if (o.isTok) res = def.dropTok ? def.dropTok(R, o) : undefined;
+  else res = def.drop ? def.drop.call(def, R, o, p) : undefined;
+  if (typeof res === 'string') { R.say(res); sfx.wrong(); o.returning = true; return; }
+  if (res === true) { sfx.drop(); return; }
+  o.returning = true;
+}
+function playPointer(e) {
+  if (R.solved) {
+    if (e.t === 'down' && R.solveT > tune.nextDelay && e.x >= NEXT.x && e.x <= NEXT.x + NEXT.w && e.y >= NEXT.y && e.y <= NEXT.y + NEXT.h) nextRiddle();
+    else if (e.t === 'down' && Math.hypot(e.x - HUD.mute.x, e.y - HUD.mute.y) <= 50) setMuted(!muted);
+    return;
+  }
+  if (e.t === 'down') {
+    if (R.press) return;
+    const target = hitTest(e);
+    if (R.def.anyDown) R.def.anyDown(R, target);
+    R.press = { id: e.id, x0: e.x, y0: e.y, target, dragging: false, ox: target ? e.x - target.x : 0, oy: target ? e.y - target.y : 0 };
+  } else if (R.press && e.id === R.press.id) {
+    const pr = R.press, o = pr.target;
+    if (e.t === 'move') {
+      if (!pr.dragging && o && o.drag && Math.hypot(e.x - pr.x0, e.y - pr.y0) > tune.dragStart) { pr.dragging = true; o.returning = false; sfx.pick(); }
+      if (pr.dragging) { o.x = clamp(e.x - pr.ox, 0, W); o.y = clamp(e.y - pr.oy, 0, H); }
+    } else if (e.t === 'up') {
+      R.press = null;
+      if (pr.dragging) handleDrop(o, e); else handleTap(o, e);
+    } else { R.press = null; if (pr.dragging) o.returning = true; }
+  }
+}
+
+// ---- Scenes ----------------------------------------------------------------------------------
+let scene, state;
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  state = { t: 0, score: 0, gained: '' };
+}
+function gridTiles(y0) { const a = []; for (let i = 0; i < 10; i++) a.push({ i, x: 560 - (i % 5) * 120, y: y0 + Math.floor(i / 5) * 120, w: 100, h: 100 }); return a; }
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() { drawFigures(); },
+  },
+  title: {
+    pointer(e) {
+      if (e.t !== 'down') return;
+      if (location.protocol.startsWith('http') && Math.hypot(e.x - 64, e.y - 60) <= 50) { location.href = '../../'; return; }
+      if (Math.hypot(e.x - 656, e.y - 60) <= 50) { setMuted(!muted); return; }
+      if (best.done) for (const g of gridTiles(930)) if (e.x >= g.x && e.x <= g.x + g.w && e.y >= g.y && e.y <= g.y + g.h) { newRun(g.i); return; }
+      newRun();
+    },
+    update(dt) { state.t += dt; if (pressed('Enter') || pressed('Space')) newRun(); },
+    draw() { drawTitle(); },
+  },
+  play: {
+    pointer: playPointer,
+    update(dt) {
+      R.t += R.solved ? 0 : dt; run.totalT += R.solved ? 0 : dt;
+      if (R.solved) R.solveT += dt;
+      if (R.msgT > 0) R.msgT -= dt;
+      if (R.pageShake > 0) R.pageShake -= dt;
+      for (const o of R.objs.concat(R.toks, [R.mute])) {
+        if (o.shakeT > 0) o.shakeT -= dt;
+        if (o.returning) {
+          const k = tune.snapBack; o.x += (o.home.x - o.x) * k; o.y += (o.home.y - o.y) * k;
+          if (Math.hypot(o.x - o.home.x, o.y - o.home.y) < 1) { o.x = o.home.x; o.y = o.home.y; o.returning = false; }
+        }
+      }
+      if (R.def.update) R.def.update.call(R.def, R, dt);
+      if (pressed('KeyH')) useHint();
+      if (R.solved && R.solveT > tune.nextDelay && (pressed('Enter') || pressed('Space'))) nextRiddle();
+    },
+    draw() { drawPlay(); },
+  },
+  results: {
+    pointer(e) {
+      if (e.t !== 'down') return;
+      if (e.x >= 160 && e.x <= 560 && e.y >= 1110 && e.y <= 1206) { newRun(); return; }
+      for (const g of gridTiles(800)) if (e.x >= g.x && e.x <= g.x + g.w && e.y >= g.y && e.y <= g.y + g.h) { newRun(g.i); return; }
+    },
+    update(dt) { state.t += dt; if (pressed('Enter') || pressed('Space')) newRun(); if (pressed('Escape')) { reset(); scene = 'title'; } },
+    draw() { drawResults(); },
+  },
+};
+
+// ---- Drawing the page --------------------------------------------------------------------------
+function drawPaper() {
+  ctx.fillStyle = '#fbf7ea'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#d4e3f3'; ctx.lineWidth = 1.5; ctx.beginPath();
+  for (let x = 20; x < W; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = 20; y < H; y += 40) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+  ctx.strokeStyle = '#e86a6a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(668, 0); ctx.lineTo(668, H); ctx.stroke();
+  ctx.strokeStyle = 'rgba(232,106,106,0.45)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(674, 0); ctx.lineTo(674, H); ctx.stroke();
+}
+function hudButton(b, fn, glow) {
+  ctx.save(); ctx.translate(b.x, b.y);
+  ink(sh.circ(0, 0, 38, 18), { fill: glow ? '#fff3c4' : '#ffffff', lw: 3.5 }); fn(); ctx.restore();
+}
+function drawHUD() {
+  // the sound button (draggable in riddle 7)
+  const m = R.mute;
+  const s = m.shakeT > 0 ? Math.sin(m.shakeT * 60) * 8 : 0;
+  ctx.save(); ctx.translate(m.x + s, m.y); ink(sh.circ(0, 0, 38, 18), { fill: '#ffffff', lw: 3.5 }); D.speaker(!muted); ctx.restore();
+  // hint: a bulb with a filling ring until it opens
+  const ready = !R.solved && hintReady() && R.hints < 2;
+  hudButton(HUD.hint, () => {
+    D.bulb(ready, R.t);
+    if (!ready && R.hints < 2 && !R.solved) {
+      const f = R.hints === 0 ? R.t / tune.hintDelay : (R.t - R.hint1At) / tune.hint2Delay;
+      ctx.strokeStyle = '#2bb673'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(0, 0, 44, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(f, 0, 1)); ctx.stroke();
+    }
+  }, ready);
+  if (R.hints > 0) { ctx.save(); ctx.translate(HUD.hint.x + 30, HUD.hint.y + 30); ink(sh.circ(0, 0, 14, 10), { fill: '#ff6b6b', lw: 2.5 }); text(`${R.hints}`, 0, 1, 20, '#fff', 'center', '800'); ctx.restore(); }
+  if (R.hints >= 2 && !R.solved) hudButton(HUD.skip, () => D.skip(), false);
+  // riddle number and the clock
+  inkText(`لغز ${R.i + 1} من 10`, 560, 44, 30, INK, '800', FONT);
+  text(fmtTime(run.totalT), 560, 86, 24, '#5a6aa8', 'center', '700');
+}
+function drawQuestion() {
+  ctx.save(); ctx.font = `700 ${QSIZE}px ${HAND}`;
+  for (const t of R.toks) {
+    if (!t.vis) continue;
+    const s = t.shakeT > 0 ? Math.sin(t.shakeT * 60) * 6 : 0;
+    const lift = R.press && R.press.dragging && R.press.target === t;
+    if (lift) { ctx.fillStyle = 'rgba(255,217,61,0.5)'; rrect(t.x - t.w / 2 - 10, t.y - 30, t.w + 20, 60, 14); ctx.fill(); }
+    const k = R.toks.indexOf(t), rot = (hash(k * 17 + 5) - 0.5) * 0.07, dy = (hash(k * 23 + 1) - 0.5) * 6;
+    ctx.save(); ctx.translate(t.x + s, t.y + dy); ctx.rotate(rot);
+    inkText(t.text, 0, 0, QSIZE * (0.96 + hash(k * 29) * 0.08), INK, '700', HAND);
+    ctx.restore();
+  }
+  ctx.restore();
+  ln(40, 290, 640, 292, 2.5, 'rgba(33,64,143,0.35)');
+}
+function drawMessages() {
+  if (R.hintText && !R.solved) {
+    ctx.save(); ctx.translate(360, 1105); ctx.rotate(-0.012);
+    ink(sh.rect(-300, -42, 600, 84), { fill: '#fff3a0', lw: 3 });
+    text(R.hintText, 0, 2, 27, '#5a4a12', 'center', '700');
+    ctx.restore();
+  }
+  if (R.msgT > 0 && !R.solved) {
+    const a = Math.min(1, R.msgT / 0.3);
+    ctx.globalAlpha = a; ctx.save(); ctx.translate(360, 1212);
+    ink(sh.rect(-310, -38, 620, 76), { fill: '#ffffff', lw: 3 });
+    ink([-20, -38, 0, -58, 18, -38], { open: true, sharp: true, lw: 3 });
+    text(R.msg, 0, 2, 28, INK, 'center', '700');
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+}
+function drawSolved() {
+  const k = R.solveT;
+  ctx.fillStyle = `rgba(251,247,234,${Math.min(0.55, k * 2)})`; ctx.fillRect(0, 300, W, 840);
+  ctx.save(); ctx.translate(360, 640); D.tick(clamp(k / 0.5, 0, 1)); ctx.restore();
+  if (k > 0.4) {
+    const p = Math.min(1, (k - 0.4) * 4);
+    D.star(520, 470 - p * 10, 26 * p); D.star(210, 520, 16 * p, '#ff9f43'); D.star(560, 760, 14 * p, '#4d96ff');
+  }
+  inkText(['أحسنت!', 'رائع!', 'فكرة ذكية!', 'عبقري!'][R.i % 4], 360, 920, 54, '#2bb673', '800', HAND);
+  if (k > tune.nextDelay) {
+    ink(sh.rect(NEXT.x, NEXT.y, NEXT.w, NEXT.h), { fill: '#ffd93d', lw: 4 });
+    text(R.i < 9 || run.practice >= 0 ? 'التالي' : 'النتيجة', NEXT.x + NEXT.w / 2 + 30, NEXT.y + NEXT.h / 2 + 2, 36, INK, 'center', '800');
+    ink([NEXT.x + 70, NEXT.y + 30, NEXT.x + 46, NEXT.y + 48, NEXT.x + 70, NEXT.y + 66], { open: true, sharp: true, lw: 5 });
+  }
+}
+function drawPlay() {
+  BOIL = Math.floor(R.t / tune.boil) % 3; JAMP = tune.jitter;
+  drawPaper();
+  ctx.save();
+  if (R.pageShake > 0) ctx.translate(Math.sin(R.pageShake * 60) * 6, 0);
+  R.def.draw.call(R.def, R);
+  drawQuestion();
+  ctx.restore();
+  if (R.solved) drawSolved();
+  drawHUD();
+  drawMessages();
+}
+function drawTitle() {
+  BOIL = Math.floor(state.t / tune.boil) % 3; JAMP = tune.jitter;
+  drawPaper();
+  if (location.protocol.startsWith('http')) { ctx.save(); ctx.translate(64, 60); ink(sh.circ(0, 0, 38, 18), { fill: '#ffffff', lw: 3.5 }); D.house(INK); ctx.restore(); }
+  ctx.save(); ctx.translate(656, 60); ink(sh.circ(0, 0, 38, 18), { fill: '#ffffff', lw: 3.5 }); D.speaker(!muted); ctx.restore();
+  // a box with a thought escaping it
+  ctx.save(); ctx.translate(360, 470);
+  ink([-120, -40, 120, -40, 120, 110, -120, 110], { fill: '#c08552', sharp: true });
+  ink([-120, -40, -160, -100, 80, -100, 120, -40], { fill: '#d9a066', sharp: true });
+  ink([120, -40, 170, -95, 80, -100], { fill: '#b07040', sharp: true });
+  ink([0, -40, 30, -140, 110, -170, 170, -240], { open: true, lw: 6 });
+  ink([150, -260, 182, -236, 148, -222], { open: true, sharp: true, lw: 6 });
+  D.star(-170, -150, 22); D.star(-110, -60, 14, '#ff9f43'); D.star(210, -150, 12, '#4d96ff');
+  ctx.restore();
+  inkText('فكّر برّا الصندوق', 360, 160, 70, INK, '800', HAND);
+  text('THINK OUTSIDE', 360, 236, 30, '#5a6aa8', 'center', '800');
+  const pulse = 0.75 + 0.25 * Math.sin(state.t * 4);
+  ctx.globalAlpha = pulse; inkText('اضغط للبدء', 360, 680, 46, '#e34b4b', '800', HAND); ctx.globalAlpha = 1;
+  text('عشرة ألغاز، وكل لغز له خدعة مختلفة', 360, 760, 28, INK);
+  text('اضغط واسحب أي شيء… حتى كلمات السؤال!', 360, 806, 28, INK);
+  text('تلميح مجاني بعد 20 ثانية، وتخطٍّ بعد تلميحين', 360, 852, 26, '#5a6aa8');
+  if (best.done) {
+    text(`أفضل وقت ${fmtTime(best.time)} · أقل تلميحات ${best.hints}`, 360, 900, 26, '#2bb673', 'center', '700');
+    for (const g of gridTiles(930)) { ink(sh.rect(g.x, g.y, g.w, g.h), { fill: '#ffffff', lw: 3 }); text(`${g.i + 1}`, g.x + g.w / 2, g.y + g.h / 2 + 2, 40, INK, 'center', '800'); }
+    text('أو اختر لغزًا', 360, 1180, 24, '#5a6aa8');
+  }
+  text('Enter: متابعة · H: تلميح · M: الصوت', 360, 1230, 24, '#5a6aa8');
+}
+function drawResults() {
+  BOIL = Math.floor(state.t / tune.boil) % 3; JAMP = tune.jitter;
+  drawPaper();
+  const prac = run && run.practice >= 0;
+  inkText(prac ? 'حُلّ اللغز!' : 'انتهيت من الألغاز العشرة!', 360, 150, 50, INK, '800', HAND);
+  if (!prac) {
+    ctx.save(); ctx.translate(360, 300); D.tick(1); ctx.restore();
+    text(`الوقت: ${fmtTime(run.totalT)}`, 360, 470, 34, INK, 'center', '800');
+    text(`التلميحات: ${run.hints} · التخطي: ${run.skips}`, 360, 520, 30, INK, 'center', '700');
+    text(run.newBest ? 'رقم قياسي جديد!' : `أفضل وقت لك: ${fmtTime(best.time)}`, 360, 575, 30, '#2bb673', 'center', '800');
+    text(`أقل عدد تلميحات: ${best.hints}`, 360, 620, 28, '#5a6aa8', 'center', '700');
+    for (let i = 0; i < 3; i++) D.star(250 + i * 110, 690, 26, ['#ffd93d', '#ff9f43', '#4d96ff'][i]);
+  }
+  text('اختر لغزًا لتلعبه مرة أخرى', 360, 760, 28, INK, 'center', '700');
+  for (const g of gridTiles(800)) {
+    const ok = run && run.solved[g.i];
+    ink(sh.rect(g.x, g.y, g.w, g.h), { fill: ok ? '#e2f7e8' : '#ffffff', lw: 3 });
+    text(`${g.i + 1}`, g.x + g.w / 2, g.y + g.h / 2 + 2, 40, INK, 'center', '800');
+  }
+  ink(sh.rect(160, 1110, 400, 96), { fill: '#ffd93d', lw: 4 });
+  text('العب من البداية', 360, 1160, 34, INK, 'center', '800');
+}
+function drawFigures() {
+  BOIL = Math.floor(state.t / tune.boil) % 3; JAMP = tune.jitter;
+  drawPaper();
+  text('الرسومات', 360, 40, 32, INK, 'center', '800');
+  const items = [
+    ['قطة', 0.36, () => { ctx.translate(0, -50); D.cat(false, 0); }], ['سمكة', 1, () => D.fish()], ['حوض سمك', 0.7, () => D.bowl(state.t)], ['صنارة', 0.45, () => D.rod()],
+    ['باب', 0.38, () => D.door(false)], ['ممسحة', 0.7, () => D.mat()], ['مفتاح', 1.2, () => D.key(0)], ['أصيص', 0.75, () => D.flowerPot()],
+    ['بيضة', 0.8, () => D.egg(2, 0)], ['كتكوت', 0.8, () => D.chick(state.t)], ['مطرقة', 0.8, () => D.hammer()], ['ساعة', 0.9, () => D.clock(state.t)],
+    ['برتقالة', 0.38, () => D.orange('#ff9f43')], ['علبة لون', 0.8, () => D.paintPot('#ff5252')], ['عصفور', 0.6, () => D.bird(0.5, state.t)], ['صفّارة', 0.9, () => D.whistle()],
+    ['مصباح', 0.55, () => D.deskLamp(true)], ['فراشة', 1.1, () => D.moth(state.t, false)], ['قابس', 1.1, () => D.plug()], ['قطعة لغز', 0.75, () => { piecePath(110); ctx.fillStyle = '#ffd93d'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.stroke(); }],
+    ['وردة', 0.5, () => D.rose(true, 1)], ['ثلج', 0.9, () => D.ice(1)], ['شمعة', 0.5, () => D.candle(state.t)], ['قطرة ماء', 1, () => D.drop()],
+  ];
+  items.forEach(([name, k, fn], i) => {
+    const cx = 610 - (i % 4) * 165, cy = 140 + Math.floor(i / 4) * 190;
+    ctx.save(); ctx.translate(cx, cy + 50); ctx.scale(k, k); fn(); ctx.restore();
+    text(name, cx, cy + 132, 24, INK, 'center', '700');
+  });
+}
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  while (ptrQ.length) { const e = ptrQ.shift(); const sc = scenes[scene]; if (sc.pointer) sc.pointer(e); }
+  scenes[scene].update(STEP); hit.clear();
+}
+let last, acc = 0, ALPHA = 1; // ALPHA: how far the frame is between the last two steps
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now; // a stall never fast-forwards the game
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { ctx.setTransform(RATIO, 0, 0, RATIO, 0, 0); scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return scene === 'play' && R ? { riddle: R.i + 1, t: R.t, hints: R.hints, solved: R.solved, total: run.totalT } : state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+if (scene === 'play') { run = { practice: -1, totalT: 0, hints: 0, skips: 0, solved: new Array(10).fill(false), times: new Array(10).fill(0) }; startRiddle(clamp((Number(params.get('riddle')) || 1) - 1, 0, 9)); }
+if (scene === 'results' && !run) { run = { practice: -1, totalT: 0, hints: 0, skips: 0, solved: new Array(10).fill(false), times: new Array(10).fill(0) }; }
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

@@ -1,0 +1,1036 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: Is the core loop fun on a phone, and does our fairness fix answer the players' top complaint? -->
+<!-- Date: 2026-11-23 -->
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1b0f09">
+<title>عطّار · Attar</title>
+<link rel="stylesheet" href="vendor/almarai.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #1b0f09; overflow: hidden; }
+  body { font-variant-numeric: tabular-nums; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  canvas { display: block; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
+<script src="config.js"></script>
+<script>
+'use strict';
+// Attar (عطّار): pour layered scented oils between glass flasks until each holds one scent.
+// Every level is dealt only when an A* solver over canonical states finds a solution; that
+// solution's length is the par, and the same solver gives the hint and spots dead ends.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 720, H = 1280;        // logical size: portrait phone
+const PIXEL = false;
+const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
+const TITLE = 'عطّار · Attar';
+const CONTROLS = ['اضغط قارورة لترفعها، ثم اضغط أخرى لتسكب', 'الأسهم والمسافة · U تراجع · H تلميح · R إعادة'];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let VIEW_R = 1;
+function fit() { // fills the window at any size and pixel ratio
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  const r = s * (devicePixelRatio || 1);
+  VIEW_R = r;
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  ctx.setTransform(r, 0, 0, r, 0, 0); ctx.imageSmoothingEnabled = true;
+  bgCache = null;
+}
+let bgCache = null;
+addEventListener('resize', fit); fit();
+const ARABIC = /[؀-ۿ]/;
+function setFont(size, weight = '') { ctx.font = `${weight} ${size}px ${FONT}`; }
+function text(s, x, y, size, c, align = 'center', weight = '') {
+  ctx.fillStyle = c; setFont(size, weight); ctx.textAlign = align;
+  ctx.textBaseline = 'middle'; ctx.direction = ARABIC.test(s) ? 'rtl' : 'ltr';
+  ctx.fillText(s, x, y); ctx.direction = 'ltr';
+}
+function wrap(s, size, maxW, weight = '') {
+  setFont(size, weight); ctx.direction = 'rtl';
+  const words = s.split(' '), lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur);
+  ctx.direction = 'ltr'; return lines;
+}
+
+// ---- Input: keys by position, pointers queued and read on the step ---------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code);
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => down.clear());
+const ptrQ = [];
+let activePtr = null;
+function toLogical(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height }; }
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault(); startAudio();
+  if (activePtr !== null && activePtr !== e.pointerId) return;
+  activePtr = e.pointerId;
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  ptrQ.push({ type: 'down', ...toLogical(e) });
+});
+function ptrEnd(e, type) { if (e.pointerId !== activePtr) return; activePtr = null; ptrQ.push({ type, ...toLogical(e) }); }
+canvas.addEventListener('pointerup', e => ptrEnd(e, 'up'));
+canvas.addEventListener('pointercancel', e => ptrEnd(e, 'cancel'));
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+const inRect = (p, r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    try {
+      const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)();
+      const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+      out.connect(ac.destination); audio = { ac, out };
+    } catch (_) { return; }
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; store.set('muted', m); }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3, delay = 0, slide = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur + 0.02);
+}
+const sfx = {
+  lift() { tone(620, 0.07, 'sine', 0.12, 0, 120); },
+  drop() { tone(420, 0.07, 'sine', 0.1, 0, -100); },
+  pour(n) { const d = tune.pour_time; for (let k = 0; k < 4 + n * 2; k++) tone(260 + ((k * 73) % 120) + k * 14, 0.07, 'sine', 0.09, d * 0.32 + k * 0.045, 80); },
+  seal(delay) { tone(1047, 0.35, 'triangle', 0.14, delay); tone(1568, 0.45, 'sine', 0.09, delay + 0.06); tone(2093, 0.5, 'sine', 0.05, delay + 0.12); },
+  nope() { tone(150, 0.12, 'square', 0.07); },
+  hint() { tone(880, 0.1, 'triangle', 0.13); tone(1175, 0.16, 'triangle', 0.1, 0.07); },
+  win() { [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.35, 'triangle', 0.16, i * 0.1)); },
+  ui() { tone(440, 0.05, 'triangle', 0.1); },
+};
+
+// ---- Storage: unlocked level and best per level; the game works without it -------------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('attar:' + k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem('attar:' + k, JSON.stringify(v)); } catch (_) {} },
+};
+muted = store.get('muted', false);
+
+// ---- Look: the nine scents ---------------------------------------------------------------
+const SCENT = [
+  { c: '#c8325a', hi: '#f4869f', n: 'ورد', em: 'rose', dark: false },
+  { c: '#e8891c', hi: '#ffc574', n: 'عنبر', em: 'drop', dark: false },
+  { c: '#6e3d20', hi: '#b07244', n: 'عود', em: 'wood', dark: false },
+  { c: '#efe2bf', hi: '#ffffff', n: 'ياسمين', em: 'jasmine', dark: true },
+  { c: '#f5c41e', hi: '#fff2a0', n: 'زعفران', em: 'threads', dark: true },
+  { c: '#1f9d5b', hi: '#78e3a6', n: 'زمرد', em: 'leaf', dark: false },
+  { c: '#34419f', hi: '#8190f0', n: 'نيلة', em: 'crescent', dark: false },
+  { c: '#8a4fb4', hi: '#c99aee', n: 'مسك', em: 'pod', dark: false },
+  { c: '#ff8768', hi: '#ffc6b4', n: 'مرجان', em: 'coral', dark: true },
+];
+const CH = 'abcdefghi';
+const ci = ch => ch.charCodeAt(0) - 97;
+function hash01(a, b = 0) { // decoration only (grain, glints): not gameplay
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35);
+  h ^= h >>> 13; h = Math.imul(h, 0x27d4eb2f); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+// ---- Rules and solver -------------------------------------------------------------------
+// A state is an array of strings, one per flask, bottom to top, one letter per layer.
+function topRun(f) { const t = f[f.length - 1]; let n = 1; while (n < f.length && f[f.length - 1 - n] === t) n++; return n; }
+function isSealed(f, cap) { return f.length === cap && topRun(f) === cap; }
+/** Pour rule: the top run moves onto the same scent or into an empty flask, as far as space allows. */
+function canPour(st, i, j, cap) {
+  if (i === j) return false;
+  const a = st[i], b = st[j];
+  if (!a.length || b.length >= cap || isSealed(a, cap)) return false;
+  return !b.length || b[b.length - 1] === a[a.length - 1];
+}
+const pourAmount = (st, i, j, cap) => Math.min(topRun(st[i]), cap - st[j].length);
+function applyPour(st, i, j, n) { const s = st.slice(), a = st[i]; s[i] = a.slice(0, a.length - n); s[j] = st[j] + a.slice(a.length - n); return s; }
+const isSolved = (st, cap) => st.every(f => !f.length || isSealed(f, cap));
+const stateKey = st => st.slice().sort().join(',');
+function hScore(st) { // layer runs minus scents: each pour can lower it by at most one
+  let seg = 0; const seen = new Set();
+  for (const f of st) for (let k = 0; k < f.length; k++) { if (k === 0 || f[k] !== f[k - 1]) seg++; seen.add(f[k]); }
+  return seg - seen.size;
+}
+function legalMoves(st, cap) { const out = []; for (let i = 0; i < st.length; i++) for (let j = 0; j < st.length; j++) if (canPour(st, i, j, cap)) out.push([i, j]); return out; }
+function solverMoves(st, cap) { // legal moves minus the pointless ones (sound for proving dead ends)
+  const out = [];
+  for (let i = 0; i < st.length; i++) {
+    const a = st[i]; if (!a.length || isSealed(a, cap)) continue;
+    const run = topRun(a), t = a[a.length - 1]; let triedEmpty = false;
+    for (let j = 0; j < st.length; j++) {
+      if (i === j) continue; const b = st[j];
+      if (b.length >= cap) continue;
+      if (!b.length) { if (run === a.length || triedEmpty) continue; triedEmpty = true; }
+      else if (b[b.length - 1] !== t) continue;
+      out.push([i, j, Math.min(run, cap - b.length)]);
+    }
+  }
+  return out;
+}
+class Heap { // min-heap on .f
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(x) { const a = this.a; a.push(x); let i = a.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (a[p].f <= x.f) break; a[i] = a[p]; i = p; } a[i] = x; }
+  pop() {
+    const a = this.a, top = a[0], x = a.pop();
+    if (a.length) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= a.length) break; if (c + 1 < a.length && a[c + 1].f < a[c].f) c++; if (a[c].f >= x.f) break; a[i] = a[c]; i = c; } a[i] = x; }
+    return top;
+  }
+}
+/**
+ * Weighted A* over canonical states (flask order ignored). Returns
+ * { found, path: [[i, j, n], ...], exhausted } — exhausted without found proves no solution.
+ */
+function solve(start, cap, w, nodeCap) {
+  const heap = new Heap(), best = new Map();
+  heap.push({ st: start, g: 0, parent: null, move: null, f: w * hScore(start) });
+  best.set(stateKey(start), 0);
+  let opened = 0;
+  while (heap.size) {
+    const node = heap.pop();
+    if (best.get(stateKey(node.st)) < node.g) continue;
+    if (isSolved(node.st, cap)) { const path = []; for (let n = node; n.parent; n = n.parent) path.push(n.move); return { found: true, path: path.reverse(), exhausted: false, opened }; }
+    if (++opened > nodeCap) return { found: false, exhausted: false, opened };
+    for (const m of solverMoves(node.st, cap)) {
+      const s = applyPour(node.st, m[0], m[1], m[2]), k = stateKey(s), g = node.g + 1, old = best.get(k);
+      if (old !== undefined && old <= g) continue;
+      best.set(k, g);
+      const h = hScore(s);
+      heap.push({ st: s, g, parent: node, move: m, f: g + w * h + h * 0.001 });
+    }
+  }
+  return { found: false, exhausted: true, opened };
+}
+function solveAny(st, cap, w, nodeCap) { // the hint and the dealer: near-shortest first, then any
+  let r = solve(st, cap, w, nodeCap);
+  if (!r.found && !r.exhausted) r = solve(st, cap, Math.max(3, w * 2), nodeCap);
+  return r;
+}
+/** A trap: one or two pours from the start (the second into the last empty flask) reach a proven dead end. */
+function hasTrap(st, cap) {
+  const seen = new Set();
+  const dead = s => {
+    if (s.some(f => !f.length)) return false;
+    const k = stateKey(s); if (seen.has(k)) return false; seen.add(k);
+    const r = solve(s, cap, 3, tune.dead_nodes); return !r.found && r.exhausted; // the same test the game runs after a pour
+  };
+  for (const [i, j] of legalMoves(st, cap)) {
+    const s1 = applyPour(st, i, j, pourAmount(st, i, j, cap));
+    if (dead(s1)) return true;
+    for (const [i2, j2] of legalMoves(s1, cap)) {
+      if (s1[j2].length) continue;
+      if (dead(applyPour(s1, i2, j2, pourAmount(s1, i2, j2, cap)))) return true;
+    }
+  }
+  return false;
+}
+
+// ---- Levels ------------------------------------------------------------------------------
+const LEVELS = 12;
+const isNarrow = lv => lv >= tune.narrow_from && (lv - tune.narrow_from) % tune.narrow_every === 0;
+const isVeiled = lv => lv >= tune.veil_from;
+const capOf = lv => isNarrow(lv) ? tune.narrow_capacity : tune.capacity;
+const scentsOf = lv => tune['scents_' + Math.min(LEVELS, lv)];
+const emptiesOf = lv => lv === 1 ? tune.first_empties : tune.empties;
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+/** One deal attempt for a level: shuffled layers, kept only when the solver proves it solvable. */
+function dealAttempt(lv, tries) {
+  const k = scentsOf(lv), cap = capOf(lv);
+  const kinds = lv === 1 ? [0, 1] : shuffle([...Array(SCENT.length).keys()]).slice(0, k);
+  const pool = []; for (const c of kinds) for (let n = 0; n < cap; n++) pool.push(CH[c]);
+  shuffle(pool);
+  const st = [];
+  for (let f = 0; f < k; f++) st.push(pool.slice(f * cap, (f + 1) * cap).join(''));
+  for (let e = 0; e < emptiesOf(lv); e++) st.push('');
+  if (st.some(f => f.length && topRun(f) >= cap - (lv > 2 ? 1 : 0))) return null; // nothing (almost) done at the start
+  const r = solveAny(st, cap, 1, tune.solver_nodes);
+  if (!r.found) return null;
+  if (lv === 1 && r.path.length !== tune.first_par && tries < 400) return null;
+  if (lv >= 3 && lv <= tune.trap_levels && tries < 200 && !hasTrap(st, cap)) return null;
+  return { st, par: r.path.length, cap };
+}
+
+// ---- Layout -------------------------------------------------------------------------------
+const B = {
+  mute: { x: 624, y: 16, w: 80, h: 80 }, menu: { x: 16, y: 16, w: 80, h: 80 }, home: { x: 16, y: 16, w: 80, h: 80 },
+  undo: { x: 492, y: 1112, w: 196, h: 128 }, hint: { x: 262, y: 1112, w: 196, h: 128 }, restart: { x: 32, y: 1112, w: 196, h: 128 },
+  start: { x: 150, y: 680, w: 420, h: 104 },
+  next: { x: 150, y: 820, w: 420, h: 106 }, again: { x: 210, y: 946, w: 300, h: 88 },
+  sUndo: { x: 380, y: 640, w: 230, h: 100 }, sRestart: { x: 110, y: 640, w: 230, h: 100 },
+};
+const TILE = k => ({ x: 70 + (k % 4) * 150, y: 812 + Math.floor(k / 4) * 128, w: 130, h: 110 });
+/** Flask geometry and positions for n flasks of a capacity: one shelf up to 6, else two. */
+function makeLayout(n, cap) {
+  const rows = n <= 6 ? 1 : 2;
+  const per = rows === 1 ? [n] : [Math.ceil(n / 2), Math.floor(n / 2)];
+  const narrow = cap < tune.capacity;
+  const w0 = rows === 1 ? Math.min(124, (W - 60) / n - 26) : 86;
+  const w = w0 * (narrow ? 0.8 : 1);
+  const layerH = rows === 1 ? Math.round(Math.min(82, w0 * 0.68)) : 50;
+  const neckW = w * 0.46, neckH = rows === 1 ? Math.round(w0 * 0.46) : 38, shH = w * 0.3;
+  const bodyH = cap * layerH + 12, totalH = neckH + shH + bodyH;
+  const shelfY = rows === 1 ? [860] : [612, 982];
+  const g = { w, layerH, neckW, neckH, shH, bodyH, totalH, cap };
+  g.outer = flaskPath(g, 0); g.inner = flaskPath(g, 5);
+  const pos = [];
+  for (let r = 0; r < rows; r++) {
+    const c = per[r], gap = Math.min(34, (W - 60 - c * w) / Math.max(1, c - 1));
+    for (let k = 0; k < c; k++) pos.push({ x: W / 2 + (k - (c - 1) / 2) * (w + gap), y: shelfY[r] - totalH, row: r, colW: w + gap });
+  }
+  return { g, pos, rows, shelfY, per };
+}
+function flaskPath(g, inset) {
+  const p = new Path2D(), nw = g.neckW / 2 - inset * 0.6, w = g.w / 2 - inset, top = inset * 0.4, nh = g.neckH, sh = g.shH, bot = g.totalH - inset, r = Math.min(w * 0.6, 26);
+  p.moveTo(-nw, top); p.lineTo(-nw, nh);
+  p.bezierCurveTo(-nw, nh + sh * 0.7, -w, nh + sh * 0.3, -w, nh + sh);
+  p.lineTo(-w, bot - r); p.quadraticCurveTo(-w, bot, -w + r, bot);
+  p.lineTo(w - r, bot); p.quadraticCurveTo(w, bot, w, bot - r);
+  p.lineTo(w, nh + sh); p.bezierCurveTo(w, nh + sh * 0.3, nw, nh + sh * 0.7, nw, nh);
+  p.lineTo(nw, top); p.closePath();
+  return p;
+}
+
+// ---- State --------------------------------------------------------------------------------
+let scene, state;
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  state = {
+    t: 0, level: 1, phase: 'deal', dealer: null, st: [], hidden: [], start: null, par: 0, cap: 4, moves: 0,
+    undo: [], sel: -1, anim: null, sealedAt: [], hint: null, hintUsed: false, stuck: false, dead: false,
+    cursor: 0, kbd: false, lay: null, plan: null, msg: null, winAt: 0, stars: 0, best: null, btnDown: null,
+    shake: [], score: 0, gained: '', allDone: false,
+  };
+}
+const unlocked = () => Math.min(LEVELS, store.get('unlocked', 1));
+function startLevel(lv) {
+  state.level = lv; state.phase = 'deal'; state.anim = null; state.sel = -1; state.hint = null; state.msg = null; state.lay = null;
+  seed = ((Number(params.get('seed')) || CONFIG.seed) * 9973 + lv * 7919) | 0;
+  state.dealer = { lv, tries: 0 };
+  events.push({ type: 'deal', level: lv });
+}
+function dealStep() {
+  const d = state.dealer;
+  for (let k = 0; k < 2; k++) {
+    d.tries++;
+    const r = dealAttempt(d.lv, d.tries);
+    if (r) { loadDeal(r); return; }
+  }
+}
+function loadDeal(r) {
+  const lv = state.level;
+  state.start = r.st.slice(); state.cap = r.cap; state.par = r.par;
+  state.lay = makeLayout(r.st.length, r.cap);
+  state.dealer = null; bgCache = null;
+  state.cursor = 0;
+  restartLevel(true);
+  state.msg = lv === 1 ? 'ارفع قارورة، ثم اسكب فوق العطر نفسه أو في قارورة فارغة'
+    : lv === tune.veil_from ? 'ضباب داكن يحجب بعض الطبقات حتى تصل إلى الأعلى'
+    : isNarrow(lv) && lv === tune.narrow_from ? 'قوارير ضيقة: كل واحدة تتسع لثلاث طبقات فقط'
+    : null;
+}
+function restartLevel(fresh) {
+  const lv = state.level;
+  state.st = state.start.slice();
+  state.hidden = state.st.map(f => [...f].map((_, k) => isVeiled(lv) && k < f.length - 1));
+  state.moves = 0; state.undo = []; state.sel = -1; state.anim = null; state.hint = null; state.hintUsed = false;
+  state.sealedAt = state.st.map(f => isSealed(f, state.cap) ? 0 : -1);
+  state.phase = 'play'; state.stuck = false; state.dead = false; state.plan = null; state.winAt = 0;
+  if (!fresh) { sfx.ui(); state.msg = null; }
+  updatePlan();
+}
+
+// ---- Player actions -------------------------------------------------------------------
+function pushUndo() { state.undo.push({ st: state.st.slice(), hidden: state.hidden.map(a => a.slice()), moves: state.moves }); }
+function finishAnim() { state.anim = null; }
+function tapFlask(f) {
+  if (state.phase !== 'play') return;
+  state.msg = state.level === 1 ? state.msg : null;
+  const cap = state.cap;
+  if (state.sel < 0) {
+    if (!state.st[f].length || isSealed(state.st[f], cap)) { sfx.nope(); state.shake.push({ f, t: state.t }); return; }
+    state.sel = f; sfx.lift(); return;
+  }
+  if (state.sel === f) { state.sel = -1; sfx.drop(); return; }
+  if (pour(state.sel, f)) return;
+  // not a legal pour: lift the tapped flask instead, when it can be lifted
+  state.shake.push({ f, t: state.t }); sfx.nope();
+  if (state.st[f].length && !isSealed(state.st[f], cap)) state.sel = f; else state.sel = -1;
+}
+function pour(i, j) {
+  const cap = state.cap, st = state.st;
+  if (!canPour(st, i, j, cap)) return false;
+  finishAnim();
+  const n = pourAmount(st, i, j, cap), c = ci(st[i][st[i].length - 1]);
+  pushUndo();
+  state.st = applyPour(st, i, j, n);
+  const hd = state.hidden.map(a => a.slice());
+  hd[i].splice(hd[i].length - n, n);
+  for (let k = 0; k < n; k++) hd[j].push(false);
+  if (hd[i].length) hd[i][hd[i].length - 1] = false; // a layer that reaches the top is unveiled
+  state.hidden = hd;
+  state.moves++; state.sel = -1; state.hint = null;
+  const side = Math.sign(state.lay.pos[j].x - state.lay.pos[i].x) || 1;
+  state.anim = { i, j, c, n, t: 0, side };
+  sfx.pour(n); events.push({ type: 'pour', i, j, n });
+  afterChange(true);
+  return true;
+}
+function afterChange(poured) {
+  const cap = state.cap, delay = poured ? tune.pour_time * 0.78 : 0;
+  state.st.forEach((f, k) => {
+    const s = isSealed(f, cap);
+    if (s && state.sealedAt[k] < 0) { state.sealedAt[k] = state.t + delay; sfx.seal(delay); events.push({ type: 'seal', f: k }); }
+    if (!s) state.sealedAt[k] = -1;
+  });
+  state.stuck = false; state.dead = false;
+  if (isSolved(state.st, cap)) { state.winAt = state.t + delay + 0.9; state.phase = 'won'; return; }
+  if (!legalMoves(state.st, cap).length) { state.stuck = true; events.push({ type: 'stuck' }); return; }
+  const r = solve(state.st, cap, 3, tune.dead_nodes);
+  if (!r.found && r.exhausted) { state.dead = true; events.push({ type: 'dead' }); }
+  updatePlan();
+}
+function updatePlan() { // level 1: the drawn hand follows the solver's next move
+  state.plan = null;
+  if (state.level !== 1 || state.phase !== 'play') return;
+  const r = solve(state.st, state.cap, 1, 20000);
+  if (r.found && r.path.length) state.plan = r.path[0];
+}
+function undo() {
+  const u = state.undo.pop(); if (!u || state.phase === 'won') return;
+  finishAnim(); state.st = u.st; state.hidden = u.hidden; state.moves = u.moves; state.sel = -1; state.hint = null;
+  sfx.drop(); afterChange(false);
+}
+function useHint() {
+  if (state.phase !== 'play') return;
+  const r = solveAny(state.st, state.cap, tune.hint_weight, tune.hint_nodes);
+  state.hintUsed = true;
+  if (r.found && r.path.length) {
+    state.hint = { i: r.path[0][0], j: r.path[0][1], t: state.t }; sfx.hint();
+    state.cursor = state.sel === r.path[0][0] ? r.path[0][1] : r.path[0][0];
+    events.push({ type: 'hint', i: r.path[0][0], j: r.path[0][1] });
+  } else { state.dead = true; state.msg = 'لا حل من هنا: تراجع بضع سكبات'; sfx.nope(); }
+}
+function finishLevel() {
+  const extra = state.moves - state.par;
+  let stars = extra <= 0 ? 3 : extra <= tune.star2_extra ? 2 : 1;
+  if (state.hintUsed) stars = Math.min(stars, 2);
+  state.stars = stars;
+  const bests = store.get('best', {}), old = bests[state.level];
+  const better = !old || stars > old.stars || (stars === old.stars && state.moves < old.moves);
+  if (better) bests[state.level] = { stars, moves: state.moves };
+  state.best = bests[state.level]; store.set('best', bests);
+  if (state.level < LEVELS) store.set('unlocked', Math.max(unlocked(), state.level + 1));
+  state.allDone = state.level >= LEVELS;
+  state.gained = `${stars}`; state.score = stars;
+  sfx.win(); events.push({ type: 'win', level: state.level, stars });
+  scene = 'results';
+}
+
+// ---- Drawing: figures --------------------------------------------------------------------
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+/** Each scent's own small emblem, drawn inside its layers and on the figures sheet. */
+function drawEmblem(kind, x, y, s, col) {
+  ctx.save(); ctx.translate(x, y); ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.2, s * 0.09); ctx.lineCap = 'round';
+  if (kind === 'rose') { for (let k = 0; k < 5; k++) { ctx.save(); ctx.rotate(k * Math.PI * 0.4); ctx.beginPath(); ctx.ellipse(0, -s * 0.24, s * 0.16, s * 0.24, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore(); } }
+  else if (kind === 'drop') { ctx.beginPath(); ctx.moveTo(0, -s * 0.48); ctx.bezierCurveTo(s * 0.12, -s * 0.2, s * 0.36, 0, s * 0.3, s * 0.22); ctx.bezierCurveTo(s * 0.22, s * 0.5, -s * 0.22, s * 0.5, -s * 0.3, s * 0.22); ctx.bezierCurveTo(-s * 0.36, 0, -s * 0.12, -s * 0.2, 0, -s * 0.48); ctx.fill(); }
+  else if (kind === 'wood') { ctx.beginPath(); ctx.moveTo(-s * 0.42, s * 0.2); ctx.lineTo(-s * 0.18, -s * 0.36); ctx.lineTo(s * 0.42, -s * 0.2); ctx.lineTo(s * 0.18, s * 0.36); ctx.closePath(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-s * 0.22, s * 0.1); ctx.lineTo(s * 0.22, -s * 0.1); ctx.moveTo(-s * 0.08, s * 0.22); ctx.lineTo(s * 0.28, s * 0.06); ctx.stroke(); }
+  else if (kind === 'jasmine') { ctx.beginPath(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, r = k % 2 ? s * 0.14 : s * 0.46; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); }
+  else if (kind === 'threads') { ctx.beginPath(); for (const a of [-0.5, 0, 0.5]) { ctx.moveTo(0, s * 0.42); ctx.quadraticCurveTo(Math.sin(a) * s * 0.5, 0, Math.sin(a) * s * 0.36, -s * 0.42); } ctx.stroke(); }
+  else if (kind === 'leaf') { ctx.beginPath(); ctx.moveTo(-s * 0.4, s * 0.36); ctx.quadraticCurveTo(-s * 0.36, -s * 0.36, s * 0.4, -s * 0.4); ctx.quadraticCurveTo(s * 0.32, s * 0.3, -s * 0.4, s * 0.36); ctx.fill(); }
+  else if (kind === 'crescent') { ctx.beginPath(); ctx.arc(0, 0, s * 0.42, Math.PI * 0.3, Math.PI * 1.7); ctx.arc(s * 0.16, -s * 0.02, s * 0.32, Math.PI * 1.55, Math.PI * 0.45, true); ctx.closePath(); ctx.fill(); }
+  else if (kind === 'pod') { ctx.beginPath(); ctx.moveTo(0, -s * 0.46); ctx.quadraticCurveTo(s * 0.42, 0, 0, s * 0.46); ctx.quadraticCurveTo(-s * 0.42, 0, 0, -s * 0.46); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, -s * 0.3); ctx.lineTo(0, s * 0.3); ctx.stroke(); }
+  else if (kind === 'coral') { ctx.beginPath(); ctx.moveTo(0, s * 0.46); ctx.lineTo(0, 0); ctx.lineTo(-s * 0.26, -s * 0.24); ctx.lineTo(-s * 0.3, -s * 0.46); ctx.moveTo(0, 0); ctx.lineTo(s * 0.22, -s * 0.2); ctx.lineTo(s * 0.34, -s * 0.44); ctx.moveTo(-s * 0.26, -s * 0.24); ctx.lineTo(-s * 0.06, -s * 0.42); ctx.moveTo(s * 0.22, -s * 0.2); ctx.lineTo(s * 0.06, -s * 0.38); ctx.stroke(); }
+  ctx.restore();
+}
+/** A gold stopper (faceted dome with a finial). */
+function drawStopper(nw, s) {
+  const g = ctx.createLinearGradient(-nw, 0, nw, 0);
+  g.addColorStop(0, '#8a5a12'); g.addColorStop(0.35, '#ffe08a'); g.addColorStop(0.6, '#d9a23a'); g.addColorStop(1, '#7a4c0c');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(-nw * 0.8, 8); ctx.lineTo(-nw * 0.8, -2);
+  ctx.bezierCurveTo(-nw * 1.5, -s * 0.25, -nw * 0.5, -s * 0.6, 0, -s * 0.85);
+  ctx.bezierCurveTo(nw * 0.5, -s * 0.6, nw * 1.5, -s * 0.25, nw * 0.8, -2);
+  ctx.lineTo(nw * 0.8, 8); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#5a3606'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,245,200,0.7)'; ctx.beginPath(); ctx.moveTo(-nw * 0.35, -4); ctx.quadraticCurveTo(-nw * 0.5, -s * 0.35, -nw * 0.05, -s * 0.7); ctx.stroke();
+  ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.ellipse(0, -s * 0.9, nw * 0.22, nw * 0.28, 0, 0, Math.PI * 2); ctx.fill();
+}
+/** A curling wisp of scent rising from a sealed flask. */
+function drawWisp(x, y, c, t, a) {
+  ctx.save(); ctx.lineCap = 'round';
+  for (let k = 0; k < 2; k++) {
+    ctx.beginPath();
+    for (let s = 0; s <= 24; s++) {
+      const yy = -s * 5.2, amp = 5 + s * 0.9, xx = Math.sin(s * 0.38 + t * 2.2 + k * 2.4) * amp + Math.sin(t * 0.9 + k) * 4;
+      if (s === 0) ctx.moveTo(x + xx * 0.3, y + yy); else ctx.lineTo(x + xx, y + yy);
+    }
+    const g = ctx.createLinearGradient(0, y, 0, y - 125);
+    g.addColorStop(0, hexA(c, 0.75 * a)); g.addColorStop(1, hexA(c, 0));
+    ctx.strokeStyle = g; ctx.lineWidth = 4 - k * 1.4; ctx.stroke();
+  }
+  ctx.restore();
+}
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+/**
+ * One flask at (x, y) = its mouth, tilted by angle. layers: [{ c, amt, hidden }] bottom to top
+ * (amt in layers, fractions allowed while pouring). The oil stays level in world space.
+ */
+function drawFlask(g, x, y, angle, layers, o = {}) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+  if (o.glow) { ctx.save(); ctx.shadowColor = o.glow; ctx.shadowBlur = 26; ctx.strokeStyle = o.glow; ctx.lineWidth = 7; ctx.stroke(g.outer); ctx.restore(); }
+  ctx.fillStyle = 'rgba(200,225,255,0.09)'; ctx.fill(g.outer);
+  // the oils, level in world space
+  ctx.save(); ctx.clip(g.inner); ctx.rotate(-angle);
+  const bottom = g.totalH - 6, capTop = bottom - g.cap * g.layerH, hw = g.w / 2 - 5;
+  const cs = Math.cos(angle), sn = Math.sin(angle);
+  const ys = [[-hw, capTop], [hw, capTop], [-hw, bottom], [hw, bottom]].map(([px, py]) => px * sn + py * cs);
+  const yLow = Math.max(...ys), yHigh = Math.min(...ys), span = yLow - yHigh;
+  let cum = 0, topC = -1;
+  for (const L of layers) {
+    if (L.amt <= 0.001) continue;
+    const y0 = yLow - (cum / g.cap) * span, y1 = yLow - ((cum + L.amt) / g.cap) * span;
+    if (L.hidden) {
+      ctx.fillStyle = '#2a2232'; ctx.fillRect(-300, y1, 600, y0 - y1 + 0.6);
+      ctx.fillStyle = 'rgba(215,200,235,0.32)'; ctx.fillRect(-300, y1, 600, 2);
+      ctx.strokeStyle = 'rgba(190,175,215,0.28)'; ctx.lineWidth = 3;
+      for (let k = 0; k < 3; k++) {
+        const yy = y1 + (y0 - y1) * (0.25 + k * 0.25), ph = (o.t || 0) * 1.4 + k * 1.7 + x * 0.02;
+        ctx.beginPath(); ctx.moveTo(-60, yy);
+        ctx.bezierCurveTo(-25, yy - 9 * Math.sin(ph), 10, yy + 9 * Math.cos(ph), 60, yy - 4 * Math.sin(ph * 1.3)); ctx.stroke();
+      }
+      topC = -2;
+    } else {
+      const sc = SCENT[L.c];
+      const lg = ctx.createLinearGradient(0, y1, 0, y0); lg.addColorStop(0, sc.hi); lg.addColorStop(0.18, sc.c); lg.addColorStop(1, sc.c);
+      ctx.fillStyle = lg; ctx.fillRect(-300, y1, 600, y0 - y1 + 0.6);
+      if (Math.abs(angle) < 0.01 && L.amt > 0.6 && o.emblems !== false) {
+        drawEmblem(sc.em, 0, (y0 + y1) / 2, Math.min(g.layerH * 0.48, g.w * 0.4), sc.dark ? 'rgba(70,40,10,0.34)' : 'rgba(255,245,230,0.3)');
+      }
+      topC = L.c;
+    }
+    cum += L.amt;
+  }
+  if (cum > 0.02) { // meniscus: a soft lighter lip on the surface
+    const ysf = yLow - (cum / g.cap) * span;
+    ctx.fillStyle = topC >= 0 ? hexA(SCENT[topC].hi, 0.75) : 'rgba(150,135,175,0.6)';
+    ctx.beginPath(); ctx.ellipse(0, ysf + 2, 300, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(-300, ysf, 600, 1.4);
+  }
+  ctx.rotate(angle);
+  const sh = ctx.createLinearGradient(-g.w / 2, 0, g.w / 2, 0);
+  sh.addColorStop(0, 'rgba(0,0,0,0.34)'); sh.addColorStop(0.22, 'rgba(255,255,255,0.08)'); sh.addColorStop(0.5, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,0.38)');
+  ctx.fillStyle = sh; ctx.fillRect(-g.w / 2, 0, g.w, g.totalH);
+  ctx.restore();
+  // glass front: highlight, rim, outline
+  ctx.fillStyle = 'rgba(255,255,255,0.26)';
+  rr(-g.w / 2 + 9, g.neckH + g.shH + 8, g.w * 0.1, g.bodyH * 0.62, g.w * 0.05); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(g.w / 2 - 15, g.neckH + g.shH + 14, g.w * 0.05, g.bodyH * 0.3, 3); ctx.fill();
+  ctx.strokeStyle = 'rgba(225,238,255,0.65)'; ctx.lineWidth = 2.6; ctx.stroke(g.outer);
+  // gold filigree neck: lip, two bands, shoulder curls
+  const nw = g.neckW / 2, gold = ctx.createLinearGradient(-nw - 6, 0, nw + 6, 0);
+  gold.addColorStop(0, '#7a4c0c'); gold.addColorStop(0.4, '#ffd877'); gold.addColorStop(1, '#8a5a12');
+  ctx.fillStyle = gold;
+  rr(-nw - 6, -7, g.neckW + 12, 11, 5); ctx.fill();
+  rr(-nw - 2, g.neckH * 0.42, g.neckW + 4, 5, 2.5); ctx.fill();
+  rr(-nw - 3, g.neckH - 4, g.neckW + 6, 6, 3); ctx.fill();
+  ctx.strokeStyle = '#e8b54a'; ctx.lineWidth = 1.8;
+  for (const sd of [-1, 1]) {
+    ctx.beginPath();
+    const cx = sd * (nw + g.w * 0.13), cy = g.neckH + g.shH * 0.55;
+    for (let k = 0; k <= 16; k++) { const a = k * 0.55, r = 1.2 + k * 0.48; ctx.lineTo(cx + sd * Math.cos(a) * r, cy + Math.sin(a) * r); }
+    ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(-nw - g.w * 0.02, g.neckH + 6); ctx.quadraticCurveTo(-g.w * 0.3, g.neckH + g.shH, -g.w * 0.36, g.neckH + g.shH + 6);
+  ctx.moveTo(nw + g.w * 0.02, g.neckH + 6); ctx.quadraticCurveTo(g.w * 0.3, g.neckH + g.shH, g.w * 0.36, g.neckH + g.shH + 6); ctx.stroke();
+  if (o.stopper !== undefined && o.stopper >= 0) {
+    const k = Math.min(1, o.stopper / tune.stopper_time), e = k < 1 ? 1 - Math.pow(1 - k, 3) : 1;
+    const bounce = k < 1 ? 0 : 0;
+    ctx.save(); ctx.translate(0, -(1 - e) * 130 + bounce); drawStopper(nw, g.neckW * 0.95); ctx.restore();
+  }
+  ctx.restore();
+}
+/** A pointing hand (index finger down), tip at (x, y). */
+function drawHand(x, y, s, t) {
+  ctx.save(); ctx.translate(x, y - Math.abs(Math.sin(t * 4.5)) * s * 0.18);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(s * 0.06, s * 0.08, s * 0.16, s * 0.05, 0, 0, Math.PI * 2); ctx.fill();
+  const skin = '#f2c9a0', line = '#6b4423';
+  ctx.fillStyle = skin; ctx.strokeStyle = line; ctx.lineWidth = Math.max(1.5, s * 0.035);
+  ctx.beginPath(); // index finger
+  ctx.moveTo(-s * 0.09, -s * 0.62); ctx.lineTo(-s * 0.09, -s * 0.08); ctx.quadraticCurveTo(-s * 0.09, s * 0.04, 0, s * 0.04);
+  ctx.quadraticCurveTo(s * 0.09, s * 0.04, s * 0.09, -s * 0.08); ctx.lineTo(s * 0.09, -s * 0.62); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); // palm with curled fingers
+  ctx.moveTo(-s * 0.1, -s * 0.5); ctx.lineTo(-s * 0.1, -s * 0.98); ctx.lineTo(s * 0.4, -s * 0.98);
+  ctx.quadraticCurveTo(s * 0.46, -s * 0.7, s * 0.38, -s * 0.5);
+  ctx.quadraticCurveTo(s * 0.33, -s * 0.38, s * 0.24, -s * 0.44); ctx.quadraticCurveTo(s * 0.18, -s * 0.36, s * 0.1, -s * 0.44);
+  ctx.quadraticCurveTo(s * 0.05, -s * 0.38, s * 0.08, -s * 0.5); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(s * 0.24, -s * 0.44); ctx.lineTo(s * 0.26, -s * 0.6); ctx.moveTo(s * 0.1, -s * 0.44); ctx.lineTo(s * 0.12, -s * 0.58); ctx.stroke();
+  ctx.beginPath(); // thumb
+  ctx.moveTo(-s * 0.1, -s * 0.7); ctx.quadraticCurveTo(-s * 0.3, -s * 0.66, -s * 0.26, -s * 0.5); ctx.quadraticCurveTo(-s * 0.2, -s * 0.46, -s * 0.1, -s * 0.56); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#7a1f2b'; rr(-s * 0.16, -s * 1.2, s * 0.62, s * 0.24, s * 0.05); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#e4b04a'; ctx.fillRect(-s * 0.16, -s * 1.0, s * 0.62, s * 0.04);
+  ctx.restore();
+}
+/** The brass lamp: a pierced lantern on a chain, warm light falling on the shelf. */
+function drawLamp(x, y, s, t) {
+  const fl = 0.9 + 0.1 * Math.sin(t * 7.3) * Math.sin(t * 3.1);
+  const glow = ctx.createRadialGradient(x, y + s * 0.6, 10, x, y + s * 2, s * 9);
+  glow.addColorStop(0, `rgba(255,196,110,${0.34 * fl})`); glow.addColorStop(0.5, `rgba(255,170,80,${0.1 * fl})`); glow.addColorStop(1, 'rgba(255,160,70,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#a77a2e'; ctx.lineWidth = 3;
+  ctx.beginPath(); for (let k = 0; k < 4; k++) { ctx.moveTo(x - 3, y - s * 0.9 + k * s * 0.2); ctx.lineTo(x + 3, y - s * 0.8 + k * s * 0.2); } ctx.stroke();
+  ctx.fillStyle = '#b5852f'; ctx.beginPath(); ctx.moveTo(x - s * 0.18, y); ctx.quadraticCurveTo(x, y - s * 0.32, x + s * 0.18, y); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x - s * 0.34, y); ctx.lineTo(x + s * 0.34, y); ctx.lineTo(x + s * 0.42, y + s * 0.55); ctx.lineTo(x + s * 0.26, y + s * 0.95); ctx.lineTo(x - s * 0.26, y + s * 0.95); ctx.lineTo(x - s * 0.42, y + s * 0.55); ctx.closePath();
+  const bg = ctx.createLinearGradient(x - s * 0.4, 0, x + s * 0.4, 0); bg.addColorStop(0, '#6e4a14'); bg.addColorStop(0.45, '#d9a64a'); bg.addColorStop(1, '#6e4a14');
+  ctx.fillStyle = bg; ctx.fill(); ctx.strokeStyle = '#4a2f08'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = `rgba(255,236,150,${0.85 * fl})`;
+  for (const [dx, dy, r] of [[0, 0.45, 0.11], [-0.2, 0.35, 0.06], [0.2, 0.35, 0.06], [-0.18, 0.7, 0.06], [0.18, 0.7, 0.06], [0, 0.8, 0.05]]) {
+    ctx.beginPath(); for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, rr2 = k % 2 ? r * s * 0.45 : r * s; ctx.lineTo(x + dx * s + Math.cos(a) * rr2, y + dy * s + Math.sin(a) * rr2); } ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = '#8a6020'; ctx.beginPath(); ctx.moveTo(x - s * 0.1, y + s * 0.95); ctx.lineTo(x + s * 0.1, y + s * 0.95); ctx.lineTo(x, y + s * 1.2); ctx.closePath(); ctx.fill();
+}
+// icons
+function iconUndo(x, y, s, c) { ctx.strokeStyle = c; ctx.lineWidth = s * 0.12; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(x, y + s * 0.08, s * 0.32, -Math.PI * 0.95, Math.PI * 0.35); ctx.stroke(); ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x - s * 0.5, y - s * 0.05); ctx.lineTo(x - s * 0.18, y - s * 0.06); ctx.lineTo(x - s * 0.36, y + s * 0.24); ctx.closePath(); ctx.fill(); ctx.lineCap = 'butt'; }
+function iconRestart(x, y, s, c) { ctx.strokeStyle = c; ctx.lineWidth = s * 0.12; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(x, y, s * 0.32, -Math.PI * 0.35, Math.PI * 1.45); ctx.stroke(); const a = -Math.PI * 0.35, ex = x + Math.cos(a) * s * 0.32, ey = y + Math.sin(a) * s * 0.32; ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(ex + s * 0.2, ey - s * 0.12); ctx.lineTo(ex - s * 0.12, ey - s * 0.2); ctx.lineTo(ex + s * 0.02, ey + s * 0.16); ctx.closePath(); ctx.fill(); ctx.lineCap = 'butt'; }
+function iconBulb(x, y, s, c) { // a small drop-shaped flask with a sparkle: the hint
+  ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x, y - s * 0.42); ctx.bezierCurveTo(x + s * 0.1, y - s * 0.2, x + s * 0.34, y, x + s * 0.28, y + s * 0.2); ctx.bezierCurveTo(x + s * 0.2, y + s * 0.44, x - s * 0.2, y + s * 0.44, x - s * 0.28, y + s * 0.2); ctx.bezierCurveTo(x - s * 0.34, y, x - s * 0.1, y - s * 0.2, x, y - s * 0.42); ctx.fill();
+  ctx.fillStyle = '#ffe08a'; ctx.beginPath(); for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, r = k % 2 ? s * 0.05 : s * 0.15; ctx.lineTo(x + s * 0.3 + Math.cos(a) * r, y - s * 0.3 + Math.sin(a) * r); } ctx.closePath(); ctx.fill();
+}
+function iconSpeaker(x, y, s, c, off) {
+  ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x - s * 0.36, y - s * 0.12); ctx.lineTo(x - s * 0.18, y - s * 0.12); ctx.lineTo(x + s * 0.04, y - s * 0.32); ctx.lineTo(x + s * 0.04, y + s * 0.32); ctx.lineTo(x - s * 0.18, y + s * 0.12); ctx.lineTo(x - s * 0.36, y + s * 0.12); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = c; ctx.lineWidth = s * 0.08; ctx.lineCap = 'round';
+  if (off) { ctx.beginPath(); ctx.moveTo(x + s * 0.14, y - s * 0.16); ctx.lineTo(x + s * 0.42, y + s * 0.16); ctx.moveTo(x + s * 0.42, y - s * 0.16); ctx.lineTo(x + s * 0.14, y + s * 0.16); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.arc(x + s * 0.06, y, s * 0.18, -0.9, 0.9); ctx.stroke(); ctx.beginPath(); ctx.arc(x + s * 0.06, y, s * 0.34, -0.9, 0.9); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+}
+function iconGrid(x, y, s, c) { ctx.fillStyle = c; for (let k = 0; k < 4; k++) { rr(x - s * 0.3 + (k % 2) * s * 0.34, y - s * 0.3 + Math.floor(k / 2) * s * 0.34, s * 0.26, s * 0.26, s * 0.05); ctx.fill(); } }
+function iconHouse(x, y, s, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x, y - s * 0.38); ctx.lineTo(x + s * 0.4, y - s * 0.02); ctx.lineTo(x + s * 0.28, y - s * 0.02); ctx.lineTo(x + s * 0.28, y + s * 0.34); ctx.lineTo(x - s * 0.28, y + s * 0.34); ctx.lineTo(x - s * 0.28, y - s * 0.02); ctx.lineTo(x - s * 0.4, y - s * 0.02); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#3a2210'; ctx.fillRect(x - s * 0.08, y + s * 0.08, s * 0.16, s * 0.26); }
+function iconLock(x, y, s, c) { ctx.strokeStyle = c; ctx.lineWidth = s * 0.1; ctx.beginPath(); ctx.arc(x, y - s * 0.1, s * 0.2, Math.PI, 0); ctx.stroke(); ctx.fillStyle = c; rr(x - s * 0.3, y - s * 0.1, s * 0.6, s * 0.44, s * 0.06); ctx.fill(); }
+function starPath(x, y, r) { ctx.beginPath(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rad = k % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad); } ctx.closePath(); }
+function drawStar(x, y, r, on) {
+  starPath(x, y, r);
+  if (on) { const g = ctx.createLinearGradient(0, y - r, 0, y + r); g.addColorStop(0, '#ffe08a'); g.addColorStop(1, '#d9901c'); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#6a3d08'; }
+  else { ctx.fillStyle = 'rgba(40,25,15,0.6)'; ctx.fill(); ctx.strokeStyle = 'rgba(240,220,180,0.45)'; }
+  ctx.lineWidth = Math.max(1.5, r * 0.07); ctx.stroke();
+}
+function drawButton(b, label, icon, on = false, pulse = 0, enabled = true) {
+  const press = state && state.btnDown === b, y = b.y + (press ? 3 : 0);
+  ctx.save(); if (!enabled) ctx.globalAlpha = 0.45;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; rr(b.x + 2, b.y + 6, b.w, b.h, 22); ctx.fill();
+  const g = ctx.createLinearGradient(0, y, 0, y + b.h);
+  if (on) { g.addColorStop(0, '#f6cf6a'); g.addColorStop(1, '#c48a22'); } else { g.addColorStop(0, '#6a3f22'); g.addColorStop(1, '#3d220f'); }
+  ctx.fillStyle = g; rr(b.x, y, b.w, b.h, 22); ctx.fill();
+  ctx.strokeStyle = on ? '#6b4208' : '#c9963e'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.strokeStyle = on ? 'rgba(255,245,200,0.6)' : 'rgba(255,215,140,0.18)'; ctx.lineWidth = 2; rr(b.x + 6, y + 6, b.w - 12, b.h - 12, 16); ctx.stroke();
+  if (pulse > 0) { ctx.strokeStyle = `rgba(255,214,100,${pulse})`; ctx.lineWidth = 7; rr(b.x - 6, y - 6, b.w + 12, b.h + 12, 27); ctx.stroke(); }
+  const fg = on ? '#3a2008' : '#fbeed2';
+  if (icon && label) { icon(b.x + b.w / 2, y + b.h * 0.38, Math.min(b.w, b.h) * 0.5, fg); text(label, b.x + b.w / 2, y + b.h * 0.79, 27, fg, 'center', 'bold'); }
+  else if (icon) icon(b.x + b.w / 2, y + b.h / 2, Math.min(b.w, b.h) * 0.6, fg);
+  else text(label, b.x + b.w / 2, y + b.h / 2 + 2, b.h > 100 ? 40 : 32, fg, 'center', 'bold');
+  ctx.restore();
+}
+
+// ---- Drawing: the shop ---------------------------------------------------------------------
+function drawWall() { // dark walnut panels with grain (cached)
+  if (!bgCache) {
+    const S = Math.min(2, Math.max(1, VIEW_R)), off = document.createElement('canvas');
+    off.width = Math.ceil(W * S); off.height = Math.ceil(H * S);
+    const c2 = off.getContext('2d'); c2.scale(S, S);
+    const g = c2.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#24140b'); g.addColorStop(1, '#170c06');
+    c2.fillStyle = g; c2.fillRect(0, 0, W, H);
+    for (let p = 0; p < 6; p++) {
+      const x = p * 120;
+      c2.fillStyle = p % 2 ? 'rgba(80,45,22,0.22)' : 'rgba(60,32,15,0.18)'; c2.fillRect(x, 0, 120, H);
+      c2.strokeStyle = 'rgba(0,0,0,0.45)'; c2.lineWidth = 3; c2.beginPath(); c2.moveTo(x, 0); c2.lineTo(x, H); c2.stroke();
+      c2.strokeStyle = 'rgba(140,85,45,0.16)'; c2.lineWidth = 1.4;
+      for (let k = 0; k < 7; k++) {
+        const gx = x + 12 + hash01(p, k) * 96; c2.beginPath(); c2.moveTo(gx, 0);
+        for (let yy = 0; yy <= H; yy += 64) c2.lineTo(gx + Math.sin(yy / 90 + p + k) * 6 + hash01(p * 7 + k, yy) * 3, yy);
+        c2.stroke();
+      }
+    }
+    // carved arch niche behind the shelves
+    c2.strokeStyle = 'rgba(210,150,80,0.16)'; c2.lineWidth = 5;
+    c2.beginPath(); c2.moveTo(40, H); c2.lineTo(40, 330); c2.quadraticCurveTo(40, 230, W / 2, 200); c2.quadraticCurveTo(W - 40, 230, W - 40, 330); c2.lineTo(W - 40, H); c2.stroke();
+    bgCache = off;
+  }
+  ctx.drawImage(bgCache, 0, 0, W, H);
+}
+function drawShelf(y) {
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(20, y + 30, W - 40, 26);
+  const g = ctx.createLinearGradient(0, y, 0, y + 30); g.addColorStop(0, '#8a5530'); g.addColorStop(0.3, '#6b3f20'); g.addColorStop(1, '#3f2210');
+  ctx.fillStyle = g; ctx.fillRect(14, y, W - 28, 30);
+  ctx.fillStyle = 'rgba(255,210,150,0.28)'; ctx.fillRect(14, y, W - 28, 3);
+  ctx.fillStyle = '#4a2812'; // carved scallop trim
+  ctx.beginPath(); ctx.moveTo(14, y + 30);
+  for (let x = 14; x < W - 14; x += 34) { ctx.lineTo(x, y + 30); ctx.quadraticCurveTo(x + 17, y + 56, x + 34, y + 30); }
+  ctx.lineTo(W - 14, y + 30); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(230,170,90,0.35)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = 'rgba(240,190,110,0.45)';
+  for (let x = 31; x < W - 14; x += 34) { ctx.beginPath(); ctx.moveTo(x, y + 36); ctx.lineTo(x + 3, y + 40); ctx.lineTo(x, y + 44); ctx.lineTo(x - 3, y + 40); ctx.closePath(); ctx.fill(); }
+}
+function flaskLayers(k) { // what flask k holds now, with a pour in flight shown part-way
+  const f = state.st[k], hd = state.hidden[k], out = [];
+  for (let q = 0; q < f.length; q++) out.push({ c: ci(f[q]), amt: 1, hidden: hd[q] });
+  const a = state.anim;
+  if (a) {
+    const p = pourProgress(a);
+    if (k === a.i) out.push({ c: a.c, amt: a.n * (1 - p), hidden: false });
+    if (k === a.j) { out.splice(out.length - a.n, a.n); out.push({ c: a.c, amt: a.n * p, hidden: false }); }
+  }
+  return out;
+}
+const ease = x => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+function pourProgress(a) { const u = a.t / tune.pour_time; return Math.max(0, Math.min(1, (u - 0.3) / 0.45)); }
+function flaskPose(k) { // where flask k's mouth is and how far it tilts
+  const P = state.lay.pos[k], lift = tune.lift_px;
+  let x = P.x, y = P.y, ang = 0;
+  if (state.sel === k) y -= lift;
+  const a = state.anim;
+  if (a && a.i === k) {
+    const T = state.lay.pos[a.j], u = a.t / tune.pour_time;
+    const px = T.x - a.side * (state.lay.g.w * 0.22), py = T.y - 40, pa = a.side * tune.tilt;
+    const rx = P.x, ry = P.y - lift;
+    if (u < 0.3) { const e = ease(u / 0.3); x = rx + (px - rx) * e; y = ry + (py - ry) * e; ang = pa * e; }
+    else if (u < 0.75) { x = px; y = py; ang = pa; }
+    else { const e = ease((u - 0.75) / 0.25); x = px + (P.x - px) * e; y = py + (P.y - py) * e; ang = pa * (1 - e); }
+  }
+  for (const s of state.shake) if (s.f === k) { const age = state.t - s.t; if (age < 0.3) x += Math.sin(age * 60) * 7 * (1 - age / 0.3); }
+  return { x, y, ang };
+}
+function drawShop() {
+  drawWall();
+  drawLamp(W / 2, 46, 64, state.t);
+  const lay = state.lay; if (!lay) return;
+  for (const y of lay.shelfY) drawShelf(y);
+  const order = lay.pos.map((_, k) => k);
+  if (state.anim) { order.splice(order.indexOf(state.anim.i), 1); order.push(state.anim.i); }
+  if (state.sel >= 0) { order.splice(order.indexOf(state.sel), 1); order.push(state.sel); }
+  // the stream first, behind the pouring flask's mouth
+  const a = state.anim;
+  for (const k of order) {
+    const pose = flaskPose(k), P = lay.pos[k];
+    // contact shadow
+    if (!(a && a.i === k)) { ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(P.x, lay.shelfY[P.row] + 2, lay.g.w * 0.5, 6, 0, 0, Math.PI * 2); ctx.fill(); }
+    let glow = null;
+    if (state.hint && (k === state.hint.i || k === state.hint.j)) glow = `rgba(255,210,90,${0.55 + 0.35 * Math.sin(state.t * 6)})`;
+    if (state.sel === k) glow = 'rgba(255,236,170,0.85)';
+    const sealT = state.sealedAt[k];
+    const stopper = sealT >= 0 && state.t >= sealT ? state.t - sealT : -1;
+    drawFlask(lay.g, pose.x, pose.y, pose.ang, flaskLayers(k), { glow, stopper, t: state.t });
+    if (stopper >= 0 && state.st[k].length) drawWisp(pose.x, pose.y - lay.g.neckW * 0.95, SCENT[ci(state.st[k][0])].hi, state.t + k, Math.min(1, stopper / 0.8));
+    if (state.kbd && state.cursor === k && state.phase === 'play') {
+      ctx.fillStyle = '#ffe08a'; const cy = lay.shelfY[P.row] + 50;
+      ctx.beginPath(); ctx.moveTo(P.x, cy - 14); ctx.lineTo(P.x + 16, cy + 6); ctx.lineTo(P.x - 16, cy + 6); ctx.closePath(); ctx.fill();
+    }
+  }
+  if (a) {
+    const p = pourProgress(a), u = a.t / tune.pour_time;
+    if (u > 0.3 && u < 0.78) {
+      const pose = flaskPose(a.i), T = lay.pos[a.j];
+      const lipX = pose.x + Math.cos(pose.ang) * (a.side * lay.g.neckW * 0.5), lipY = pose.y + Math.sin(pose.ang) * (a.side * lay.g.neckW * 0.5);
+      const surf = T.y + lay.g.totalH - 6 - state.st[a.j].length * lay.g.layerH + a.n * lay.g.layerH * (1 - p);
+      const sc = SCENT[a.c], wdt = 3 + 4 * Math.sin(Math.PI * Math.min(1, (u - 0.3) / 0.48));
+      ctx.strokeStyle = sc.c; ctx.lineWidth = wdt; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(lipX, lipY); ctx.quadraticCurveTo(lipX + a.side * 10, (lipY + T.y) / 2, T.x, surf); ctx.stroke();
+      ctx.strokeStyle = hexA(sc.hi, 0.7); ctx.lineWidth = Math.max(1, wdt * 0.3);
+      ctx.beginPath(); ctx.moveTo(lipX, lipY); ctx.quadraticCurveTo(lipX + a.side * 10, (lipY + T.y) / 2, T.x, surf); ctx.stroke();
+      ctx.fillStyle = hexA(sc.hi, 0.8);
+      for (let k = 0; k < 4; k++) { const ph = state.t * 9 + k * 1.6; ctx.beginPath(); ctx.ellipse(T.x + Math.sin(ph) * 10, surf - 3 - Math.abs(Math.cos(ph)) * 7, 2.4, 3, 0, 0, Math.PI * 2); ctx.fill(); }
+      ctx.lineCap = 'butt';
+    }
+  }
+}
+function guideTarget() { // what the drawn hand points at: the hint, or level 1's next move
+  const m = state.hint ? [state.hint.i, state.hint.j] : state.plan;
+  if (!m || state.anim || state.phase !== 'play') return -1;
+  return state.sel === m[0] ? m[1] : (state.sel < 0 ? m[0] : state.sel);
+}
+function drawGuide() {
+  const k = guideTarget(); if (k < 0) return;
+  const pose = flaskPose(k), lay = state.lay;
+  // point at the top layer when lifting, at the mouth when pouring
+  const n = state.st[k].length, sel = state.sel === k;
+  const yTop = sel || !n ? pose.y - 18 : pose.y + lay.g.totalH - 6 - n * lay.g.layerH - 4;
+  drawHand(pose.x + 6, Math.max(250, yTop), 92, state.t);
+}
+function drawHud() {
+  drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
+  drawButton(B.menu, '', iconGrid);
+  text(`المستوى ${state.level}`, W / 2, 150, 40, '#ffe7b6', 'center', 'bold');
+  if (state.phase !== 'deal') {
+    const note = isNarrow(state.level) ? ' · قوارير ضيقة' : '';
+    text(`السكبات ${state.moves} · الهدف ${state.par}${note}`, W / 2, 196, 28, '#e9d3a8');
+  }
+}
+function drawBanner() {
+  let msg = state.msg, warn = false;
+  if (state.dead && !state.stuck) { msg = 'طريق مسدود: لا حل من هنا، تراجع خطوة'; warn = true; }
+  if (!msg || state.phase === 'deal') return;
+  const lines = wrap(msg, 27, W - 100, 'bold'), two = lines.length > 1;
+  const x = 30, y = state.lay && state.lay.rows === 2 ? (two ? 1016 : 1022) : 940, w = W - 60, h = two ? 90 : 76;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; rr(x + 2, y + 5, w, h, 18); ctx.fill();
+  ctx.fillStyle = warn ? '#5a1e14' : '#3a2412'; rr(x, y, w, h, 18); ctx.fill();
+  ctx.strokeStyle = warn ? '#ff9a7a' : '#d6a44c'; ctx.lineWidth = 2.5; ctx.stroke();
+  lines.slice(0, 2).forEach((ln, k) => text(ln, W / 2, y + h / 2 + (k - (Math.min(2, lines.length) - 1) / 2) * 32, 27, warn ? '#ffe1d6' : '#f6e3bd', 'center', 'bold'));
+}
+function drawControls() {
+  const pulse = (state.dead || state.stuck) ? 0.45 + 0.45 * Math.sin(state.t * 7) : 0;
+  drawButton(B.undo, 'تراجع', iconUndo, false, pulse, state.undo.length > 0);
+  drawButton(B.hint, 'تلميح', iconBulb, false, 0, state.phase === 'play');
+  drawButton(B.restart, 'إعادة', iconRestart, false, state.stuck ? pulse : 0);
+}
+
+// ---- Scenes ----------------------------------------------------------------------------
+function flaskAt(p) {
+  const lay = state.lay; if (!lay) return -1;
+  for (let k = 0; k < lay.pos.length; k++) {
+    const P = lay.pos[k], half = P.colW / 2;
+    if (p.x >= P.x - half && p.x <= P.x + half && p.y >= P.y - tune.lift_px - 40 && p.y <= lay.shelfY[P.row] + 30) return k;
+  }
+  return -1;
+}
+const buttonAt = (p, list) => { for (const k of list) if (inRect(p, B[k])) return k; return null; };
+function handleMute(ev) { if (ev.type === 'down' && inRect(ev, B.mute)) { setMuted(!muted); return true; } return false; }
+function goPlay(lv) { reset(); scene = 'play'; startLevel(lv); }
+function toTitle() { const t = state.t; reset(); state.t = t; scene = 'title'; }
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() {
+      drawWall(); drawLamp(W / 2, 40, 50, state.t);
+      text('أشكال اللعبة', W / 2, 150, 40, '#ffe7b6', 'center', 'bold');
+      const g = makeLayout(10, tune.capacity).g, gn = makeLayout(10, tune.narrow_capacity).g, S = 0.62, t = state.t;
+      const cell = k => ({ x: 82 + (k % 5) * 139, y: 290 + Math.floor(k / 5) * 350 });
+      const label = (k, s2) => { const c = cell(k); text(s2, c.x, c.y + g.totalH * S + 44, 24, '#f6e3bd', 'center', 'bold'); };
+      const flask = (k, gg, ang, layers, o) => { const c = cell(k); ctx.save(); ctx.translate(c.x, c.y); ctx.scale(S, S); drawFlask(gg, 0, gg === gn ? g.totalH - gn.totalH : 0, ang, layers, o); ctx.restore(); };
+      for (let k = 0; k < 9; k++) {
+        const layers = []; for (let q = 0; q < 4; q++) layers.push({ c: k, amt: 1 });
+        flask(k, g, 0, layers, { stopper: 1, t });
+        const c = cell(k); drawWisp(c.x, c.y - g.neckW * 0.95 * S, SCENT[k].hi, t + k, 1);
+        drawEmblem(SCENT[k].em, c.x, c.y + g.totalH * S + 82, 26, SCENT[k].hi);
+        label(k, SCENT[k].n);
+      }
+      flask(9, g, 0, [{ c: 2, amt: 1, hidden: true }, { c: 3, amt: 1, hidden: true }, { c: 0, amt: 1 }], { t }); label(9, 'طبقة محجوبة');
+      flask(10, gn, 0, [{ c: 5, amt: 1 }, { c: 7, amt: 1 }, { c: 5, amt: 1 }], { t }); label(10, 'قارورة ضيقة');
+      flask(11, g, 0.42, [{ c: 1, amt: 2 }, { c: 6, amt: 1 }], { t }); label(11, 'سكب');
+      flask(12, g, 0, [], { glow: 'rgba(255,210,90,0.9)', t }); label(12, 'تلميح');
+      const c13 = cell(13); drawHand(c13.x, c13.y + 120, 100, t); label(13, 'اليد');
+      const c14 = cell(14); drawLamp(c14.x, c14.y + 30, 60, t); label(14, 'القنديل');
+    },
+  },
+  title: {
+    update(dt) {
+      state.t += dt;
+      if (pressed('Enter') || pressed('Space')) goPlay(unlocked());
+    },
+    pointer(ev) {
+      if (handleMute(ev)) return;
+      const tiles = [...Array(LEVELS).keys()];
+      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['start', 'home'])] || null; return; }
+      if (ev.type !== 'up') return;
+      state.btnDown = null;
+      const k = buttonAt(ev, ['start', 'home']);
+      if (k === 'start') { goPlay(unlocked()); return; }
+      if (k === 'home' && location.protocol.startsWith('http')) { location.href = '../../'; return; }
+      for (const n of tiles) if (inRect(ev, TILE(n)) && n + 1 <= unlocked()) { goPlay(n + 1); return; }
+    },
+    draw() {
+      const t = state.t;
+      drawWall(); drawLamp(W / 2, 40, 60, t);
+      text('عطّار', W / 2, 205, 120, '#ffe2a6', 'center', 'bold');
+      text('Attar', W / 2, 280, 38, '#e2c58f', 'center');
+      // a small shelf of sealed flasks
+      drawShelf(630);
+      const g = makeLayout(10, tune.capacity).g;
+      [0, 4, 6, 1, 5].forEach((c, k) => {
+        const x = 150 + k * 105, layers = []; for (let q = 0; q < 4; q++) layers.push({ c, amt: 1 });
+        const s = 0.72; ctx.save(); ctx.translate(x, 630 - g.totalH * s); ctx.scale(s, s);
+        drawFlask(g, 0, 0, 0, layers, { stopper: 1, t }); drawWisp(0, -g.neckW * 0.95, SCENT[c].hi, t + k, 0.6);
+        ctx.restore();
+      });
+      const lv = unlocked();
+      drawButton(B.start, lv > 1 ? `تابع: المستوى ${lv}` : 'ابدأ', null, true);
+      const bests = store.get('best', {});
+      for (let n = 0; n < LEVELS; n++) {
+        const r = TILE(n), open = n + 1 <= lv, b = bests[n + 1];
+        ctx.fillStyle = open ? '#4a2a14' : '#2a1810'; rr(r.x, r.y, r.w, r.h, 16); ctx.fill();
+        ctx.strokeStyle = open ? '#c9963e' : 'rgba(201,150,62,0.3)'; ctx.lineWidth = 2.5; ctx.stroke();
+        if (open) {
+          text(String(n + 1), r.x + r.w / 2, r.y + 40, 38, '#ffe7b6', 'center', 'bold');
+          for (let s = 0; s < 3; s++) drawStar(r.x + r.w / 2 + (s - 1) * 30, r.y + 84, 12, b && s < b.stars);
+        } else iconLock(r.x + r.w / 2, r.y + r.h / 2, 56, 'rgba(201,150,62,0.55)');
+      }
+      CONTROLS.forEach((c, i) => text(c, W / 2, 1214 + i * 36, 25, '#e9d3a8'));
+      drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
+      if (location.protocol.startsWith('http')) drawButton(B.home, '', iconHouse);
+    },
+  },
+  play: {
+    update(dt) {
+      state.t += dt;
+      state.shake = state.shake.filter(s => state.t - s.t < 0.3);
+      if (state.phase === 'deal') { dealStep(); return; }
+      if (state.anim) { state.anim.t += dt; if (state.anim.t >= tune.pour_time) state.anim = null; }
+      if (state.hint && state.t - state.hint.t > tune.hint_time) state.hint = null;
+      if (state.phase === 'won') { if (state.t >= state.winAt && !state.anim) finishLevel(); return; }
+      const n = state.st.length, lay = state.lay;
+      if (pressed('ArrowRight')) { state.kbd = true; state.cursor = (state.cursor + 1) % n; }
+      if (pressed('ArrowLeft')) { state.kbd = true; state.cursor = (state.cursor + n - 1) % n; }
+      if ((pressed('ArrowDown') || pressed('ArrowUp')) && lay.rows === 2) {
+        state.kbd = true; const P = lay.pos[state.cursor], other = 1 - P.row;
+        let best = -1, bd = 1e9; lay.pos.forEach((Q, k) => { if (Q.row === other && Math.abs(Q.x - P.x) < bd) { bd = Math.abs(Q.x - P.x); best = k; } });
+        if (best >= 0) state.cursor = best;
+      }
+      if (pressed('Space') || pressed('Enter')) { state.kbd = true; tapFlask(state.cursor); }
+      if (pressed('KeyU') || pressed('Backspace')) undo();
+      if (pressed('KeyH')) useHint();
+      if (pressed('KeyR')) restartLevel(false);
+      if (pressed('Escape')) toTitle();
+    },
+    pointer(ev) {
+      if (handleMute(ev)) return;
+      if (state.phase === 'deal') return;
+      const btns = state.stuck ? ['menu', 'sUndo', 'sRestart', 'undo', 'restart'] : ['menu', 'undo', 'hint', 'restart'];
+      if (ev.type === 'down') {
+        state.kbd = false;
+        const k = buttonAt(ev, btns); if (k) { state.btnDown = B[k]; return; }
+        if (state.stuck || state.phase !== 'play') return;
+        const f = flaskAt(ev);
+        if (f >= 0) { state.cursor = f; tapFlask(f); }
+        else if (state.sel >= 0) { state.sel = -1; sfx.drop(); }
+        return;
+      }
+      if (ev.type === 'up' || ev.type === 'cancel') {
+        const was = state.btnDown; state.btnDown = null;
+        if (!was || ev.type !== 'up') return;
+        const k = buttonAt(ev, btns); if (!k || B[k] !== was) return;
+        sfx.ui();
+        if (k === 'menu') toTitle();
+        else if (k === 'undo' || k === 'sUndo') undo();
+        else if (k === 'hint') useHint();
+        else if (k === 'restart' || k === 'sRestart') restartLevel(false);
+      }
+    },
+    draw() {
+      drawShop();
+      drawHud();
+      if (state.phase === 'deal') { text('يملأ العطّار القوارير...', W / 2, 640, 32, '#f6e3bd'); return; }
+      drawGuide();
+      drawBanner();
+      drawControls();
+      if (state.stuck) {
+        ctx.fillStyle = 'rgba(15,8,4,0.66)'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#3a2412'; rr(70, 470, W - 140, 300, 28); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 3; ctx.stroke();
+        text('لا توجد سكبات', W / 2, 540, 48, '#ffe2c4', 'center', 'bold');
+        text('تراجع أو أعد المستوى، مجانا', W / 2, 596, 28, '#e9d3a8');
+        drawButton(B.sUndo, 'تراجع', null, true);
+        drawButton(B.sRestart, 'إعادة', null);
+      }
+    },
+  },
+  results: {
+    update(dt) {
+      state.t += dt;
+      if (pressed('Enter') || pressed('Space') || pressed('KeyN')) nextLevel();
+      if (pressed('KeyR')) { scene = 'play'; restartLevel(false); }
+      if (pressed('Escape')) toTitle();
+    },
+    pointer(ev) {
+      if (handleMute(ev)) return;
+      if (ev.type !== 'up') return;
+      const k = buttonAt(ev, ['next', 'again']);
+      if (k === 'next') nextLevel(); else if (k === 'again') { scene = 'play'; restartLevel(false); }
+    },
+    draw() {
+      drawShop(); drawHud();
+      ctx.fillStyle = 'rgba(15,8,4,0.55)'; ctx.fillRect(0, 0, W, H);
+      const x = 60, y = 330, w = W - 120, h = 730;
+      ctx.fillStyle = 'rgba(0,0,0,0.4)'; rr(x + 4, y + 10, w, h, 30); ctx.fill();
+      ctx.fillStyle = '#3a2412'; rr(x, y, w, h, 30); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 4; ctx.stroke();
+      text(state.allDone ? 'أكملت رف العطّار كله' : `اكتمل المستوى ${state.level}`, W / 2, y + 76, 44, '#ffe2a6', 'center', 'bold');
+      for (let k = 0; k < 3; k++) drawStar(W / 2 + (k - 1) * 118, y + 196, 50, k < state.stars);
+      text(`السكبات ${state.moves} · الهدف ${state.par}`, W / 2, y + 300, 34, '#f6e3bd', 'center', 'bold');
+      if (state.best) text(`أفضل نتيجة: ${state.best.moves} سكبة`, W / 2, y + 352, 28, '#e9d3a8');
+      const why = state.hintUsed ? 'التلميح يحجب النجمة الثالثة' : `ثلاث نجوم بالهدف، ونجمتان حتى ${tune.star2_extra} سكبات زيادة`;
+      text(why, W / 2, y + 404, 26, '#e9d3a8');
+      drawButton(B.next, state.allDone ? 'القائمة' : 'المستوى التالي', null, true);
+      drawButton(B.again, 'أعد المستوى', null);
+    },
+  },
+};
+function nextLevel() { if (state.level >= LEVELS) { toTitle(); return; } const lv = state.level + 1; scene = 'play'; startLevel(lv); }
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  const q = ptrQ.splice(0);
+  for (const ev of q) if (scenes[scene].pointer) scenes[scene].pointer(ev);
+  scenes[scene].update(STEP); hit.clear();
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+if (scene === 'play') startLevel(Number(params.get('level')) || unlocked());
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

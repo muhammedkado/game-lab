@@ -1,0 +1,1363 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: Is the jam-then-board loop fun when every level is proven solvable and the seats always match the travellers? -->
+<!-- Date: 2026-11-23 -->
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>زحمة القافلة · Caravan Jam</title>
+<link rel="stylesheet" href="vendor/almarai.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #4a3020; overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; touch-action: none;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
+<script src="config.js"></script>
+<script>
+'use strict';
+// Caravan Jam: lead camels out of a jammed caravanserai courtyard to four loading posts at the
+// gate; travellers in matching robes climb on; full camels leave through the arch.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.posts is CONFIG.posts.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 720, H = 1280;        // logical size: portrait phone
+const PIXEL = false;
+const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
+const TITLE = 'زحمة القافلة · Caravan Jam';
+const CONTROLS = [
+  'اضغط جملاً طريقه مفتوح ليذهب إلى المربط',
+  'يركب المسافرون الجمل الذي بلون ثيابهم',
+  'الأسهم: اختيار · مسافة: إخراج',
+  'U تراجع · R إعادة · M صوت',
+];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const screenCtx = canvas.getContext('2d');
+let ctx = screenCtx;
+let bgCanvas = null, bgKey = '';
+function fit() { // fills the window at any size and pixel ratio
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  canvas.style.imageRendering = PIXEL ? 'pixelated' : 'auto';
+  screenCtx.setTransform(r, 0, 0, r, 0, 0); screenCtx.imageSmoothingEnabled = !PIXEL;
+  bgKey = '';
+}
+addEventListener('resize', fit); fit();
+const AR = /[؀-ۿ]/;
+function text(s, x, y, size, c, align = 'center', weight = 700) {
+  ctx.fillStyle = c; ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.textBaseline = 'middle'; ctx.direction = AR.test(s) ? 'rtl' : 'ltr';
+  ctx.fillText(s, x, y); ctx.direction = 'ltr';
+}
+function textOutline(s, x, y, size, c, outline, lw) {
+  ctx.font = `800 ${size}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.direction = AR.test(s) ? 'rtl' : 'ltr'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = outline; ctx.lineWidth = lw; ctx.strokeText(s, x, y);
+  ctx.fillStyle = c; ctx.fillText(s, x, y); ctx.direction = 'ltr';
+}
+
+// ---- Input: keys by position (event.code), OS key repeat ignored; taps queued for the step --
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code); // true for one step after the key goes down
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('pointerdown', () => startAudio());
+addEventListener('blur', () => down.clear());
+const tapQueue = []; let taps = [];
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault(); startAudio();
+  const r = canvas.getBoundingClientRect();
+  tapQueue.push({ x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H });
+});
+['pointermove', 'pointerup', 'pointercancel'].forEach(n => canvas.addEventListener(n, e => e.preventDefault()));
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+function inRect(p, x, y, w, h) { return p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h; }
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const AC = window.GAME_AUDIO ? null : (window.AudioContext || window.webkitAudioContext);
+    if (!window.GAME_AUDIO && !AC) return;
+    const ac = window.GAME_AUDIO || new AC(); // a check may inject one
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3, delay = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur + 0.02);
+}
+const sfx = {
+  tap() { tone(330, 0.08, 'triangle', 0.25); tone(494, 0.1, 'triangle', 0.2, 0.06); },
+  blocked() { tone(120, 0.14, 'square', 0.12); tone(92, 0.2, 'square', 0.1, 0.09); },
+  park() { tone(150, 0.12, 'triangle', 0.3); },
+  board(k) { tone(587 + k * 74, 0.07, 'sine', 0.22); },
+  bell() { [1568, 2093, 1760, 2349].forEach((f, i) => tone(f, 0.4, 'sine', 0.1, i * 0.075)); tone(3136, 0.25, 'sine', 0.04, 0.03); },
+  stuck() { tone(392, 0.2, 'sawtooth', 0.1); tone(330, 0.2, 'sawtooth', 0.1, 0.17); tone(247, 0.45, 'sawtooth', 0.1, 0.34); },
+  win() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.28, 'triangle', 0.18, i * 0.09)); },
+  undo() { tone(523, 0.07, 'sine', 0.2); tone(392, 0.1, 'sine', 0.2, 0.06); },
+  ui() { tone(660, 0.05, 'sine', 0.18); },
+};
+
+// ---- Saved personal bests (the game works without storage) -------------------------------
+const SAVE_KEY = 'caravan-jam-save-v1';
+let save = { stars: [], unlocked: 1 };
+try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && Array.isArray(s.stars)) save = s; } catch (e) { /* no storage */ }
+function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* no storage */ } }
+function totalStars() { return save.stars.reduce((a, b) => a + (b || 0), 0); }
+
+// ---- Small drawing helpers ----------------------------------------------------------------
+const lerp = (a, b, u) => a + (b - a) * u;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const easeInOut = u => u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+function hash(a, b = 0) {
+  let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function rrect(x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function ell(x, y, rx, ry, rot = 0) { ctx.beginPath(); ctx.ellipse(x, y, Math.max(0.1, rx), Math.max(0.1, ry), rot, 0, Math.PI * 2); }
+function starPath(x, y, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
+    ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+}
+function drawStar(x, y, r, on) {
+  starPath(x, y, r); ctx.fillStyle = on ? '#ffcf3f' : 'rgba(60,35,20,0.55)'; ctx.fill();
+  ctx.lineWidth = Math.max(2, r * 0.14); ctx.strokeStyle = on ? '#8a5a00' : 'rgba(240,220,180,0.5)'; ctx.lineJoin = 'round'; ctx.stroke();
+}
+function checkMark(x, y, s, c) {
+  ctx.strokeStyle = c; ctx.lineWidth = s * 0.22; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.45, y); ctx.lineTo(x - s * 0.12, y + s * 0.32); ctx.lineTo(x + s * 0.5, y - s * 0.38); ctx.stroke();
+}
+
+// ---- The look: palette, camels, travellers, posts, gate -----------------------------------
+const PAL = [
+  { robe: '#d4463a', dark: '#8c2219', light: '#f39a86', wrap: '#fbd9cc' },
+  { robe: '#2f7dd0', dark: '#174a82', light: '#8cc1f2', wrap: '#d6e8fa' },
+  { robe: '#3ca04f', dark: '#1d6430', light: '#8fd69a', wrap: '#d6f2d8' },
+  { robe: '#f3b81d', dark: '#8a5e00', light: '#ffe17a', wrap: '#fff3c8' },
+  { robe: '#9150c6', dark: '#52267a', light: '#c9a0ea', wrap: '#eddcf9' },
+];
+const COLOUR_ADJ = ['أحمر', 'أزرق', 'أخضر', 'أصفر', 'بنفسجياً'];
+const FUR = { small: ['#c58d52', '#e2b47c', '#6b4220'], big: ['#a46f3c', '#c8925c', '#5a361a'] };
+let gt = 0; // animation time for idle motion (title, figures and play)
+
+function camelGeom(len, c) {
+  const L = len * c, half = L / 2;
+  const headLen = c * 0.47, headW = c * 0.31, neckLen = c * 0.28;
+  const bodyBack = -half + c * 0.06, bodyFront = half - headLen - neckLen + c * 0.14;
+  const bodyLen = bodyFront - bodyBack, bodyMid = (bodyFront + bodyBack) / 2, bodyW = c * 0.68;
+  return { L, half, headLen, headW, neckLen, bodyBack, bodyFront, bodyLen, bodyMid, bodyW };
+}
+function seatLocal(len, c, k) {
+  const g = camelGeom(len, c);
+  if (len === 3) return [g.bodyMid + ((k % 3) - 1) * c * 0.34, (k < 3 ? -1 : 1) * g.bodyW * 0.22];
+  return [g.bodyMid + (k - 1) * c * 0.29, 0];
+}
+function blanketPattern(ci, x0, x1, y, c, col) {
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = Math.max(1, c * 0.018);
+  const step = c * 0.11, a = c * 0.025;
+  if (ci === 0) { ctx.beginPath(); for (let x = x0, k = 0; x <= x1; x += step / 2, k++) ctx.lineTo(x, y + (k % 2 ? a : -a)); ctx.stroke(); }
+  else if (ci === 1) { for (let x = x0 + step / 2; x < x1; x += step) { ell(x, y, a, a); ctx.fill(); } }
+  else if (ci === 2) { for (let x = x0 + step / 4; x < x1; x += step) { ctx.beginPath(); ctx.moveTo(x, y - a); ctx.lineTo(x + step * 0.5, y + a); ctx.stroke(); } }
+  else if (ci === 3) { for (let x = x0 + step / 2; x < x1; x += step) { ctx.beginPath(); ctx.moveTo(x - a * 1.4, y); ctx.lineTo(x, y - a * 1.4); ctx.lineTo(x + a * 1.4, y); ctx.lineTo(x, y + a * 1.4); ctx.closePath(); ctx.fill(); } }
+  else { for (let x = x0 + step / 2; x < x1; x += step) { ctx.beginPath(); ctx.moveTo(x - a, y - a); ctx.lineTo(x + a, y + a); ctx.moveTo(x + a, y - a); ctx.lineTo(x - a, y + a); ctx.stroke(); } }
+}
+function drawRider(x, y, c, ci) {
+  const P = PAL[ci];
+  ctx.fillStyle = P.dark; ell(x - c * 0.015, y, c * 0.095, c * 0.125); ctx.fill();
+  ctx.fillStyle = P.wrap; ell(x + c * 0.01, y, c * 0.072, c * 0.072); ctx.fill();
+  ctx.strokeStyle = P.dark; ctx.lineWidth = Math.max(1, c * 0.018); ctx.stroke();
+  ctx.strokeStyle = P.robe; ctx.lineWidth = Math.max(1, c * 0.022);
+  ctx.beginPath(); ctx.arc(x + c * 0.01, y, c * 0.042, -1.1, 1.3); ctx.stroke();
+}
+// A camel seen from above. (cx, cy) its middle, ang its facing, len cells long, c the cell size.
+function drawCamel(cx, cy, ang, len, c, ci, fill, o) {
+  o = o || {};
+  const P = PAL[ci], big = len === 3, g = camelGeom(len, c);
+  const [fur, furL, furD] = big ? FUR.big : FUR.small;
+  const ph = o.ph || 0, bob = (o.bob || 0) * c;
+  const lw = Math.max(1.2, c * 0.03);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  // shadow
+  ctx.fillStyle = 'rgba(70,40,15,0.26)';
+  ell(g.bodyMid + c * 0.05, c * 0.07, g.bodyLen * 0.54, g.bodyW * 0.6); ctx.fill();
+  ell(g.half - g.headLen * 0.5 + c * 0.05 + bob, c * 0.07, g.headLen * 0.55, g.headW * 0.6); ctx.fill();
+  if (o.glow) { ctx.strokeStyle = o.glow; ctx.lineWidth = c * 0.1; ell(g.bodyMid + c * 0.1, 0, g.bodyLen / 2 + c * 0.22, g.bodyW / 2 + c * 0.13); ctx.stroke(); }
+  // legs: tucked knees when resting, striding legs when walking
+  ctx.fillStyle = furD;
+  if (o.walk != null) {
+    const sw = Math.sin(o.walk) * c * 0.14;
+    for (const [kx, s, d] of [[g.bodyFront - c * 0.18, -1, 1], [g.bodyFront - c * 0.18, 1, -1], [g.bodyBack + c * 0.2, -1, -1], [g.bodyBack + c * 0.2, 1, 1]]) {
+      ell(kx + sw * d, s * g.bodyW * 0.48, c * 0.1, c * 0.055); ctx.fill();
+    }
+  } else {
+    for (const kx of [g.bodyFront - c * 0.2, g.bodyBack + c * 0.22]) for (const s of [-1, 1]) { ell(kx, s * g.bodyW * 0.46, c * 0.12, c * 0.07); ctx.fill(); }
+  }
+  // tail
+  const tw = Math.sin(gt * 3 + ph) * c * 0.05;
+  ctx.strokeStyle = furD; ctx.lineWidth = c * 0.045;
+  ctx.beginPath(); ctx.moveTo(g.bodyBack + c * 0.05, 0); ctx.quadraticCurveTo(g.bodyBack - c * 0.06, tw * 0.5, g.bodyBack - c * 0.14, tw); ctx.stroke();
+  ell(g.bodyBack - c * 0.17, tw, c * 0.06, c * 0.04); ctx.fill();
+  // neck
+  const nx0 = g.bodyFront - c * 0.16, nx1 = g.half - g.headLen * 0.75 + bob;
+  ctx.fillStyle = fur; ctx.strokeStyle = furD; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.moveTo(nx0, -c * 0.17); ctx.quadraticCurveTo((nx0 + nx1) / 2, -c * 0.085, nx1, -c * 0.085);
+  ctx.lineTo(nx1, c * 0.085); ctx.quadraticCurveTo((nx0 + nx1) / 2, c * 0.085, nx0, c * 0.17); ctx.closePath(); ctx.fill(); ctx.stroke();
+  if (big) { // shaggy mane along the neck
+    ctx.strokeStyle = furD; ctx.lineWidth = Math.max(1, c * 0.025);
+    for (let k = 0; k < 4; k++) { const x = lerp(nx0 + c * 0.05, nx1 - c * 0.02, k / 3); ctx.beginPath(); ctx.moveTo(x - c * 0.03, -c * 0.05); ctx.lineTo(x + c * 0.03, c * 0.05); ctx.stroke(); }
+  }
+  // body
+  ctx.fillStyle = fur; ctx.strokeStyle = furD; ctx.lineWidth = lw;
+  ell(g.bodyMid, 0, g.bodyLen / 2, g.bodyW / 2); ctx.fill(); ctx.stroke();
+  // head: ears, skull, muzzle, nostrils, eyes, halter
+  const hx = g.half - g.headLen / 2 + bob;
+  const flick = Math.sin(gt * 2.3 + ph * 3) > 0.93 ? 0.45 : 0;
+  ctx.fillStyle = fur;
+  for (const s of [-1, 1]) { ell(hx - g.headLen * 0.33, s * g.headW * 0.56, c * 0.065, c * 0.035, s * (0.6 + flick)); ctx.fill(); ctx.stroke(); }
+  ctx.fillStyle = furL; ell(hx, 0, g.headLen / 2, g.headW / 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#8c5a34'; ell(hx + g.headLen * 0.3, 0, g.headLen * 0.2, g.headW * 0.4); ctx.fill();
+  ctx.fillStyle = '#2e1a0b';
+  for (const s of [-1, 1]) { ell(hx + g.headLen * 0.42, s * g.headW * 0.15, c * 0.02, c * 0.013); ctx.fill(); }
+  for (const s of [-1, 1]) {
+    ctx.fillStyle = '#1e1008'; ell(hx - g.headLen * 0.06, s * g.headW * 0.38, c * 0.036, c * 0.03); ctx.fill();
+    ctx.fillStyle = '#fff'; ell(hx - g.headLen * 0.04, s * g.headW * 0.38 - c * 0.008, c * 0.011, c * 0.011); ctx.fill();
+  }
+  ctx.strokeStyle = P.robe; ctx.lineWidth = Math.max(1.5, c * 0.035);
+  ctx.beginPath(); ctx.moveTo(hx + g.headLen * 0.12, -g.headW * 0.48); ctx.lineTo(hx + g.headLen * 0.12, g.headW * 0.48); ctx.stroke();
+  // humps and saddle blanket
+  const bw = g.bodyW * 1.14;
+  const blanket = (bl) => {
+    const x0 = g.bodyMid - bl / 2, nt = big ? 4 : 3;
+    ctx.strokeStyle = P.dark; ctx.lineWidth = Math.max(1, c * 0.022);
+    for (let i = 0; i < nt; i++) {
+      const x = x0 + bl * (i + 0.5) / nt;
+      for (const s of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(x, s * bw * 0.45); ctx.lineTo(x, s * (bw / 2 + c * 0.075)); ctx.stroke();
+        ctx.fillStyle = '#f4d46a'; ell(x, s * (bw / 2 + c * 0.09), c * 0.034, c * 0.034); ctx.fill();
+      }
+    }
+    rrect(x0, -bw / 2, bl, bw, c * 0.09); ctx.fillStyle = P.robe; ctx.fill();
+    ctx.strokeStyle = P.dark; ctx.lineWidth = lw; ctx.stroke();
+    const ins = c * 0.075;
+    rrect(x0 + ins, -bw / 2 + ins, bl - 2 * ins, bw - 2 * ins, c * 0.05);
+    ctx.strokeStyle = P.light; ctx.lineWidth = Math.max(1, c * 0.022); ctx.stroke();
+    for (const s of [-1, 1]) blanketPattern(ci, x0 + ins, x0 + bl - ins, s * (bw / 2 - ins / 2), c, P.light);
+  };
+  const hump = (x, rx, ry) => {
+    const gr = ctx.createRadialGradient(x - rx * 0.2, -ry * 0.25, 1, x, 0, Math.max(rx, ry));
+    gr.addColorStop(0, furL); gr.addColorStop(1, fur);
+    ctx.fillStyle = gr; ell(x, 0, rx, ry); ctx.fill(); ctx.strokeStyle = furD; ctx.lineWidth = lw * 0.8; ctx.stroke();
+  };
+  if (big) {
+    blanket(g.bodyLen * 0.52);
+    for (const s of [-1, 1]) {
+      const x = g.bodyMid + s * g.bodyLen * 0.34; hump(x, c * 0.22, g.bodyW * 0.36);
+      ctx.strokeStyle = furD; ctx.lineWidth = Math.max(1, c * 0.02);
+      for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(x + k * c * 0.06, -c * 0.04); ctx.lineTo(x + k * c * 0.06 + c * 0.02, c * 0.04); ctx.stroke(); }
+    }
+  } else {
+    hump(g.bodyMid, g.bodyLen * 0.38, g.bodyW * 0.4);
+    blanket(g.bodyLen * 0.62);
+  }
+  // seats and riders
+  const seats = o.seats || (big ? 6 : 3);
+  for (let k = 0; k < seats; k++) {
+    const [sx, sy] = seatLocal(len, c, k);
+    if (k < fill) drawRider(sx, sy, c, ci);
+    else { ctx.fillStyle = P.dark; ell(sx, sy, c * 0.08, c * 0.08); ctx.fill(); ctx.strokeStyle = P.light; ctx.lineWidth = Math.max(1, c * 0.02); ctx.stroke(); }
+  }
+  // neck bell
+  ctx.fillStyle = '#e9c24a'; ell(g.bodyFront + c * 0.01, 0, c * 0.055, c * 0.055); ctx.fill();
+  ctx.strokeStyle = '#7d5c10'; ctx.lineWidth = Math.max(1, c * 0.02); ctx.stroke();
+  if (o.flash) { ctx.fillStyle = `rgba(255,60,40,${o.flash})`; ell(g.bodyMid, 0, g.bodyLen / 2 + c * 0.05, g.bodyW / 2 + c * 0.06); ctx.fill(); }
+  ctx.restore();
+}
+// A traveller seen from above; variant 0 carries a bundle, 1 a staff, 2 a water skin.
+function drawTraveller(x, y, ci, variant, ang, s, step) {
+  const P = PAL[ci];
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(s, s);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.fillStyle = 'rgba(60,35,15,0.28)'; ell(2, 3, 16, 19); ctx.fill();
+  const f = Math.sin(step || 0) * 4;
+  ctx.fillStyle = '#4a2f1d'; ell(11 + f, -6, 5, 3.4); ctx.fill(); ell(11 - f, 6, 5, 3.4); ctx.fill();
+  if (variant === 1) { // staff held forward on the left
+    ctx.strokeStyle = '#6b4424'; ctx.lineWidth = 3.4; ctx.beginPath(); ctx.moveTo(-10, -19); ctx.lineTo(22, -19); ctx.stroke();
+    ctx.fillStyle = '#4a2d14'; ell(23, -19, 3.6, 3.6); ctx.fill();
+  }
+  ctx.fillStyle = P.robe; ctx.strokeStyle = P.dark; ctx.lineWidth = 2;
+  ell(0, 0, 12.5, 17.5); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = P.dark; ell(4, -15.5, 5, 4); ctx.fill(); ell(4, 15.5, 5, 4); ctx.fill();
+  ctx.strokeStyle = P.light; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(8, -9); ctx.quadraticCurveTo(12, 0, 8, 9); ctx.stroke();
+  if (variant === 0) { // cloth bundle on the back
+    ctx.fillStyle = '#efe0bd'; ctx.strokeStyle = '#8a7350'; ctx.lineWidth = 1.6;
+    ell(-11, 7, 8.5, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#c9a76a'; ell(-6, 3, 2.6, 2.6); ctx.fill();
+    ctx.strokeStyle = '#8a7350'; ctx.beginPath(); ctx.moveTo(-15, 3); ctx.lineTo(-8, 12); ctx.stroke();
+  } else if (variant === 2) { // water skin at the hip
+    ctx.fillStyle = '#9a6a3c'; ctx.strokeStyle = '#4d3017'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(-2, 16); ctx.quadraticCurveTo(-6, 28, 4, 27); ctx.quadraticCurveTo(10, 22, 5, 15); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#4d3017'; ell(2, 14.5, 2.2, 2.2); ctx.fill();
+  }
+  // head wrap with its tail of cloth
+  ctx.fillStyle = P.wrap; ctx.strokeStyle = P.dark; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(-6, -3); ctx.quadraticCurveTo(-16, 0, -14, 8); ctx.lineTo(-7, 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ell(1, 0, 9.5, 9.5); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = P.robe; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(1, 0, 5.5, -1.3, 1.5); ctx.stroke();
+  ctx.restore();
+}
+function drawPost(x, y, glow) {
+  if (glow) {
+    const gr = ctx.createRadialGradient(x, y, 4, x, y, 40);
+    gr.addColorStop(0, glow); gr.addColorStop(1, 'rgba(255,170,40,0)');
+    ctx.fillStyle = gr; ell(x, y, 40, 40); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(50,30,10,0.35)'; ell(x + 3, y + 4, 16, 14); ctx.fill();
+  ctx.fillStyle = '#7b5230'; ell(x, y, 15, 15); ctx.fill();
+  ctx.strokeStyle = '#3e2612'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.strokeStyle = '#a87a4c'; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = '#4c4c4c'; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.arc(x + 12, y + 7, 5, 0, Math.PI * 2); ctx.stroke();
+}
+function ropeLine(x0, y0, x1, y1, sag) {
+  const mx = (x0 + x1) / 2 + (y1 - y0 ? sag : 0), my = (y0 + y1) / 2 + (x1 - x0 ? sag : 0);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#6e5028'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, x1, y1); ctx.stroke();
+  ctx.strokeStyle = '#d0aa6c'; ctx.lineWidth = 3; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+}
+function drawHand(x, y, a) { // a pointing hand, fingertip at (x, y), pointing up-left
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+  ctx.fillStyle = '#fbe3c6'; ctx.strokeStyle = '#6b4220'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-7, 0); ctx.quadraticCurveTo(0, -8, 7, 0); ctx.lineTo(8, 44);
+  ctx.quadraticCurveTo(22, 38, 30, 48); ctx.quadraticCurveTo(38, 60, 32, 86);
+  ctx.lineTo(-10, 90); ctx.quadraticCurveTo(-22, 70, -26, 52); ctx.quadraticCurveTo(-28, 42, -18, 44);
+  ctx.lineTo(-8, 56); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(8, 56); ctx.lineTo(8, 66); ctx.moveTo(20, 56); ctx.lineTo(20, 68); ctx.stroke();
+  ctx.restore();
+}
+function drawIcon(kind, x, y, s, col) {
+  ctx.save(); ctx.translate(x, y); ctx.strokeStyle = col; ctx.fillStyle = col;
+  ctx.lineWidth = s * 0.13; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (kind === 'undo') {
+    ctx.beginPath(); ctx.arc(s * 0.05, s * 0.08, s * 0.34, Math.PI * 1.05, Math.PI * 0.45, false); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-s * 0.48, -s * 0.18); ctx.lineTo(-s * 0.28, s * 0.12); ctx.lineTo(-s * 0.02, -s * 0.1); ctx.closePath(); ctx.fill();
+  } else if (kind === 'restart') {
+    ctx.beginPath(); ctx.arc(0, 0, s * 0.33, -Math.PI * 0.35, Math.PI * 1.45); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(s * 0.1, -s * 0.5); ctx.lineTo(s * 0.36, -s * 0.3); ctx.lineTo(s * 0.06, -s * 0.12); ctx.closePath(); ctx.fill();
+  } else if (kind === 'sound' || kind === 'mute') {
+    ctx.beginPath(); ctx.moveTo(-s * 0.42, -s * 0.13); ctx.lineTo(-s * 0.22, -s * 0.13); ctx.lineTo(0, -s * 0.36); ctx.lineTo(0, s * 0.36); ctx.lineTo(-s * 0.22, s * 0.13); ctx.lineTo(-s * 0.42, s * 0.13); ctx.closePath(); ctx.fill();
+    if (kind === 'sound') { ctx.beginPath(); ctx.arc(0, 0, s * 0.22, -0.8, 0.8); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, s * 0.4, -0.8, 0.8); ctx.stroke(); }
+    else { ctx.beginPath(); ctx.moveTo(s * 0.12, -s * 0.18); ctx.lineTo(s * 0.44, s * 0.18); ctx.moveTo(s * 0.44, -s * 0.18); ctx.lineTo(s * 0.12, s * 0.18); ctx.stroke(); }
+  } else if (kind === 'menu') {
+    for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { rrect(a * s * 0.2 - s * 0.15, b * s * 0.2 - s * 0.15, s * 0.3, s * 0.3, s * 0.06); ctx.fill(); }
+  } else if (kind === 'home') {
+    ctx.beginPath(); ctx.moveTo(-s * 0.42, -s * 0.02); ctx.lineTo(0, -s * 0.4); ctx.lineTo(s * 0.42, -s * 0.02); ctx.stroke();
+    rrect(-s * 0.28, -s * 0.06, s * 0.56, s * 0.42, s * 0.04); ctx.fill();
+    ctx.fillStyle = '#5a3a24'; rrect(-s * 0.08, s * 0.1, s * 0.16, s * 0.26, s * 0.03); ctx.fill();
+  }
+  ctx.restore();
+}
+function woodButton(x, y, w, h, on = true) {
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; rrect(x + 2, y + 4, w, h, 16); ctx.fill();
+  const gr = ctx.createLinearGradient(0, y, 0, y + h);
+  gr.addColorStop(0, on ? '#93603a' : '#6a4a34'); gr.addColorStop(1, on ? '#6c4224' : '#4e3626');
+  ctx.fillStyle = gr; rrect(x, y, w, h, 16); ctx.fill();
+  ctx.strokeStyle = on ? '#e6c07e' : '#8c7660'; ctx.lineWidth = 3; ctx.stroke();
+}
+function bigButton(x, y, w, h, label, col = '#2f8a46') {
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; rrect(x + 3, y + 6, w, h, 22); ctx.fill();
+  ctx.fillStyle = col; rrect(x, y, w, h, 22); ctx.fill();
+  ctx.strokeStyle = '#fff3d6'; ctx.lineWidth = 4; ctx.stroke();
+  text(label, x + w / 2, y + h / 2 + 2, 38, '#fffaf0');
+}
+
+// ---- Layout -------------------------------------------------------------------------------
+const HUD_H = 96, WALLX = 26, WALLT = 124, YARD_Y = 856;
+const XL = 41, XR = 679, YT = 139, YB = 841;          // walkway centre lines around the courtyard
+const AV = { x0: 64, x1: 656, y0: 162, y1: 818 };     // the box a courtyard grid may use
+const BAY_TOP = 864, BAY_HEAD = 1004, LANE_Y = 1040;
+const GATE_X = 630, GATE_HALF = 50, WALL_Y = 1190;
+const Q_ROW1 = 1098, Q_ROW2 = 1154, Q_FRONT_X = 500, Q_GAP = 42, Q_PER_ROW = 12;
+const BTN = { mute: [14, 12, 76, 72], menu: [98, 12, 76, 72], undo: [530, 12, 82, 72], restart: [624, 12, 82, 72] };
+const bayX = slot => 60 + (600 / tune.posts) * (slot + 0.5);
+const postPos = slot => [60 + (600 / tune.posts) * slot + 2, 996];
+function slotPos(k) {
+  if (k < Q_PER_ROW) return [Q_FRONT_X - k * Q_GAP, Q_ROW1];
+  if (k < Q_PER_ROW * 2) return [Q_FRONT_X - (Q_PER_ROW - 1) * Q_GAP + (k - Q_PER_ROW) * Q_GAP, Q_ROW2];
+  return [Q_FRONT_X + Q_GAP, Q_ROW2];
+}
+
+// ---- The level dealer: build, then keep only what the solver can win -----------------------
+const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
+function levelSpec(L) {
+  const cols = Math.min(tune.grid_max_cols, tune.grid_first_cols + Math.floor((L - 1) / 2));
+  const rows = cols + 1;
+  const n = Math.min(tune.camels_max, tune.camels_first + tune.camels_step * (L - 1));
+  const colours = L >= tune.colours5_from ? 5 : L >= tune.colours4_from ? 4 : L >= tune.colours3_from ? 3 : 2;
+  const nBig = L >= tune.big_from ? Math.round(n * tune.big_share) : 0;
+  const plan = L === 1 ? 1 : L < tune.chain_from ? 2 : tune.plan_posts;
+  const minDepth = L === 1 ? 1 : L === 2 ? 2 : L >= tune.chain_from ? 3 : 2;
+  const maxDepth = L === 1 ? 1 : L === 2 ? 2 : 99;
+  return { L, cols, rows, n, colours, nBig, plan, minDepth, maxDepth };
+}
+// Each new camel is set down only where its own way out is clear, so leaving in reverse order
+// always works: no camel can ever be locked in for good.
+function placeCamels(sp) {
+  const { cols, rows, n, nBig } = sp;
+  const occ = new Int8Array(cols * rows).fill(-1), camels = [];
+  let bigLeft = nBig, tries = 0;
+  while (camels.length < n && tries < 1500) {
+    tries++;
+    const len = bigLeft > 0 && (n - camels.length <= bigLeft || rng() < 0.45) ? 3 : 2;
+    const d = Math.floor(rng() * 4), [dx, dy] = DIRS[d];
+    const hc = Math.floor(rng() * cols), hr = Math.floor(rng() * rows);
+    let ok = true; const cells = [];
+    for (let i = 0; i < len; i++) {
+      const c = hc - dx * i, r = hr - dy * i;
+      if (c < 0 || r < 0 || c >= cols || r >= rows || occ[r * cols + c] >= 0) { ok = false; break; }
+      cells.push(r * cols + c);
+    }
+    if (!ok) continue;
+    for (let c = hc + dx, r = hr + dy; c >= 0 && r >= 0 && c < cols && r < rows; c += dx, r += dy) if (occ[r * cols + c] >= 0) { ok = false; break; }
+    if (!ok) continue;
+    const id = camels.length;
+    cells.forEach(k => { occ[k] = id; });
+    camels.push({ id, hc, hr, d, len, cells });
+    if (len === 3) bigLeft--;
+  }
+  if (camels.length < n || bigLeft > 0) return null;
+  return { camels, occ };
+}
+function computeBlock(camels, cols, rows, occ) {
+  return camels.map(cm => {
+    const [dx, dy] = DIRS[cm.d]; let m = 0;
+    for (let c = cm.hc + dx, r = cm.hr + dy; c >= 0 && r >= 0 && c < cols && r < rows; c += dx, r += dy) { const o = occ[r * cols + c]; if (o >= 0) m |= 1 << o; }
+    return m;
+  });
+}
+function depthOf(block, n) {
+  let mask = (1 << n) - 1, d = 0;
+  while (mask) {
+    let rm = 0;
+    for (let i = 0; i < n; i++) if ((mask >> i & 1) && !(block[i] & mask)) rm |= 1 << i;
+    if (!rm) return 99;
+    mask &= ~rm; d++;
+  }
+  return d;
+}
+// The dealer's own way out: free camels in a random order, leaning towards camels that block others.
+function exitOrder(block, n) {
+  let mask = (1 << n) - 1; const order = [];
+  while (mask) {
+    const free = []; let tw = 0;
+    for (let i = 0; i < n; i++) if ((mask >> i & 1) && !(block[i] & mask)) {
+      let w = 1; for (let j = 0; j < n; j++) if ((mask >> j & 1) && (block[j] >> i & 1)) w += 2;
+      free.push([i, w]); tw += w;
+    }
+    let r = rng() * tw, pick = free[0][0];
+    for (const [i, w] of free) { r -= w; if (r <= 0) { pick = i; break; } }
+    order.push(pick); mask &= ~(1 << pick);
+  }
+  return order;
+}
+// The line is written from that order: every seat gets exactly one traveller of its colour.
+function makeQueue(camels, order, plan) {
+  const q = [], open = [], rem = camels.map(c => c.seats); let next = 0;
+  while (open.length < plan && next < order.length) open.push(order[next++]);
+  while (open.length) {
+    const colour = camels[open[Math.floor(rng() * open.length)]].colour;
+    const j = open.findIndex(id => camels[id].colour === colour);
+    q.push(colour); rem[open[j]]--;
+    if (rem[open[j]] === 0) { open.splice(j, 1); if (next < order.length) open.push(order[next++]); }
+  }
+  return q;
+}
+// One tap, as the rules say: the camel takes the first free post, then the line boards until the
+// front traveller fits no camel at the posts. Used by the game and by the solver alike.
+function applyTap(S, i, lv, evs) {
+  const posts = S.posts.map(p => ({ id: p.id, fill: p.fill, slot: p.slot }));
+  let slot = 0; while (posts.some(p => p.slot === slot)) slot++;
+  posts.push({ id: i, fill: 0, slot });
+  let qi = S.qi; const mask = S.mask & ~(1 << i);
+  if (evs) evs.push({ type: 'post', id: i, slot });
+  while (qi < lv.queue.length) {
+    const c = lv.queue[qi];
+    const k = posts.findIndex(p => lv.camels[p.id].colour === c);
+    if (k < 0) break;
+    const p = posts[k];
+    if (evs) evs.push({ type: 'board', qi, id: p.id, seat: p.fill });
+    p.fill++; qi++;
+    if (p.fill >= lv.camels[p.id].seats) { posts.splice(k, 1); if (evs) evs.push({ type: 'depart', id: p.id, slot: p.slot }); }
+  }
+  return { mask, posts, qi };
+}
+function canExit(lv, S, i) { return (S.mask >> i & 1) === 1 && !(lv.block[i] & S.mask); }
+// Depth-first search with a memo; returns a winning tap order or null.
+function solve(lv, limit, start) {
+  const n = lv.camels.length, Q = lv.queue.length, NP = tune.posts;
+  const seen = new Set(), path = []; let nodes = 0;
+  const firstIdx = (qi, col) => { for (let k = qi; k < Q; k++) if (lv.queue[k] === col) return k; return Q; };
+  function rec(S) {
+    if (S.qi >= Q) return true;
+    if (S.posts.length >= NP) return false;
+    if (++nodes > limit) return false;
+    const key = S.mask + '|' + S.qi + '|' + S.posts.map(p => p.id + ':' + p.fill).join(',');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const cand = [];
+    for (let i = 0; i < n; i++) if (canExit(lv, S, i)) cand.push([i, firstIdx(S.qi, lv.camels[i].colour)]);
+    cand.sort((a, b) => a[1] - b[1]);
+    for (const [i] of cand) {
+      path.push(i);
+      if (rec(applyTap(S, i, lv))) return true;
+      path.pop();
+      if (nodes > limit) return false;
+    }
+    return false;
+  }
+  const ok = rec(start || { mask: (1 << n) - 1, posts: [], qi: 0 });
+  return { ok, path: ok ? path.slice() : null, nodes };
+}
+function seatsMatch(lv) {
+  const seats = [0, 0, 0, 0, 0], trav = [0, 0, 0, 0, 0];
+  lv.camels.forEach(c => { seats[c.colour] += c.seats; });
+  lv.queue.forEach(c => { trav[c]++; });
+  return seats.every((v, i) => v === trav[i]);
+}
+function dealLevel(L) {
+  const base = levelSpec(L);
+  seed = (Math.imul(Number(params.get('seed')) || CONFIG.seed, 7919) + L * 104729) | 0;
+  for (let attempt = 0; attempt < 600; attempt++) {
+    const sp = attempt < 400 ? base : Object.assign({}, base, { minDepth: 1, maxDepth: 99 }); // fallback keeps the solver check
+    const g = placeCamels(sp); if (!g) continue;
+    const block = computeBlock(g.camels, sp.cols, sp.rows, g.occ);
+    const depth = depthOf(block, sp.n);
+    if (depth < sp.minDepth || depth > sp.maxDepth) continue;
+    if (L === 2 && block.filter(b => b).length > 2) continue;
+    const list = []; for (let i = 0; i < sp.n; i++) list.push(i % sp.colours);
+    for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+    g.camels.forEach((c, i) => { c.colour = list[i]; c.seats = c.len === 3 ? tune.seats_big : tune.seats_small; });
+    const order = exitOrder(block, sp.n);
+    const queue = makeQueue(g.camels, order, sp.plan);
+    const lv = { L, cols: sp.cols, rows: sp.rows, camels: g.camels, occ: Array.from(g.occ), block, queue, depth, colours: sp.colours };
+    if (!seatsMatch(lv)) continue;
+    const res = solve(lv, tune.solver_nodes);
+    if (!res.ok) continue;
+    lv.solution = res.path; lv.solverNodes = res.nodes; lv.attempts = attempt + 1;
+    const cell = Math.min((AV.x1 - AV.x0) / sp.cols, (AV.y1 - AV.y0) / sp.rows, tune.cell_max);
+    lv.geo = { cell, gx: (AV.x0 + AV.x1) / 2 - cell * sp.cols / 2, gy: (AV.y0 + AV.y1) / 2 - cell * sp.rows / 2 };
+    events.push({ type: 'dealt', level: L, camels: sp.n, travellers: queue.length, attempts: attempt + 1, solverNodes: res.nodes });
+    return lv;
+  }
+  throw new Error('dealer found no solvable level ' + L);
+}
+
+// ---- Paths for walking camels -------------------------------------------------------------
+function mkPath(pts) {
+  const P = [pts[0]];
+  for (let i = 1; i < pts.length; i++) { const a = P[P.length - 1], b = pts[i]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.5) P.push(b); }
+  const cum = [0];
+  for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+  return { pts: P, cum, total: cum[cum.length - 1] };
+}
+function pathAt(p, s) {
+  const n = p.pts.length; if (n === 1) return p.pts[0].slice();
+  let i = 0;
+  if (s >= p.total) i = n - 2; else if (s > 0) while (i < n - 2 && p.cum[i + 1] < s) i++;
+  const a = p.pts[i], b = p.pts[i + 1], u = (s - p.cum[i]) / Math.max(0.001, p.cum[i + 1] - p.cum[i]);
+  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+}
+function gridGeom(i) {
+  const lv = state.lv, cm = lv.camels[i], g = lv.geo, [dx, dy] = DIRS[cm.d];
+  const hx = g.gx + (cm.hc + 0.5) * g.cell, hy = g.gy + (cm.hr + 0.5) * g.cell;
+  const fx = hx + dx * g.cell / 2, fy = hy + dy * g.cell / 2, L = cm.len * g.cell;
+  return { fx, fy, cx: fx - dx * L / 2, cy: fy - dy * L / 2, ang: Math.atan2(dy, dx), dx, dy, L };
+}
+function walkPath(i, slot) {
+  const lv = state.lv, cm = lv.camels[i], q = gridGeom(i);
+  const pts = [[q.fx - q.dx * q.L, q.fy - q.dy * q.L], [q.fx, q.fy]];
+  if (cm.d === 2) pts.push([q.fx, YB]);
+  else if (cm.d === 1) pts.push([XR, q.fy], [XR, YB]);
+  else if (cm.d === 3) pts.push([XL, q.fy], [XL, YB]);
+  else { const sx = q.fx < W / 2 ? XL : XR; pts.push([q.fx, YT], [sx, YT], [sx, YB]); }
+  const bx = bayX(slot);
+  pts.push([bx, YB], [bx, BAY_HEAD]);
+  const path = mkPath(pts);
+  return { path, s0: q.L, sExit: path.cum[Math.min(2, path.cum.length - 1)] };
+}
+function leavePath(slot, len) {
+  const bx = bayX(slot);
+  return { path: mkPath([[bx, BAY_HEAD - 320], [bx, BAY_HEAD], [bx, LANE_Y], [GATE_X, LANE_Y], [GATE_X, H + 30 + len * tune.bay_cell]]), s0: 320 };
+}
+
+// ---- Game state ------------------------------------------------------------------------------
+let scene, state;
+function reset() { // ?level=N starts on that level (a tester's shortcut, like ?seed=)
+  const want = Math.floor(Number(params.get('level')) || 0);
+  startLevel(want >= 1 ? Math.min(want, tune.levels) : Math.min(save.unlocked || 1, tune.levels));
+}
+function startLevel(L) {
+  const lv = dealLevel(L);
+  state = {
+    t: 0, score: totalStars(), gained: '', level: L, lv,
+    S: { mask: (1 << lv.camels.length) - 1, posts: [], qi: 0 },
+    hist: [], undos: tune.undos, undosUsed: 0, pending: '', stars: 0,
+    vc: [], tr: [], qv: 0, lastBoard: -9, postFree: [], busyUntil: 0,
+    fx: [], parts: [], msg: '', msgT: -9, flashPostsT: -9, blockLine: null,
+    cursor: -1, kbd: false, tapped: false, bannerT: 0, won: false, winT: 0, prevBest: 0, hint: -1,
+  };
+  settle();
+  const free = lv.camels.filter(c => canExit(lv, state.S, c.id));
+  const want = free.find(c => c.colour === lv.queue[0]) || free[0];
+  state.cursor = free.length ? free[0].id : 0;
+  state.hint = want ? want.id : -1;
+  bgKey = '';
+}
+// Rebuild the picture from the rules state at once (start, undo, restart).
+function settle() {
+  const lv = state.lv, S = state.S, t = state.t;
+  state.vc = lv.camels.map((c, i) => ({ walk: null, leave: null, slot: -1, parked: false, gone: false, fillBase: 0, shakeT: -9, flashT: -9 }));
+  lv.camels.forEach((c, i) => { if (!(S.mask >> i & 1)) state.vc[i].gone = true; });
+  S.posts.forEach(p => { const v = state.vc[p.id]; v.gone = false; v.parked = true; v.slot = p.slot; v.fillBase = p.fill; });
+  state.tr = lv.queue.map((col, k) => ({ col, var: Math.floor(hash(k, lv.L * 31) * 3), x: null, y: null, startT: null, endT: null, camel: -1, seat: 0, done: k < S.qi, fx0: 0, fy0: 0, ang: 0 }));
+  state.qv = S.qi;
+  for (let k = S.qi; k < Math.min(lv.queue.length, S.qi + 26); k++) { const p = slotPos(k - S.qi); state.tr[k].x = p[0]; state.tr[k].y = p[1]; }
+  state.lastBoard = t - 1; state.postFree = new Array(tune.posts).fill(t - 1); state.busyUntil = t; state.fx = [];
+}
+function leaveTimeTo(v, target) { // seconds after a full camel starts leaving until its head has gone `target` px
+  const D = v.leave.path.total - v.leave.s0, dur = v.leave.t1 - v.leave.t0;
+  for (let u = 0; u <= 1.0001; u += 0.01) if (D * easeIn(u) >= target) return u * dur;
+  return dur;
+}
+const easeIn = u => 1 - Math.cos(u * Math.PI / 2);
+function schedule(evs) {
+  const t = state.t, lv = state.lv;
+  for (const ev of evs) {
+    const v = state.vc[ev.id], cm = lv.camels[ev.id];
+    if (ev.type === 'post') {
+      const w = walkPath(ev.id, ev.slot), d = Math.max(0.45, w.path.total / tune.walk_speed);
+      const t1 = Math.max(t + d, state.postFree[ev.slot] + 0.05);
+      v.walk = Object.assign(w, { t0: t1 - d, t1 }); v.slot = ev.slot;
+      state.fx.push({ t: t1, k: 'park', x: bayX(ev.slot), y: BAY_HEAD - 20 });
+      state.busyUntil = Math.max(state.busyUntil, t1);
+    } else if (ev.type === 'board') {
+      const tr = state.tr[ev.qi];
+      const arrive = v.walk ? v.walk.t1 : t;
+      tr.startT = Math.max(state.lastBoard + tune.board_interval, arrive, t);
+      tr.endT = tr.startT + tune.board_flight; tr.camel = ev.id; tr.seat = ev.seat;
+      state.lastBoard = tr.startT; v.lastBoardEnd = tr.endT;
+      state.fx.push({ t: tr.endT, k: 'board', id: ev.id, seat: ev.seat });
+      state.busyUntil = Math.max(state.busyUntil, tr.endT);
+    } else if (ev.type === 'depart') {
+      const t0 = Math.max(v.lastBoardEnd || t, t) + tune.depart_delay;
+      const lp = leavePath(ev.slot, cm.len), D = lp.path.total - lp.s0;
+      v.leave = Object.assign(lp, { t0, t1: t0 + D / tune.leave_speed });
+      const clear = (LANE_Y - BAY_HEAD) + cm.len * tune.bay_cell + 70;
+      state.postFree[ev.slot] = t0 + leaveTimeTo(v, clear);
+      const toGate = (LANE_Y - BAY_HEAD) + Math.abs(GATE_X - bayX(ev.slot)) + (WALL_Y - LANE_Y);
+      const tg = t0 + leaveTimeTo(v, toGate);
+      state.fx.push({ t: t0, k: 'bell' }, { t: tg, k: 'dust' });
+      state.busyUntil = Math.max(state.busyUntil, tg + 0.2);
+    }
+  }
+}
+function toast(s) { state.msg = s; state.msgT = state.t; }
+function doTap(i) {
+  const lv = state.lv, S = state.S;
+  if (!(S.mask >> i & 1) || state.pending) return;
+  state.tapped = true; state.hint = -1;
+  if (lv.block[i] & S.mask) { // blocked: shake it, flash the camel in the way
+    const v = state.vc[i]; v.shakeT = state.t;
+    const cm = lv.camels[i], [dx, dy] = DIRS[cm.d];
+    for (let c = cm.hc + dx, r = cm.hr + dy; c >= 0 && r >= 0 && c < lv.cols && r < lv.rows; c += dx, r += dy) {
+      const o = lv.occ[r * lv.cols + c];
+      if (o >= 0 && (S.mask >> o & 1)) {
+        state.vc[o].flashT = state.t;
+        const q = gridGeom(i), g = lv.geo;
+        state.blockLine = { x0: q.fx, y0: q.fy, x1: g.gx + (c + 0.5) * g.cell, y1: g.gy + (r + 0.5) * g.cell, t: state.t };
+        break;
+      }
+    }
+    toast('الطريق مسدود'); sfx.blocked(); events.push({ type: 'blocked', id: i });
+    return;
+  }
+  if (S.posts.length >= tune.posts) { toast('المرابط ممتلئة'); state.flashPostsT = state.t; sfx.blocked(); return; }
+  state.hist.push(JSON.stringify(S));
+  const evs = [];
+  state.S = applyTap(S, i, lv, evs);
+  schedule(evs);
+  sfx.tap(); events.push({ type: 'tap', id: i });
+  const S2 = state.S;
+  if (S2.qi >= lv.queue.length) state.pending = 'win';
+  else if (S2.posts.length >= tune.posts || !lv.camels.some(c => canExit(lv, S2, c.id))) state.pending = 'stuck';
+}
+function doUndo() {
+  if (!state.hist.length) { toast('لا شيء للتراجع'); return false; }
+  if (state.undos <= 0) { toast('انتهت مرات التراجع'); return false; }
+  state.S = JSON.parse(state.hist.pop()); state.undos--; state.undosUsed++;
+  state.pending = ''; state.parts = []; settle(); sfx.undo(); events.push({ type: 'undo' });
+  scene = 'play'; return true;
+}
+function doRestart() { const L = state.level; startLevel(L); state.tapped = true; state.hint = -1; scene = 'play'; sfx.ui(); events.push({ type: 'restart', level: L }); }
+function finishLevel() {
+  const L = state.level;
+  const stars = state.undosUsed === 0 ? 3 : state.undosUsed <= 2 ? 2 : 1;
+  state.stars = stars; state.prevBest = save.stars[L - 1] || 0;
+  save.stars[L - 1] = Math.max(state.prevBest, stars);
+  save.unlocked = Math.max(save.unlocked || 1, Math.min(tune.levels, L + 1));
+  if (L >= tune.levels) save.done = true;
+  persist();
+  state.score = totalStars(); state.gained = `المرحلة ${L}: ${stars} نجوم`;
+  state.won = true; scene = 'results'; sfx.win();
+  for (let k = 0; k < 40; k++) state.parts.push({ x: W / 2, y: 470, vx: (rng() - 0.5) * 700, vy: -rng() * 600 - 100, r: 5 + rng() * 6, life: 1.6, max: 1.6, col: PAL[k % 5].robe, g: 700 });
+  events.push({ type: 'win', level: L, stars });
+}
+
+// ---- Poses: where each camel is drawn right now -----------------------------------------------
+function camelPose(i) {
+  const lv = state.lv, cm = lv.camels[i], v = state.vc[i], t = state.t, bc = tune.bay_cell, gc = lv.geo.cell;
+  if (v.leave && t >= v.leave.t0) {
+    if (t >= v.leave.t1) return null;
+    const u = (t - v.leave.t0) / (v.leave.t1 - v.leave.t0);
+    const s = v.leave.s0 + (v.leave.path.total - v.leave.s0) * easeIn(u);
+    return trainPose(v.leave.path, s, cm.len, bc, 'leave');
+  }
+  if (v.walk) {
+    if (t < v.walk.t0) return gridPose(i);
+    if (t < v.walk.t1) {
+      const u = (t - v.walk.t0) / (v.walk.t1 - v.walk.t0);
+      const s = v.walk.s0 + (v.walk.path.total - v.walk.s0) * easeInOut(u);
+      const cell = s <= v.walk.sExit ? gc : lerp(gc, bc, clamp((s - v.walk.sExit) / 170, 0, 1));
+      return trainPose(v.walk.path, s, cm.len, cell, 'walk');
+    }
+    return parkPose(i);
+  }
+  if (v.gone) return null;
+  if (v.parked) return parkPose(i);
+  return gridPose(i);
+}
+function trainPose(path, s, len, cell, phase) {
+  const h = pathAt(path, s), tl = pathAt(path, s - len * cell);
+  return { x: (h[0] + tl[0]) / 2, y: (h[1] + tl[1]) / 2, ang: Math.atan2(h[1] - tl[1], h[0] - tl[0]), cell, phase, walk: s / (cell * 0.35) };
+}
+function parkPose(i) {
+  const cm = state.lv.camels[i], bc = tune.bay_cell, bx = bayX(state.vc[i].slot);
+  return { x: bx, y: BAY_HEAD - cm.len * bc / 2, ang: Math.PI / 2, cell: bc, phase: 'park' };
+}
+function gridPose(i) {
+  const q = gridGeom(i), v = state.vc[i], t = state.t;
+  let off = 0;
+  if (t - v.shakeT < 0.4) off = Math.sin((t - v.shakeT) * 45) * state.lv.geo.cell * 0.07 * (1 - (t - v.shakeT) / 0.4);
+  return { x: q.cx + q.dx * off, y: q.cy + q.dy * off, ang: q.ang, cell: state.lv.geo.cell, phase: 'grid' };
+}
+function seatWorld(i, k) {
+  const cm = state.lv.camels[i], p = parkPose(i), [sx, sy] = seatLocal(cm.len, p.cell, k);
+  return [p.x - sy, p.y + sx];
+}
+
+// ---- Background painted once per level into a cached canvas --------------------------------------
+function paintBackground(lv) {
+  ctx.fillStyle = '#4a3020'; ctx.fillRect(0, 0, W, H);
+  let gr = ctx.createLinearGradient(0, 0, 0, HUD_H);
+  gr.addColorStop(0, '#2c1b10'); gr.addColorStop(1, '#4e3220');
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, HUD_H);
+  ctx.fillStyle = '#c9a46a'; ctx.fillRect(0, HUD_H - 3, W, 3);
+  // courtyard floor: walkway cobbles around warm sandstone paving
+  ctx.fillStyle = '#cfae7a'; ctx.fillRect(WALLX, WALLT, W - 2 * WALLX, YARD_Y - WALLT);
+  for (let y = WALLT + 2, row = 0; y < YARD_Y; y += 13, row++) for (let x = WALLX + (row % 2) * 8 - 8; x < W - WALLX; x += 16) {
+    if (x > 50 && x < 658 && y > 148 && y < 826) continue;
+    const h = hash(x, y); ctx.fillStyle = h < 0.33 ? '#dcbd8b' : h < 0.66 ? '#d4b27f' : '#e2c595';
+    rrect(x + 1, y + 1, 14, 11, 4); ctx.fill();
+  }
+  ctx.fillStyle = '#e6cc9a'; ctx.fillRect(56, 154, 608, 672);
+  ctx.strokeStyle = '#cfb07c'; ctx.lineWidth = 2;
+  for (let y = 154, row = 0; y < 826; y += 56, row++) {
+    ctx.beginPath(); ctx.moveTo(56, y); ctx.lineTo(664, y); ctx.stroke();
+    for (let x = 56 + (row % 2) * 40; x < 664; x += 70 + Math.floor(hash(row, x) * 40)) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, Math.min(826, y + 56)); ctx.stroke(); }
+  }
+  if (lv) { // the courtyard grid: one raised slab per cell, a few cracked
+    const g = lv.geo, c = g.cell;
+    ctx.fillStyle = 'rgba(120,80,40,0.25)'; rrect(g.gx - 10, g.gy - 10, c * lv.cols + 20, c * lv.rows + 20, 12); ctx.fill();
+    ctx.fillStyle = '#b98a55'; rrect(g.gx - 8, g.gy - 8, c * lv.cols + 16, c * lv.rows + 16, 10); ctx.fill();
+    ctx.strokeStyle = '#f2dfb6'; ctx.lineWidth = 2; rrect(g.gx - 4, g.gy - 4, c * lv.cols + 8, c * lv.rows + 8, 7); ctx.stroke();
+    for (let r = 0; r < lv.rows; r++) for (let q = 0; q < lv.cols; q++) {
+      const h = hash(q * 7 + lv.L, r * 13);
+      ctx.fillStyle = h < 0.3 ? '#f1ddb2' : h < 0.65 ? '#ecd5a7' : '#f4e3bd';
+      rrect(g.gx + q * c + 1.5, g.gy + r * c + 1.5, c - 3, c - 3, 5); ctx.fill();
+      ctx.strokeStyle = 'rgba(160,120,70,0.35)'; ctx.lineWidth = 1.5; ctx.stroke();
+      if (hash(q + 99, r * 5 + lv.L) < 0.16) {
+        ctx.strokeStyle = 'rgba(140,100,55,0.55)'; ctx.lineWidth = 1.4;
+        let x = g.gx + q * c + c * (0.2 + 0.6 * hash(q, r + 3)), y = g.gy + r * c + 3;
+        ctx.beginPath(); ctx.moveTo(x, y);
+        for (let k = 0; k < 4; k++) { x += (hash(q + k, r) - 0.5) * c * 0.3; y += c * 0.18; ctx.lineTo(x, y); }
+        ctx.stroke();
+      }
+    }
+  }
+  // arcade walls: roof tiles, a beam, columns, arch shadows falling on the walkway
+  const arcadeV = (x0, inner, dir) => {
+    ctx.fillStyle = '#a9553a'; ctx.fillRect(x0, HUD_H, WALLX, YARD_Y - HUD_H);
+    ctx.strokeStyle = 'rgba(70,25,15,0.4)'; ctx.lineWidth = 1.5;
+    for (let y = HUD_H + 4; y < YARD_Y; y += 9) { ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + WALLX, y); ctx.stroke(); }
+    ctx.fillStyle = '#dcc293'; ctx.fillRect(dir > 0 ? inner - 5 : inner, HUD_H, 5, YARD_Y - HUD_H);
+    for (let y = WALLT + 30; y < YARD_Y - 10; y += 62) {
+      ctx.fillStyle = 'rgba(90,50,20,0.16)'; ctx.beginPath(); ctx.arc(inner, y + 31, 26, dir > 0 ? -Math.PI / 2 : Math.PI / 2, dir > 0 ? Math.PI / 2 : Math.PI * 1.5); ctx.fill();
+      ctx.fillStyle = '#efdcb8'; ell(inner, y, 6, 6); ctx.fill(); ctx.strokeStyle = '#8a6a48'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+  };
+  arcadeV(0, WALLX, 1); arcadeV(W - WALLX, W - WALLX, -1);
+  ctx.fillStyle = '#a9553a'; ctx.fillRect(0, HUD_H, W, WALLT - HUD_H);
+  ctx.strokeStyle = 'rgba(70,25,15,0.4)'; ctx.lineWidth = 1.5;
+  for (let x = 4; x < W; x += 9) { ctx.beginPath(); ctx.moveTo(x, HUD_H); ctx.lineTo(x, WALLT); ctx.stroke(); }
+  ctx.fillStyle = '#dcc293'; ctx.fillRect(0, WALLT - 5, W, 5);
+  for (let x = 60; x < W - 40; x += 62) {
+    ctx.fillStyle = 'rgba(90,50,20,0.16)'; ctx.beginPath(); ctx.arc(x + 31, WALLT, 26, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = '#efdcb8'; ell(x, WALLT, 6, 6); ctx.fill(); ctx.strokeStyle = '#8a6a48'; ctx.stroke();
+  }
+  // loading yard
+  ctx.fillStyle = '#d4ad76'; ctx.fillRect(WALLX, YARD_Y, W - 2 * WALLX, WALL_Y - YARD_Y);
+  for (let k = 0; k < 260; k++) { ctx.fillStyle = hash(k, 5) < 0.5 ? 'rgba(150,105,55,0.25)' : 'rgba(250,230,190,0.3)'; ell(WALLX + hash(k, 1) * (W - 52), YARD_Y + hash(k, 2) * (WALL_Y - YARD_Y), 2 + hash(k, 3) * 2, 1.5 + hash(k, 4)); ctx.fill(); }
+  ctx.fillStyle = '#c29a63'; ctx.fillRect(WALLX, YARD_Y - 3, W - 2 * WALLX, 7);
+  for (const x0 of [0, W - WALLX]) {
+    ctx.fillStyle = '#b98a58'; ctx.fillRect(x0, YARD_Y, WALLX, WALL_Y - YARD_Y);
+    ctx.strokeStyle = 'rgba(80,45,20,0.4)'; ctx.lineWidth = 1.5;
+    for (let y = YARD_Y; y < WALL_Y; y += 22) { ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + WALLX, y); ctx.stroke(); }
+  }
+  // lane to the gate, with hoof prints
+  ctx.fillStyle = '#e7cd9c'; rrect(44, LANE_Y - 22, GATE_X + GATE_HALF - 44, 44, 20); ctx.fill();
+  ctx.fillRect(GATE_X - GATE_HALF + 6, LANE_Y, GATE_HALF * 2 - 12, WALL_Y - LANE_Y + 4);
+  ctx.fillStyle = 'rgba(150,110,60,0.35)';
+  for (let x = 70; x < GATE_X - 20; x += 46) { ell(x, LANE_Y - 7, 4, 3); ctx.fill(); ell(x + 12, LANE_Y + 8, 4, 3); ctx.fill(); }
+  for (let y = LANE_Y + 30; y < WALL_Y; y += 40) { ell(GATE_X - 8, y, 3, 4); ctx.fill(); ell(GATE_X + 8, y + 14, 3, 4); ctx.fill(); }
+  // bays: straw mats between rope rails
+  const NP = tune.posts, bw = 600 / NP;
+  for (let i = 0; i < NP; i++) {
+    const x0 = 60 + bw * i;
+    ctx.fillStyle = '#e4c987'; rrect(x0 + 12, BAY_TOP + 4, bw - 24, BAY_HEAD - BAY_TOP + 6, 16); ctx.fill();
+    ctx.strokeStyle = '#c4a05a'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = 'rgba(180,140,70,0.6)'; ctx.lineWidth = 1.5;
+    for (let k = 0; k < 16; k++) { const x = x0 + 22 + hash(i, k) * (bw - 44), y = BAY_TOP + 14 + hash(k, i + 7) * 120, a = hash(k + 3, i) * 3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * 12, y + Math.sin(a) * 12); ctx.stroke(); }
+  }
+  for (let i = 0; i <= NP; i++) {
+    const x = 60 + bw * i + 2;
+    ropeLine(x, BAY_TOP + 6, x, 990, 5);
+    ctx.fillStyle = '#5e3e22'; ell(x, BAY_TOP + 6, 6, 6); ctx.fill();
+    if (i === NP) { ell(x, 990, 7, 7); ctx.fill(); }
+  }
+  // the line: a woven runner in two rows, brass stanchions and ropes
+  for (const y of [Q_ROW1, Q_ROW2]) {
+    ctx.fillStyle = '#5b4636'; rrect(18, y - 24, 506, 48, 10); ctx.fill();
+    ctx.strokeStyle = '#e8cf9f'; ctx.lineWidth = 2; rrect(23, y - 19, 496, 38, 7); ctx.stroke();
+    ctx.fillStyle = '#c6814a';
+    for (let x = 34; x < 516; x += 21) { ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x + 4, y); ctx.lineTo(x, y + 4); ctx.lineTo(x - 4, y); ctx.closePath(); ctx.fill(); }
+  }
+  const stanchion = (x, y) => { ctx.fillStyle = 'rgba(40,25,10,0.3)'; ell(x + 2, y + 3, 8, 7); ctx.fill(); ctx.fillStyle = '#d2a845'; ell(x, y, 7, 7); ctx.fill(); ctx.strokeStyle = '#7a5a10'; ctx.lineWidth = 2; ctx.stroke(); };
+  ropeLine(30, 1068, 455, 1068, 6); ropeLine(70, Q_ROW1 + 28, 545, Q_ROW1 + 28, 6);
+  for (const [x, y] of [[30, 1068], [242, 1068], [455, 1068], [70, Q_ROW1 + 28], [308, Q_ROW1 + 28], [545, Q_ROW1 + 28]]) stanchion(x, y);
+  // the gate wall: sandstone blocks and merlons; the desert seen through the arch
+  ctx.fillStyle = '#c39a63'; ctx.fillRect(0, WALL_Y, W, H - WALL_Y);
+  ctx.strokeStyle = 'rgba(90,55,25,0.45)'; ctx.lineWidth = 1.5;
+  for (let y = WALL_Y + 22, row = 0; y < H; y += 22, row++) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    for (let x = (row % 2) * 24; x < W; x += 48) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 22); ctx.stroke(); }
+  }
+  ctx.fillStyle = '#d9b47c';
+  for (let x = 4; x < W; x += 30) { ctx.fillRect(x, WALL_Y - 4, 18, 12); }
+  gr = ctx.createLinearGradient(0, WALL_Y, 0, H);
+  gr.addColorStop(0, '#e9c98e'); gr.addColorStop(1, '#f7e2b2');
+  ctx.fillStyle = gr; ctx.fillRect(GATE_X - GATE_HALF, WALL_Y - 4, GATE_HALF * 2, H - WALL_Y + 4);
+  ctx.strokeStyle = 'rgba(200,150,80,0.6)'; ctx.lineWidth = 2;
+  for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(GATE_X - GATE_HALF, 1240 + k * 16); ctx.quadraticCurveTo(GATE_X, 1228 + k * 16, GATE_X + GATE_HALF, 1244 + k * 16); ctx.stroke(); }
+}
+function drawBackground(key, lv) {
+  if (bgKey !== key || !bgCanvas) {
+    bgCanvas = bgCanvas || document.createElement('canvas');
+    bgCanvas.width = canvas.width; bgCanvas.height = canvas.height;
+    const c2 = bgCanvas.getContext('2d'), k = canvas.width / W;
+    c2.setTransform(k, 0, 0, k, 0, 0);
+    ctx = c2; paintBackground(lv); ctx = screenCtx;
+    bgKey = key;
+  }
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(bgCanvas, 0, 0); ctx.restore();
+}
+// Drawn over leaving camels: the gate towers and the carved arch they pass under.
+function drawGateFront() {
+  for (const x of [GATE_X - GATE_HALF - 18, GATE_X + GATE_HALF + 18]) {
+    ctx.fillStyle = 'rgba(40,20,5,0.35)'; rrect(x - 18, WALL_Y - 12, 42, 104, 8); ctx.fill();
+    const gr = ctx.createLinearGradient(x - 20, 0, x + 20, 0);
+    gr.addColorStop(0, '#d7ae72'); gr.addColorStop(1, '#a9773f');
+    ctx.fillStyle = gr; rrect(x - 21, WALL_Y - 18, 42, 100, 8); ctx.fill();
+    ctx.strokeStyle = '#6e4620'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#f1dcae'; ell(x, WALL_Y + 8, 9, 9); ctx.fill();
+    ctx.strokeStyle = '#8a5a2a'; ctx.lineWidth = 1.5;
+    for (let a = 0; a < 8; a++) { ctx.beginPath(); ctx.moveTo(x, WALL_Y + 8); ctx.lineTo(x + Math.cos(a * Math.PI / 4) * 9, WALL_Y + 8 + Math.sin(a * Math.PI / 4) * 9); ctx.stroke(); }
+  }
+  const x0 = GATE_X - GATE_HALF - 4, x1 = GATE_X + GATE_HALF + 4, y0 = WALL_Y - 12, y1 = WALL_Y + 30;
+  ctx.fillStyle = '#b5824a'; rrect(x0, y0, x1 - x0, y1 - y0, 6); ctx.fill();
+  ctx.strokeStyle = '#6e4620'; ctx.lineWidth = 2; ctx.stroke();
+  // carved horseshoe arch in striped voussoirs
+  ctx.lineWidth = 9; ctx.lineCap = 'butt';
+  for (let k = 0; k < 9; k++) {
+    ctx.strokeStyle = k % 2 ? '#f3e1b8' : '#a2402c';
+    ctx.beginPath(); ctx.arc(GATE_X, y1 + 2, 38, Math.PI * (1.08 + k * 0.093), Math.PI * (1.08 + (k + 1) * 0.093)); ctx.stroke();
+  }
+  ctx.strokeStyle = '#5a3416'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(GATE_X, y1 + 2, 43, Math.PI * 1.06, Math.PI * 1.94); ctx.stroke();
+  ctx.fillStyle = '#f3e1b8'; for (const s of [-1, 1]) { ell(GATE_X + s * 46, y0 + 10, 4, 4); ctx.fill(); }
+}
+
+// ---- Drawing the play scene ----------------------------------------------------------------
+function drawPlay() {
+  const lv = state.lv, S = state.S, t = state.t, NP = tune.posts;
+  drawBackground('lv' + lv.L + ':' + NP, lv);
+  // posts glow amber when all but one are taken, red when all are
+  const taken = S.posts.length, flashP = t - state.flashPostsT < 0.6;
+  const pulse = 0.55 + 0.45 * Math.sin(t * 6);
+  for (let i = 0; i < NP; i++) {
+    const [px, py] = postPos(i);
+    let glow = null;
+    if (taken === NP || flashP) glow = `rgba(255,80,40,${0.75 * pulse})`;
+    else if (taken === NP - 1) glow = `rgba(255,176,40,${0.8 * pulse})`;
+    drawPost(px, py, glow);
+  }
+  const fills = new Array(lv.camels.length).fill(0);
+  for (const tr of state.tr) if (tr.camel >= 0 && tr.endT != null && t >= tr.endT && !tr.done) fills[tr.camel]++;
+  // camels: grid first, then parked (with tie ropes), then walking, then leaving
+  const poses = lv.camels.map((c, i) => camelPose(i));
+  const order = ['grid', 'park', 'walk', 'leave'];
+  if (state.blockLine && t - state.blockLine.t < 0.7) {
+    const b = state.blockLine; ctx.strokeStyle = `rgba(220,40,30,${0.9 * (1 - (t - b.t) / 0.7)})`; ctx.lineWidth = 5; ctx.setLineDash([10, 8]);
+    ctx.beginPath(); ctx.moveTo(b.x0, b.y0); ctx.lineTo(b.x1, b.y1); ctx.stroke(); ctx.setLineDash([]);
+  }
+  for (const ph of order) lv.camels.forEach((cm, i) => {
+    const p = poses[i]; if (!p || p.phase !== ph) return;
+    const v = state.vc[i];
+    if (ph === 'park') {
+      const [px, py] = postPos(v.slot);
+      ctx.strokeStyle = '#7a5a30'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(px + 10, py - 4);
+      ctx.quadraticCurveTo((px + p.x) / 2, py + 14, p.x, BAY_HEAD - 14); ctx.stroke();
+    }
+    const free = ph === 'grid' && canExit(lv, S, i) && !state.pending;
+    const flash = t - v.flashT < 0.6 ? 0.55 * (1 - (t - v.flashT) / 0.6) * (0.5 + 0.5 * Math.sin((t - v.flashT) * 30)) : 0;
+    drawCamel(p.x, p.y, p.ang, cm.len, p.cell, cm.colour, v.fillBase + fills[i], {
+      ph: i * 1.7, bob: free ? Math.sin(t * 4 + i) * 0.035 : 0, walk: ph === 'walk' || ph === 'leave' ? p.walk : null,
+      flash, seats: cm.seats,
+    });
+  });
+  // keyboard cursor
+  if (state.kbd && state.cursor >= 0 && (S.mask >> state.cursor & 1)) {
+    const cm = lv.camels[state.cursor], g = lv.geo;
+    let c0 = 99, r0 = 99, c1 = -1, r1 = -1;
+    cm.cells.forEach(k => { const q = k % lv.cols, r = Math.floor(k / lv.cols); c0 = Math.min(c0, q); c1 = Math.max(c1, q); r0 = Math.min(r0, r); r1 = Math.max(r1, r); });
+    const x0 = g.gx + c0 * g.cell, y0 = g.gy + r0 * g.cell, x1 = g.gx + (c1 + 1) * g.cell, y1 = g.gy + (r1 + 1) * g.cell, e = 6 + 3 * Math.sin(t * 6), a = 20;
+    ctx.strokeStyle = '#fff6d0'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+    for (const [x, y, sx, sy] of [[x0 - e, y0 - e, 1, 1], [x1 + e, y0 - e, -1, 1], [x0 - e, y1 + e, 1, -1], [x1 + e, y1 + e, -1, -1]]) {
+      ctx.beginPath(); ctx.moveTo(x + sx * a, y); ctx.lineTo(x, y); ctx.lineTo(x, y + sy * a); ctx.stroke();
+    }
+  }
+  drawQueue();
+  drawGateFront();
+  for (const p of state.parts) { ctx.globalAlpha = clamp(p.life / p.max, 0, 1) * (p.a || 1); ctx.fillStyle = p.col; ell(p.x, p.y, p.r, p.r); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  drawHud();
+  // first-level hand and the level banner
+  if (state.hint >= 0 && !state.tapped && lv.L === 1) {
+    const q = gridGeom(state.hint), k = Math.sin(t * 5) * 10;
+    drawHand(q.cx + 16 + k * 0.5, q.cy + 14 + k, -0.45);
+  }
+  if (t - state.bannerT < 4.2 && !(state.tapped && t > 1.2)) {
+    const a = clamp(Math.min(t / 0.3, (4.2 - t) / 0.5), 0, 1);
+    ctx.globalAlpha = a; drawBanner(); ctx.globalAlpha = 1;
+  }
+  if (t - state.msgT < 1.4) {
+    const a = clamp((1.4 - (t - state.msgT)) / 0.3, 0, 1);
+    ctx.globalAlpha = a; ctx.fillStyle = 'rgba(40,20,10,0.85)'; rrect(W / 2 - 170, 770, 340, 64, 32); ctx.fill();
+    text(state.msg, W / 2, 803, 30, '#fff2d6'); ctx.globalAlpha = 1;
+  }
+}
+const TIPS = {
+  1: 'اضغط جملاً طريقه مفتوح وبلون أول مسافر',
+  2: 'جمل يسدّ طريق آخر: أخرج الذي في الأمام',
+  3: 'لون ثالث: اقرأ الطابور قبل أن تضغط',
+  4: 'سلاسل أعمق: لا تشغل المرابط بلون لا يُطلب',
+  5: 'الجمل الكبير بسنامين يحمل ستة مسافرين',
+  6: 'لون رابع يدخل الساحة',
+  7: 'ساحة واسعة: خطّط للمرابط الأربعة',
+  8: 'ساحة كاملة وأربعة ألوان',
+  9: 'خمسة ألوان: انظر بعيداً في الطابور',
+  10: 'المرحلة الأخيرة: القافلة الكبرى',
+};
+function drawBanner() {
+  const L = state.level;
+  ctx.fillStyle = 'rgba(48,26,12,0.9)'; rrect(40, 878, 640, 116, 24); ctx.fill();
+  ctx.strokeStyle = '#e6c07e'; ctx.lineWidth = 3; ctx.stroke();
+  text(TIPS[L] || 'خطّط قبل أن تضغط', W / 2, 916, 30, '#fff2d6');
+  text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, 962, 26, '#bfe8a8');
+  checkMark(W / 2 + 178, 962, 26, '#8fd67a');
+}
+function drawQueue() {
+  const t = state.t, lv = state.lv, Q = lv.queue.length;
+  // travellers still waiting, back to front so the front one is on top
+  const last = Math.min(Q, state.qv + Q_PER_ROW * 2);
+  for (let k = last - 1; k >= state.qv; k--) {
+    const tr = state.tr[k]; if (tr.done || tr.x == null || (tr.startT != null && t >= tr.startT)) continue;
+    const slot = k - state.qv;
+    if (slot === 0) { ctx.fillStyle = 'rgba(255,240,200,0.35)'; ell(tr.x, tr.y, 26, 26); ctx.fill(); ctx.strokeStyle = PAL[tr.col].light; ctx.lineWidth = 3; ctx.stroke(); }
+    drawTraveller(tr.x, tr.y, tr.col, tr.var, tr.ang, 1, tr.moving ? t * 14 + k : 0);
+  }
+  const rest = Q - last;
+  if (rest > 0) {
+    ctx.fillStyle = '#3a2416'; rrect(530, Q_ROW2 - 22, 60, 44, 22); ctx.fill(); ctx.strokeStyle = '#e6c07e'; ctx.lineWidth = 2.5; ctx.stroke();
+    text('+' + rest, 560, Q_ROW2 + 1, 26, '#fff2d6');
+  }
+  // travellers walking to their camels
+  for (let k = state.qv - 30 < 0 ? 0 : state.qv - 30; k < Math.min(Q, state.qv + 40); k++) {
+    const tr = state.tr[k]; if (tr.done || tr.startT == null || t < tr.startT || t >= tr.endT) continue;
+    const u = (t - tr.startT) / (tr.endT - tr.startT), [sx, sy] = seatWorld(tr.camel, tr.seat);
+    const x = lerp(tr.fx0, sx, u), y = lerp(tr.fy0, sy, u) - Math.sin(u * Math.PI) * 28;
+    drawTraveller(x, y, tr.col, tr.var, Math.atan2(sy - tr.fy0, sx - tr.fx0), lerp(1, 0.6, u), t * 20);
+  }
+}
+function drawHud() {
+  const lv = state.lv;
+  const b = BTN;
+  woodButton(...b.mute); drawIcon(muted ? 'mute' : 'sound', b.mute[0] + 38, b.mute[1] + 36, 44, '#fff2d6');
+  woodButton(...b.menu); drawIcon('menu', b.menu[0] + 38, b.menu[1] + 36, 40, '#fff2d6');
+  const canUndo = state.undos > 0 && state.hist.length > 0;
+  woodButton(...b.undo, canUndo); drawIcon('undo', b.undo[0] + 36, b.undo[1] + 36, 46, canUndo ? '#fff2d6' : '#a8957c');
+  ctx.fillStyle = state.undos > 0 ? '#2f8a46' : '#7a3a2a'; ell(b.undo[0] + 70, b.undo[1] + 14, 15, 15); ctx.fill();
+  ctx.strokeStyle = '#fff2d6'; ctx.lineWidth = 2; ctx.stroke();
+  text(String(state.undos), b.undo[0] + 70, b.undo[1] + 15, 22, '#fff');
+  woodButton(...b.restart); drawIcon('restart', b.restart[0] + 41, b.restart[1] + 36, 46, '#fff2d6');
+  text(`المرحلة ${lv.L}`, 352, 36, 34, '#fff2d6');
+  const left = lv.queue.length - state.qv;
+  text(`مسافرون ينتظرون: ${left}`, 352, 74, 24, '#e6c99a', 'center', 600);
+}
+
+// ---- Overlays ---------------------------------------------------------------------------------
+function panel(y0, h) {
+  ctx.fillStyle = 'rgba(20,10,4,0.55)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(54, y0 + 8, 612, h, 30); ctx.fill();
+  const gr = ctx.createLinearGradient(0, y0, 0, y0 + h); gr.addColorStop(0, '#f6e6c2'); gr.addColorStop(1, '#e8cf9e');
+  ctx.fillStyle = gr; rrect(50, y0, 620, h, 30); ctx.fill();
+  ctx.strokeStyle = '#8a5a2a'; ctx.lineWidth = 5; ctx.stroke();
+  ctx.strokeStyle = '#c89a5a'; ctx.lineWidth = 2; rrect(64, y0 + 14, 592, h - 28, 22); ctx.stroke();
+}
+const OVER_BTNS = { restart: [130, 800, 460, 104], undo: [130, 922, 460, 96] };
+function drawOver() {
+  drawPlay();
+  panel(360, 690);
+  text('القافلة عالقة', W / 2, 440, 56, '#8c2219');
+  const front = state.tr[state.S.qi];
+  text('كل المرابط مشغولة،', W / 2, 520, 32, '#4a2c14');
+  if (front) {
+    text(`وأول مسافر يريد جملاً ${COLOUR_ADJ[front.col]}`, W / 2, 568, 32, '#4a2c14');
+    text('ولا جمل بلونه عند المرابط', W / 2, 616, 32, '#4a2c14');
+    ctx.fillStyle = 'rgba(120,80,40,0.15)'; ell(W / 2, 712, 64, 64); ctx.fill();
+    drawTraveller(W / 2, 712, front.col, front.var, -Math.PI / 2, 2.4, 0);
+  }
+  bigButton(...OVER_BTNS.restart, 'أعد المرحلة', '#2f8a46');
+  const canUndo = state.undos > 0 && state.hist.length > 0;
+  if (canUndo) bigButton(...OVER_BTNS.undo, `تراجع (${state.undos})`, '#8a5a2a');
+  else text('لا تراجع متبقٍ: الإعادة مجانية', W / 2, 970, 28, '#6a4a2a');
+}
+const RES_BTNS = { next: [130, 820, 460, 108], again: [130, 946, 460, 92] };
+function drawResults() {
+  drawPlay();
+  panel(330, 740);
+  const L = state.level, last = L >= tune.levels;
+  text(last ? 'أنهيت المراحل كلها!' : 'أحسنت!', W / 2, 410, 58, '#2f6a2a');
+  text('انطلقت القافلة كلها من البوابة', W / 2, 478, 30, '#4a2c14');
+  for (let k = 0; k < 3; k++) {
+    const pop = clamp((state.t - state.winT - k * 0.25) / 0.3, 0, 1);
+    drawStar(W / 2 + (k - 1) * 116, 580 - (k === 1 ? 16 : 0), 46 * (k < state.stars ? 0.6 + 0.4 * pop : 1), k < state.stars && pop > 0);
+  }
+  const best = save.stars[L - 1] || 0;
+  text(state.stars > state.prevBest ? 'أفضل نتيجة جديدة!' : `أفضل نتيجة: ${best} من 3`, W / 2, 680, 30, '#8a4a10');
+  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : `التراجع المستعمل: ${state.undosUsed}`, W / 2, 736, 28, '#4a2c14', 'center', 600);
+  bigButton(...RES_BTNS.next, last ? 'القائمة' : 'المرحلة التالية', '#2f8a46');
+  bigButton(...RES_BTNS.again, 'أعد هذه المرحلة', '#8a5a2a');
+}
+
+// ---- Title and figures -------------------------------------------------------------------------
+const TITLE_BTNS = { start: [150, 560, 420, 116], home: [14, 12, 76, 72], mute: [630, 12, 76, 72] };
+const levelBtn = i => [62 + (i % 5) * 122, 760 + Math.floor(i / 5) * 116, 106, 100];
+function drawTitle() {
+  drawBackground('title', null);
+  const t = gt;
+  // a little caravan crossing the courtyard
+  drawCamel(470, 470, Math.PI, 2, 92, 0, 3, { ph: 1, walk: t * 6 });
+  drawCamel(250, 470, Math.PI, 3, 74, 1, 4, { ph: 2, walk: t * 6 + 1, seats: 6 });
+  drawTraveller(640, 470, 2, 1, Math.PI, 1.3, t * 10);
+  ctx.fillStyle = 'rgba(30,15,5,0.55)'; rrect(40, 150, 640, 240, 30); ctx.fill();
+  textOutline('زحمة القافلة', W / 2, 240, 88, '#ffe9b8', '#5a2a10', 12);
+  text('Caravan Jam', W / 2, 330, 34, '#f3d9a6', 'center', 600);
+  const L = Math.min(save.unlocked || 1, tune.levels);
+  bigButton(...TITLE_BTNS.start, L > 1 ? `تابع: المرحلة ${L}` : 'اضغط للبدء', '#2f8a46');
+  for (let i = 0; i < tune.levels; i++) {
+    const [x, y, w, h] = levelBtn(i), open = i + 1 <= (save.unlocked || 1);
+    woodButton(x, y, w, h, open);
+    text(String(i + 1), x + w / 2, y + 38, 36, open ? '#fff2d6' : '#9c8a72');
+    for (let k = 0; k < 3; k++) drawStar(x + w / 2 + (k - 1) * 26, y + 76, 11, k < (save.stars[i] || 0));
+  }
+  ctx.fillStyle = 'rgba(30,15,5,0.6)'; rrect(30, 1000, 660, 210, 24); ctx.fill();
+  CONTROLS.forEach((c, i) => text(c, W / 2, 1036 + i * 46, i < 2 ? 28 : 26, i < 2 ? '#fff2d6' : '#e6c99a', 'center', i < 2 ? 700 : 600));
+  text(`نجومك: ${totalStars()} من ${tune.levels * 3}`, W / 2, 1244, 26, '#e6c99a', 'center', 600);
+  if (location.protocol.startsWith('http')) { woodButton(...TITLE_BTNS.home); drawIcon('home', TITLE_BTNS.home[0] + 38, TITLE_BTNS.home[1] + 36, 46, '#fff2d6'); }
+  woodButton(...TITLE_BTNS.mute); drawIcon(muted ? 'mute' : 'sound', TITLE_BTNS.mute[0] + 38, TITLE_BTNS.mute[1] + 36, 44, '#fff2d6');
+}
+function drawFigures() {
+  ctx.fillStyle = '#e6cc9a'; ctx.fillRect(0, 0, W, H);
+  text('الشخصيات · Figures', W / 2, 50, 36, '#4a2c14');
+  const lab = (s, x, y) => text(s, x, y, 24, '#4a2c14', 'center', 700);
+  drawCamel(200, 210, -Math.PI / 2, 2, 100, 0, 1, { ph: 0 });
+  lab('جمل صغير بسنام (3 مقاعد)', 200, 340);
+  drawCamel(520, 230, -Math.PI / 2, 3, 84, 1, 2, { ph: 1, seats: 6 });
+  lab('جمل كبير بسنامين (6 مقاعد)', 520, 380);
+  [['مسافر بصرّة', 0], ['مسافر بعصا', 1], ['مسافر بقربة', 2]].forEach(([s, v], k) => {
+    const x = 130 + k * 230; drawTraveller(x, 470, k + 2, v, -Math.PI / 2, 2.2, 0); lab(s, x, 540);
+  });
+  for (let c = 0; c < 5; c++) drawCamel(80 + c * 140, 680, Math.PI / 2, 2, 62, c, c % 3, { ph: c });
+  lab('خمسة ألوان، لكل لون نقشة على البطانية', W / 2, 790);
+  drawPost(150, 900, 'rgba(255,176,40,0.8)'); lab('مربط خشبي', 150, 960);
+  drawHand(330, 870, -0.45); lab('يد الإرشاد', 330, 990);
+  ctx.save(); ctx.translate(-70, -170); drawGateFront(); ctx.restore(); lab('البوابة المقوّسة', 560, 1090);
+  for (let k = 0; k < 3; k++) drawStar(260 + k * 100, 1170, 34, k < 2);
+  lab('النجوم', 360, 1230);
+}
+
+// ---- Scenes ---------------------------------------------------------------------------------
+function takeTap() { return taps.length ? taps.shift() : null; }
+function updatePlayWorld(dt) {
+  const t = state.t, lv = state.lv;
+  // timed effects: sounds and dust as scheduled moments are reached
+  for (let k = state.fx.length - 1; k >= 0; k--) {
+    const f = state.fx[k]; if (f.t > t) continue;
+    state.fx.splice(k, 1);
+    if (f.k === 'board') { sfx.board(f.seat); const [x, y] = seatWorld(f.id, f.seat); for (let j = 0; j < 5; j++) state.parts.push({ x, y, vx: (rng() - 0.5) * 120, vy: -rng() * 120, r: 3, life: 0.4, max: 0.4, col: '#fff6d0' }); }
+    else if (f.k === 'park') { sfx.park(); for (let j = 0; j < 8; j++) state.parts.push({ x: f.x + (rng() - 0.5) * 30, y: f.y, vx: (rng() - 0.5) * 90, vy: -rng() * 40, r: 6 + rng() * 6, life: 0.6, max: 0.6, col: '#d9b98a', a: 0.7 }); }
+    else if (f.k === 'bell') sfx.bell();
+    else if (f.k === 'dust') { for (let j = 0; j < 22; j++) state.parts.push({ x: GATE_X + (rng() - 0.5) * 70, y: WALL_Y + 10 + rng() * 20, vx: (rng() - 0.5) * 200, vy: -rng() * 90 + 20, r: 8 + rng() * 12, life: 0.9 + rng() * 0.4, max: 1.2, col: '#e3c28c', a: 0.8 }); tone(90, 0.25, 'triangle', 0.2); }
+  }
+  // the line shuffles forward
+  while (state.qv < lv.queue.length) { const tr = state.tr[state.qv]; if (tr.done || (tr.startT != null && t >= tr.startT)) state.qv++; else break; }
+  for (let k = state.qv; k < Math.min(lv.queue.length, state.qv + Q_PER_ROW * 2 + 1); k++) {
+    const tr = state.tr[k]; const [tx, ty] = slotPos(k - state.qv);
+    if (tr.x == null) { const p = slotPos(k - state.qv + 1); tr.x = p[0]; tr.y = p[1]; }
+    const dx = tx - tr.x, dy = ty - tr.y, e = Math.min(1, dt * tune.queue_ease);
+    tr.moving = Math.abs(dx) + Math.abs(dy) > 1.5;
+    if (tr.moving) tr.ang = Math.atan2(dy, dx); else tr.ang = ty === Q_ROW1 ? 0 : Math.PI;
+    tr.x += dx * e; tr.y += dy * e;
+  }
+  for (const tr of state.tr) if (tr.startT != null && !tr.flying && t >= tr.startT) { tr.flying = true; tr.fx0 = tr.x == null ? Q_FRONT_X : tr.x; tr.fy0 = tr.y == null ? Q_ROW1 : tr.y; }
+  for (let k = state.parts.length - 1; k >= 0; k--) {
+    const p = state.parts[k]; p.life -= dt; if (p.life <= 0) { state.parts.splice(k, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.g || 0) * dt; p.vx *= 1 - dt * 2; if (!p.g) p.vy *= 1 - dt * 2;
+  }
+}
+function moveCursor(dx, dy) {
+  const lv = state.lv, S = state.S;
+  state.kbd = true;
+  const alive = lv.camels.filter(c => S.mask >> c.id & 1);
+  if (!alive.length) return;
+  let cur = state.cursor;
+  if (cur < 0 || !(S.mask >> cur & 1)) { state.cursor = (alive.find(c => canExit(lv, S, c.id)) || alive[0]).id; return; }
+  const a = gridGeom(cur); let best = -1, bc = 1e9;
+  for (const c of alive) {
+    if (c.id === cur) continue;
+    const b = gridGeom(c.id), along = (b.cx - a.cx) * dx + (b.cy - a.cy) * dy, perp = Math.abs((b.cx - a.cx) * dy - (b.cy - a.cy) * dx);
+    if (along < lv.geo.cell * 0.3) continue;
+    const cost = along + perp * 2; if (cost < bc) { bc = cost; best = c.id; }
+  }
+  if (best >= 0) state.cursor = best;
+}
+function camelAt(p) {
+  const lv = state.lv, S = state.S; let best = -1, bd = 1e9;
+  lv.camels.forEach(c => {
+    if (!(S.mask >> c.id & 1)) return;
+    const q = gridGeom(c.id), hx = q.fx - q.dx * lv.geo.cell * 0.5, hy = q.fy - q.dy * lv.geo.cell * 0.5;
+    const tx = q.fx - q.dx * (q.L - lv.geo.cell * 0.5), ty = q.fy - q.dy * (q.L - lv.geo.cell * 0.5);
+    const vx = hx - tx, vy = hy - ty, ll = vx * vx + vy * vy || 1;
+    const u = clamp(((p.x - tx) * vx + (p.y - ty) * vy) / ll, 0, 1);
+    const d = Math.hypot(p.x - (tx + vx * u), p.y - (ty + vy * u));
+    if (d < bd) { bd = d; best = c.id; }
+  });
+  return bd <= lv.geo.cell * 0.5 ? best : -1;
+}
+function playInput() {
+  const lv = state.lv, S = state.S;
+  if (pressed('Escape')) { scene = 'title'; return; }
+  if (pressed('KeyU')) doUndo();
+  if (pressed('KeyR')) { doRestart(); return; }
+  if (pressed('ArrowLeft')) moveCursor(-1, 0);
+  if (pressed('ArrowRight')) moveCursor(1, 0);
+  if (pressed('ArrowUp')) moveCursor(0, -1);
+  if (pressed('ArrowDown')) moveCursor(0, 1);
+  if (pressed('Space') || pressed('Enter')) {
+    if (state.cursor < 0 || !(state.S.mask >> state.cursor & 1)) moveCursor(0, 0);
+    state.kbd = true;
+    if (state.cursor >= 0) doTap(state.cursor);
+  }
+  let p;
+  while ((p = takeTap())) {
+    if (inRect(p, ...BTN.mute)) { setMuted(!muted); continue; }
+    if (inRect(p, ...BTN.menu)) { scene = 'title'; sfx.ui(); return; }
+    if (inRect(p, ...BTN.undo)) { doUndo(); continue; }
+    if (inRect(p, ...BTN.restart)) { doRestart(); return; }
+    const i = camelAt(p);
+    if (i >= 0) { state.kbd = false; state.cursor = i; doTap(i); }
+  }
+  void lv; void S;
+}
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() { drawFigures(); },
+  },
+  title: {
+    update() {
+      const L = Math.min(save.unlocked || 1, tune.levels);
+      if (pressed('Enter') || pressed('Space')) { startLevel(L); scene = 'play'; sfx.ui(); return; }
+      let p;
+      while ((p = takeTap())) {
+        if (inRect(p, ...TITLE_BTNS.mute)) { setMuted(!muted); continue; }
+        if (location.protocol.startsWith('http') && inRect(p, ...TITLE_BTNS.home)) { location.href = '../../'; return; }
+        if (inRect(p, ...TITLE_BTNS.start)) { startLevel(L); scene = 'play'; sfx.ui(); return; }
+        for (let i = 0; i < tune.levels; i++) if (inRect(p, ...levelBtn(i)) && i + 1 <= (save.unlocked || 1)) { startLevel(i + 1); scene = 'play'; sfx.ui(); return; }
+      }
+    },
+    draw() { drawTitle(); },
+  },
+  play: {
+    update(dt) {
+      state.t += dt;
+      playInput();
+      if (scene !== 'play') return;
+      updatePlayWorld(dt);
+      if (state.pending && state.t >= state.busyUntil + 0.35) {
+        if (state.pending === 'win') { state.winT = state.t; finishLevel(); }
+        else { scene = 'over'; sfx.stuck(); events.push({ type: 'stuck', level: state.level }); state.gained = 'القافلة عالقة'; }
+      }
+    },
+    draw() { drawPlay(); },
+  },
+  over: {
+    update(dt) {
+      state.t += dt; updatePlayWorld(dt);
+      if (pressed('KeyR') || pressed('Enter') || pressed('Space')) { doRestart(); return; }
+      if (pressed('KeyU')) { doUndo(); return; }
+      if (pressed('Escape')) { scene = 'title'; return; }
+      let p;
+      while ((p = takeTap())) {
+        if (inRect(p, ...OVER_BTNS.restart)) { doRestart(); return; }
+        if (inRect(p, ...OVER_BTNS.undo) && state.undos > 0 && state.hist.length) { doUndo(); return; }
+      }
+    },
+    draw() { drawOver(); },
+  },
+  results: {
+    update(dt) {
+      state.t += dt; updatePlayWorld(dt);
+      const L = state.level, next = () => { if (L >= tune.levels) scene = 'title'; else { startLevel(L + 1); scene = 'play'; } sfx.ui(); };
+      if (pressed('Enter') || pressed('Space')) { next(); return; }
+      if (pressed('KeyR')) { doRestart(); return; }
+      if (pressed('Escape')) { scene = 'title'; return; }
+      let p;
+      while ((p = takeTap())) {
+        if (inRect(p, ...RES_BTNS.next)) { next(); return; }
+        if (inRect(p, ...RES_BTNS.again)) { doRestart(); return; }
+      }
+    },
+    draw() { drawResults(); },
+  },
+};
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  taps = tapQueue.splice(0);
+  gt += STEP;
+  scenes[scene].update(STEP); hit.clear(); taps = [];
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+if (!scenes[scene]) scene = 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

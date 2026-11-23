@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مختبر الألعاب</title>
+<meta name="description" content="عشر ألعاب أصلية مستوحاة من أقوى ألعاب الترند، بلا إعلانات وبمراحل عادلة. العبها من المتصفح على الآيفون.">
+<meta name="theme-color" content="#14100c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="مختبر الألعاب">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:title" content="مختبر الألعاب · Game Lab">
+<meta property="og:description" content="عشر ألعاب أصلية مستوحاة من الترند، بلا إعلانات وبمراحل عادلة.">
+<meta property="og:image" content="https://muhammedkado.github.io/game-lab/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Almarai:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f6efe4; --bg2:#efe4d3; --card:#fffaf2; --ink:#2a2118; --muted:#6f604f; --line:#e2d3bd;
+  --accent:#b4552d; --accent2:#1f6f6a; --gold:#b98a2e; --chip:#f1e3cd; --shadow:0 1px 2px rgba(60,40,20,.06),0 8px 24px rgba(60,40,20,.08);
+  --hero1:#2b1d12; --hero2:#5b3a1f; --heroInk:#fff6e8;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14100c; --bg2:#1c1610; --card:#211a13; --ink:#f3e8d6; --muted:#b5a48d; --line:#3a2e22;
+  --accent:#e0794a; --accent2:#4fb3a9; --gold:#d9ae55; --chip:#2c2218; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  --hero1:#0f0b08; --hero2:#3a2614; --heroInk:#fff6e8;
+}}
+:root[data-theme="dark"]{
+  --bg:#14100c; --bg2:#1c1610; --card:#211a13; --ink:#f3e8d6; --muted:#b5a48d; --line:#3a2e22;
+  --accent:#e0794a; --accent2:#4fb3a9; --gold:#d9ae55; --chip:#2c2218; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  --hero1:#0f0b08; --hero2:#3a2614; --heroInk:#fff6e8;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.75 Almarai,"SF Arabic","Geeza Pro",Tahoma,sans-serif}
+a{color:inherit}
+.wrap{max-width:1120px;margin:0 auto;padding:0 16px}
+header.top{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top)}
+header.top .wrap{display:flex;align-items:center;gap:12px;height:56px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font:700 20px/1 Almarai,sans-serif}
+.brand svg{flex:none}
+nav.links{margin-inline-start:auto;display:flex;gap:4px}
+nav.links a{text-decoration:none;color:var(--muted);font-weight:500;font-size:14px;padding:6px 10px;border-radius:8px}
+nav.links a:hover{background:var(--chip);color:var(--ink)}
+@media (max-width:640px){nav.links{display:none}}
+.hero{background:radial-gradient(120% 90% at 85% 0%,var(--hero2),var(--hero1));color:var(--heroInk);position:relative;overflow:hidden}
+.hero .pattern{position:absolute;inset:0;opacity:.13;pointer-events:none}
+.hero .wrap{position:relative;padding:56px 16px 48px}
+.kicker{display:inline-block;font-size:13px;font-weight:600;letter-spacing:.02em;color:#f3c98b;border:1px solid rgba(243,201,139,.35);padding:3px 10px;border-radius:99px}
+.hero h1{font:800 clamp(32px,7vw,56px)/1.25 Almarai,sans-serif;margin:14px 0 10px}
+.hero p.lead{max-width:640px;font-size:clamp(16px,2.4vw,19px);color:#ecdcc4;margin:0 0 22px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:760px}
+@media (max-width:640px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{background:rgba(255,246,232,.07);border:1px solid rgba(255,246,232,.14);border-radius:14px;padding:12px 14px}
+.stat b{display:block;font:700 26px/1.2 Almarai,sans-serif;color:#fff;font-variant-numeric:tabular-nums}
+.stat span{font-size:13px;color:#dcc9ad}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;font:600 15px/1 inherit;font-family:inherit;text-decoration:none;border:1px solid transparent;cursor:pointer}
+.btn.primary{background:var(--accent);color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent;border-color:var(--line);color:var(--ink)}
+.btn.ghost:hover{background:var(--chip)}
+.hero .ctas{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
+.hero .btn.ghost{color:#fff;border-color:rgba(255,255,255,.3)}
+.hero .btn.ghost:hover{background:rgba(255,255,255,.08)}
+section{padding:48px 0}
+h2{font:700 clamp(24px,4.4vw,34px)/1.25 Almarai,sans-serif;margin:0 0 8px}
+.sub{color:var(--muted);margin:0 0 24px;max-width:720px}
+.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:860px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.steps{grid-template-columns:1fr}}
+.step{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+.step .n{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--chip);color:var(--accent);font-weight:700;margin-bottom:8px}
+.step h3{margin:0 0 4px;font-size:16px}
+.step p{margin:0;color:var(--muted);font-size:14px;line-height:1.7}
+.insights{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+@media (max-width:860px){.insights{grid-template-columns:1fr}}
+.insight{border-inline-start:4px solid var(--accent);background:var(--bg2);border-radius:12px;padding:14px 16px}
+.insight b{display:block;margin-bottom:2px}
+.insight span{color:var(--muted);font-size:14px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}
+.filters button{font:500 14px/1 inherit;font-family:inherit;min-height:38px;padding:0 14px;border-radius:99px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+.filters button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+@media (max-width:980px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:620px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.cover{position:relative;aspect-ratio:4/3;background:var(--bg2);overflow:hidden}
+.cover img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
+.cover .rank{position:absolute;top:10px;inset-inline-start:10px;background:rgba(20,14,8,.78);color:#fff;font-size:12px;font-weight:600;padding:4px 9px;border-radius:99px}
+.cover .num{position:absolute;bottom:10px;inset-inline-end:10px;width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700}
+.body{padding:16px 16px 18px;display:flex;flex-direction:column;gap:10px;flex:1}
+.title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.title h3{margin:0;font:700 22px/1.3 Almarai,sans-serif}
+.title small{color:var(--muted);font-size:13px;direction:ltr}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-size:12px;font-weight:600;padding:3px 9px;border-radius:99px;background:var(--chip);color:var(--muted)}
+.tag.easy{color:#2f7d4f}.tag.mid{color:#a46a12}.tag.hard{color:#b23b2a}
+.insp{font-size:14px;color:var(--muted);margin:0}
+.insp b{color:var(--ink);font-weight:600}
+.quote{margin:0;font-size:14px;background:var(--bg2);border-radius:12px;padding:10px 12px;line-height:1.7}
+.quote em{font-style:normal;color:var(--muted);display:block;font-size:12px;margin-top:2px}
+ul.fix{margin:0;padding:0;list-style:none;display:grid;gap:6px;font-size:14px}
+ul.fix li{display:flex;gap:8px;align-items:flex-start}
+ul.fix li svg{flex:none;margin-top:5px}
+.actions{display:flex;gap:8px;margin-top:auto;padding-top:6px}
+.actions .btn{flex:1}
+details.more{border-top:1px dashed var(--line);padding-top:8px;font-size:14px}
+details.more summary{cursor:pointer;color:var(--accent2);font-weight:600;list-style:none}
+details.more summary::-webkit-details-marker{display:none}
+details.more p{margin:8px 0 0;color:var(--muted)}
+.feature{display:grid;grid-template-columns:1.1fr 1fr;gap:0;background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:var(--shadow)}
+@media (max-width:760px){.feature{grid-template-columns:1fr}}
+.feature .art{background:linear-gradient(135deg,#1b1530,#2d2250);min-height:220px;display:grid;place-items:center}
+.feature .txt{padding:22px}
+.feature h3{font:700 26px/1.3 Almarai,sans-serif;margin:0 0 6px}
+.feature p{color:var(--muted);margin:0 0 14px}
+.re-table{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.re-table th,.re-table td{text-align:start;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.re-table th{background:var(--bg2);font-weight:600}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:14px}
+.note{font-size:13px;color:var(--muted);margin-top:10px}
+footer{border-top:1px solid var(--line);padding:28px 0 calc(28px + env(safe-area-inset-bottom));color:var(--muted);font-size:13px}
+footer p{margin:4px 0}
+.theme-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);width:38px;height:38px;border-radius:10px;display:grid;place-items:center;cursor:pointer}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg width="30" height="30" viewBox="0 0 40 40" aria-hidden="true"><g fill="none" stroke="var(--accent)" stroke-width="2.4"><rect x="9" y="9" width="22" height="22" rx="2"/><rect x="9" y="9" width="22" height="22" rx="2" transform="rotate(45 20 20)"/></g><circle cx="20" cy="20" r="4" fill="var(--gold)"/></svg>
+      مختبر الألعاب
+    </a>
+    <nav class="links">
+      <a href="#games">الألعاب</a>
+      <a href="#method">كيف اخترنا</a>
+      <a href="#re">الهندسة العكسية</a>
+      <a href="#first">بلوكات عادلة</a>
+    </nav>
+    <button class="theme-btn" id="themeBtn" aria-label="تبديل الوضع الليلي">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="hero">
+  <svg class="pattern" aria-hidden="true" width="100%" height="100%"><defs><pattern id="pt" width="56" height="56" patternUnits="userSpaceOnUse"><g fill="none" stroke="#f3c98b" stroke-width="1"><rect x="14" y="14" width="28" height="28"/><rect x="14" y="14" width="28" height="28" transform="rotate(45 28 28)"/></g></pattern></defs><rect width="100%" height="100%" fill="url(#pt)"/></svg>
+  <div class="wrap">
+    <span class="kicker">بيانات ٢٣ نوفمبر ٢٠٢٦</span>
+    <h1>عشر ألعاب ترند، بنسخة أحلى وأعدل</h1>
+    <p class="lead">درسنا أقوى ألعاب الموبايل هلأ بالأرقام وبتقييمات اللاعبين، وعملنا لكل وحدة لعبة أصلية من نفس النوع: بلا إعلانات، وكل مرحلة إلها حل، والمساعدة ببلاش. كلها بتنلعب من المتصفح على الآيفون.</p>
+    <div class="stats">
+      <div class="stat"><b>10</b><span>نماذج بتنلعب هلأ</span></div>
+      <div class="stat"><b>111</b><span>لعبة بقوائم الترند درسناها</span></div>
+      <div class="stat"><b>100</b><span>تقييم سلبي قريناه</span></div>
+      <div class="stat"><b>0</b><span>إعلانات</span></div>
+    </div>
+    <div class="ctas">
+      <a class="btn primary" href="#games">ابدأ اللعب</a>
+      <a class="btn ghost" href="#method">كيف اخترنا الألعاب</a>
+    </div>
+  </div>
+</div>
+
+<section id="method">
+  <div class="wrap">
+    <h2>كيف اخترنا الألعاب</h2>
+    <p class="sub">ما اعتمدنا على الحدس. سحبنا البيانات وقرينا شو بيقولوا اللاعبين، وبعدين صممنا كل لعبة لتحل مشاكلهم.</p>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h3>قوائم الترند</h3><p>سحبنا بـ Apify أكتر الألعاب تحميلاً بـ Google Play بأمريكا والسعودية، والأكثر ربحاً، وقائمة ألعاب الآيفون من Apple.</p></div>
+      <div class="step"><div class="n">2</div><h3>تفاصيل ٢٢ لعبة</h3><p>عدد التحميلات والتقييمات وتاريخ النزول. أقوى الألعاب نزلت هالسنة وكبرت بسرعة كبيرة.</p></div>
+      <div class="step"><div class="n">3</div><h3>شكاوى اللاعبين</h3><p>قرينا ١٠٠ تقييم سلبي، الأكثر لايكات، لخمس ألعاب، وطلعنا المشاكل اللي بتتكرر.</p></div>
+      <div class="step"><div class="n">4</div><h3>نموذج لكل لعبة</h3><p>كل لعبة إلها خطة من صفحة وحدة، وانبنت وانفحصت بطريقة <a href="https://github.com/Donchitos/Claude-Code-Game-Studios">Claude Code Game Studios</a>.</p></div>
+    </div>
+    <div class="insights">
+      <div class="insight"><b>المشكلة الأولى: الإعلانات</b><span>بكل الألعاب الخمسة، أكتر شكوى عليها لايكات كانت عن إعلان بعد كل مرحلة، وإعلانات ما بتتسكّر.</span></div>
+      <div class="insight"><b>المشكلة التانية: مراحل مستحيلة</b><span>مراحل ما بتنحل إلا بأدوات مدفوعة. بـ Rotate Rings تقييم عليه ٣٥٨ لايك عن هالشي.</span></div>
+      <div class="insight"><b>المشكلة التالتة: منافسة وهمية</b><span>لوحات ترتيب ودوريات بتطلع فيها لحالك، ونتائج بتبيّن إنها مش حقيقية.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="games" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2>الألعاب العشرة</h2>
+    <p class="sub">مرتبة حسب قوتها بالترند. كل لعبة أصلية: نفس فكرة اللعب، بس الاسم والرسومات والمراحل تبعنا.</p>
+    <div class="filters" role="group" aria-label="فلترة الألعاب">
+      <button aria-pressed="true" data-f="all">الكل</button>
+      <button aria-pressed="false" data-f="puzzle">ألغاز</button>
+      <button aria-pressed="false" data-f="action">أكشن</button>
+      <button aria-pressed="false" data-f="easy">الأسهل لنكملها</button>
+    </div>
+    <div class="grid" id="grid"></div>
+  </div>
+</section>
+
+<section id="re">
+  <div class="wrap">
+    <h2>الهندسة العكسية</h2>
+    <p class="sub" id="reIntro">حللنا ملفات الألعاب الأصلية بأداة <a href="https://github.com/morluto/rea">REA</a> تحليل ثابت، يعني قرينا الملفات بدون ما نشغّلها. هدفنا نفهم كيف معمولة مراحلها وإعلاناتها. ما أخدنا منها ولا كود ولا رسومات ولا مراحل.</p>
+    <div id="reBody"><p class="note">النتائج عم تنضاف.</p></div>
+  </div>
+</section>
+
+<section id="first" style="padding-top:0">
+  <div class="wrap">
+    <div class="feature">
+      <div class="art">
+        <svg width="200" height="200" viewBox="0 0 200 200" aria-hidden="true">
+          <g transform="translate(20 20)">
+            <rect width="160" height="160" rx="14" fill="#2a2148"/>
+            <g>
+              <rect x="10" y="10" width="34" height="34" rx="7" fill="#ff6b6b"/><rect x="46" y="10" width="34" height="34" rx="7" fill="#ff6b6b"/>
+              <rect x="10" y="46" width="34" height="34" rx="7" fill="#feca57"/><rect x="82" y="46" width="34" height="34" rx="7" fill="#1dd1a1"/>
+              <rect x="118" y="46" width="34" height="34" rx="7" fill="#1dd1a1"/><rect x="10" y="82" width="34" height="34" rx="7" fill="#54a0ff"/>
+              <rect x="46" y="82" width="34" height="34" rx="7" fill="#54a0ff"/><rect x="82" y="82" width="34" height="34" rx="7" fill="#54a0ff"/>
+              <rect x="118" y="118" width="34" height="34" rx="7" fill="#c56cf0"/><rect x="82" y="118" width="34" height="34" rx="7" fill="#c56cf0"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+      <div class="txt">
+        <span class="tag">أول لعبة من المختبر</span>
+        <h3>بلوكات عادلة</h3>
+        <p>لعبة بلوكات من نفس نوع Block Blast، والقطع فيها ما بتنغش. في تراجع وتدوير ولغز يومي، وكمان في نسخة أندرويد.</p>
+        <a class="btn primary" href="https://muhammedkado.github.io/fair-blocks/">العب بلوكات عادلة</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>كل الألعاب هون أصلية، ومش تابعة لأي لعبة أو شركة مذكورة بالصفحة. أسماء الألعاب المذكورة علامات تجارية لأصحابها، وذكرناها لنوضح مصدر البيانات بس.</p>
+    <p>الأدوات: Apify لبيانات المتاجر · <a href="https://github.com/Donchitos/Claude-Code-Game-Studios">Claude Code Game Studios</a> (MIT) لبناء النماذج · <a href="https://github.com/morluto/rea">REA</a> (MIT) للتحليل.</p>
+    <p>هدول نماذج أولية، يعني ممكن يكون فيها أخطاء. إذا لقيت شي، احكيلنا.</p>
+  </div>
+</footer>
+
+<script src="re.js"></script>
+<script>
+'use strict';
+const GAMES = [
+  {id:'zellige-arrows', ar:'سهام الزليج', en:'Zellige Arrows', kind:'puzzle', build:'easy', genre:'لغز أسهم',
+   rank:'100M+ خلال 9 شهور', insp:'Amaze GO!', stats:'100M+ تحميل خلال 9 شهور · ★ 4.86 · المركز 18 بألعاب الآيفون',
+   quote:'إعلان بعد كل مرحلة وما في خيار تدفع لتشيلها، ودوري تنافسي إجباري وبتطلع فيه لحالك.', qsrc:'ترجمة مختصرة لأكتر تقييم سلبي عليه لايكات',
+   fix:['بلا إعلانات وبلا دوري وهمي','كل مرحلة إلها حل مضمون من طريقة بنائها','عقد ملونة بتقفل الأسهم، ولوحة زليج بتبين كل ما تحل'],
+   how:'اكبس على السهم اللي طريقه فاضي لبرّا. السهم بيطلع والأسهم التانية بيصير إلها طريق. إذا كبست على سهم مسكّر بتخسر قلب.'},
+  {id:'oases', ar:'واحات', en:'Oases', kind:'puzzle', build:'easy', genre:'لغز منطقي',
+   rank:'الأولى عالآيفون', insp:'Meowdoku', stats:'المركز 1 بألعاب الآيفون · المركز 4 بأندرويد · 10M+ خلال 7 شهور · ★ 4.66',
+   quote:'إعلانات إجبارية بتطلع وانت عم تلعب، وما بتعطيك أي مكافأة.', qsrc:'أكتر تقييم سلبي عليه لايكات (836)، ويشتكوا كمان من لوحة ترتيب وهمية ومراحل بتتكرر',
+   fix:['ألغاز مولّدة وإلها حل واحد مثبت، فما بتتكرر','التلميح بيشرحلك ليش، مش بس وين','لغز يومي، وأفضل وقت إلك أنت، بلا ترتيب وهمي'],
+   how:'حط خيمة وحدة بكل واحة ملونة. ممنوع خيمتين بنفس الصف أو العمود، وممنوع يتلامسوا ولو بالقطري.'},
+  {id:'astrolabe', ar:'أسطرلاب', en:'Astrolabe', kind:'puzzle', build:'mid', genre:'لغز تدوير',
+   rank:'10M+ بأقل من 4 شهور', insp:'Rotate Rings', stats:'10M+ بأقل من 4 شهور · ★ 4.78 · المركز 6 بأندرويد',
+   quote:'بعد المرحلة 160 صار مستحيل تحل المرحلة بدون أدوات مدفوعة.', qsrc:'تقييم عليه 358 لايك',
+   fix:['كل مرحلة محسوب إلها أقصر حل، وعدد الحركات دايماً بيكفي','التلميح هو الحركة الصح الجاية، ببلاش','الحلقات مسننة وبتلف بعضها، فاللغز بده تفكير مش حظ'],
+   how:'لف الحلقات النحاسية لحتى تصفّ الفتحات ويوصل ضو النجوم من المركز لكل نجمة عالإطار.'},
+  {id:'caravan-jam', ar:'زحمة القافلة', en:'Caravan Jam', kind:'puzzle', build:'mid', genre:'زحمة وفرز ألوان',
+   rank:'3 ألعاب بأول 50 عالآيفون', insp:'Bus Fever Party!', stats:'3 ألعاب باصات بأول 50 عالآيفون · 10M+ · ★ 3.95 بس',
+   quote:'المراحل معمولة لتخسر وتتفرج على إعلانات. وفي مرحلة فيها باص 40 مقعد و36 راكب، فما بتخلص أبداً.', qsrc:'ترجمة مختصرة لتقييمات سلبية',
+   fix:['برنامج بيتأكد إنو كل مرحلة بتنحل قبل ما تلعبها','عدد الركاب دايماً قد عدد المقاعد','الصعوبة بتزيد شوي شوي، وفي 3 تراجعات ببلاش'],
+   how:'اكبس عالجمل اللي طريقه فاضي ليطلع عالبوابة، والمسافرين اللي لابسين نفس لونه بيركبوا عليه. لا تخلّي الأعمدة يمتلوا.'},
+  {id:'mangonel', ar:'منجنيق', en:'Mangonel', kind:'action', build:'hard', genre:'فيزياء ورمي',
+   rank:'10M+ خلال 5 شهور', insp:'Royal Smash!', stats:'10M+ خلال 5 شهور · ★ 4.63 · المركز 15 بأندرويد',
+   quote:'الكرة ما بتروح مطرح ما بصوّب. والإعلانات بتجمّد اللعبة، وفي نظام أرواح.', qsrc:'ترجمة مختصرة لتقييمات سلبية',
+   fix:['فيزياء ثابتة: نفس الرمية بتعطي نفس النتيجة','قوس تصويب واضح قبل ما ترمي','3 أنواع ذخيرة، وما في أرواح ولا انتظار'],
+   how:'اسحب لورا لتصوّب، وشوف القوس، واترك لترمي. كسّر كل الجرار بالذخيرة اللي معك.'},
+  {id:'sand-claim', ar:'رمال', en:'Sand Claim', kind:'action', build:'mid', genre:'احتلال أراضي',
+   rank:'الثالثة بالسعودية', insp:'Paper.io 2', stats:'100M+ · المركز 3 بالسعودية · المركز 12 بأمريكا',
+   quote:'15% من تقييماتها نجمة وحدة، يعني أكتر من 383 ألف تقييم.', qsrc:'من بيانات المتجر',
+   fix:['البوتات مكتوب عليها إنها بوتات، مش لاعبين وهميين','الواحات بتعطيك نسبة زيادة لما تحاوطها','جولة 3 دقايق، بلا إعلانات'],
+   how:'اطلع من أرضك وارسم دورة على الرمل وارجع، فبتصير كل المساحة اللي جواها إلك. إذا حدا قطع خطك قبل ما ترجع، بتخسر.'},
+  {id:'moving-day', ar:'يوم النقل', en:'Moving Day', kind:'puzzle', build:'mid', genre:'فرز وتوضيب',
+   rank:'الأولى بأمريكا اليوم', insp:'Amochiroom: Room Sort', stats:'المركز 1 بأندرويد أمريكا · نزلت من شهر · 1M+ · ★ 4.70',
+   quote:'', qsrc:'',
+   fix:['بتشوف الصندوقين الجايين، فبتخطط بدل ما تخمّن','كل مرحلة مفحوصة إنها بتنحل','أغراض بيت عربي: دلّة وكاسات شاي ووسادات'],
+   how:'وضّب أغراض البيت بالصناديق. كل صندوق بيطلب نوع معيّن، والأغراض الزايدة بتروح عالطاولة، وما لازم الطاولة تمتلي.'},
+  {id:'attar', ar:'عطّار', en:'Attar', kind:'puzzle', build:'easy', genre:'فرز سوائل',
+   rank:'الرابعة عالآيفون', insp:'Magic Sort!', stats:'المركز 4 بألعاب الآيفون · 10M+ · ★ 4.53',
+   quote:'', qsrc:'',
+   fix:['كل مرحلة مثبت إلها حل','تراجع بلا حدود، وما في قنينة زيادة بفلوس','التلميح من نفس البرنامج اللي بيحل المرحلة'],
+   how:'اسكب زيوت العطر بين القناني لحتى تصير كل قنينة ريحة وحدة.'},
+  {id:'dune-serpent', ar:'أفعى الكثبان', en:'Dune Serpent', kind:'action', build:'mid', genre:'أفعى وساحة',
+   rank:'100M+', insp:'Snake Clash! و Snake.io', stats:'100M+ لكل وحدة · Snake.io بالمركز 12 بالسعودية',
+   quote:'', qsrc:'',
+   fix:['عاصفة رملية بتضيّق الساحة، فكل جولة إلها نهاية','البوتات واضحة إنها بوتات','جولة 3 دقايق، بلا إعلانات'],
+   how:'كول الخرز المضوي لتكبر، ولف حوالين الأفاعي التانية لحتى يخبطوا فيك. انتبه من العاصفة.'},
+  {id:'think-outside', ar:'فكّر برّا الصندوق', en:'Think Outside', kind:'puzzle', build:'mid', genre:'ألغاز خدع',
+   rank:'السعودية والآيفون', insp:'Brain Puzzle 3', stats:'10M+ · ★ 4.72 · المركز 11 بالسعودية · المركز 20 عالآيفون',
+   quote:'', qsrc:'',
+   fix:['10 ألغاز جديدة كلياً، وكل لغز بخدعة مختلفة','تلميح ببلاش بعد 20 ثانية','رسومات دفتر مدرسة بتتحرك'],
+   how:'الجواب عمره ما بيكون وين بتطلّع أول مرة. اسحب الكلمات، ودوّر ورا الأشياء، وجرّب كل شي.'},
+];
+const BUILD = {easy:['سهلة نكملها','easy'], mid:['متوسطة','mid'], hard:['صعبة','hard']};
+const check = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="var(--accent2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const RE = window.RE_NOTES || {};
+const num = s => esc(s).replace(/(\d[\d.,]*[MK]?\+?)/g, '<bdi dir="ltr">$1</bdi>');
+function card(g, i) {
+  const b = BUILD[g.build];
+  return `<article class="card" data-kind="${g.kind}" data-build="${g.build}">
+    <div class="cover"><img src="games/${g.id}/cover.png" alt="لقطة من لعبة ${esc(g.ar)}" loading="lazy" onerror="this.style.display='none'"><span class="rank">${num(g.rank)}</span><span class="num">${i + 1}</span></div>
+    <div class="body">
+      <div class="title"><h3>${esc(g.ar)}</h3><small>${esc(g.en)}</small></div>
+      <div class="tags"><span class="tag">${esc(g.genre)}</span><span class="tag ${b[1]}">${b[0]}</span></div>
+      <p class="insp">مستوحاة من <b dir="ltr">${esc(g.insp)}</b><br>${num(g.stats)}</p>
+      ${g.quote ? `<p class="quote">«${esc(g.quote)}»<em>${esc(g.qsrc)}</em></p>` : ''}
+      <ul class="fix">${g.fix.map(f => `<li>${check}<span>${esc(f)}</span></li>`).join('')}</ul>
+      <details class="more"><summary>كيف بتنلعب؟</summary><p>${esc(g.how)}</p>${RE[g.id] ? `<p><b>من الهندسة العكسية:</b> ${esc(RE[g.id])}</p>` : ''}</details>
+      <div class="actions"><a class="btn primary" href="games/${g.id}/">العب</a></div>
+    </div>
+  </article>`;
+}
+const grid = document.getElementById('grid');
+grid.innerHTML = GAMES.map(card).join('');
+document.querySelectorAll('.filters button').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('.filters button').forEach(b => b.setAttribute('aria-pressed', b === btn));
+  const f = btn.dataset.f;
+  grid.querySelectorAll('.card').forEach(c => {
+    c.hidden = !(f === 'all' || c.dataset.kind === f || (f === 'easy' && c.dataset.build === 'easy'));
+  });
+}));
+if (window.RE_TABLE) document.getElementById('reBody').innerHTML = window.RE_TABLE;
+const root = document.documentElement;
+try { const t = localStorage.getItem('theme'); if (t) root.dataset.theme = t; } catch (e) {}
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('theme', root.dataset.theme); } catch (e) {}
+});
+</script>
+</body>
+</html>

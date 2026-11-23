@@ -1,0 +1,7 @@
+- path: vendor/almarai.css
+  origin: licensed
+  tool: "subset-font 2.3.0 (Arabic + Latin ranges, woff2) embedded as data URIs"
+  source: {vendor: "The Almarai Project Authors", product: "Almarai Regular/Bold/ExtraBold", url: "https://github.com/google/fonts/tree/main/ofl/almarai"}
+  licence: {id: OFL-1.1}
+  date: 2026-11-23
+  ships: true
