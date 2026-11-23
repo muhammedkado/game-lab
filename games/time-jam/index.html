@@ -525,7 +525,14 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     if (o.gait != null) { const g = Math.sin(o.gait * Math.PI / tune.stride); sc *= 1 + tune.bob * Math.abs(g); sway = tune.sway * g; walkPh = g; }
     if (o.breath != null) sc *= 1 + 0.014 * o.breath;
   }
+  let drv = null; // a road vehicle under way: engine rumble, suspension and body roll
+  if (E.move === 'drive' && o.gait != null) {
+    drv = o.gait;
+    sc *= 1 + tune.drive_bounce * Math.abs(Math.sin(drv / 23));
+    sway = tune.drive_roll * Math.sin(drv / 37);
+  }
   ctx.save(); ctx.translate(cx, cy);
+  if (drv != null) ctx.translate(Math.sin(drv * 1.9) * tune.rumble, Math.cos(drv * 2.3) * tune.rumble);
   if (walkPh != null) ctx.translate(0, -tune.hop * Math.abs(walkPh)); // each step lifts the body a little (screen up)
   ctx.rotate(ang + sway); ctx.scale(sc * (o.sqA || 1), sc * (o.sqC || 1));
   if (walkPh != null) ctx.transform(1, tune.step_shear * walkPh, 0, 1, 0, 0); // the body leans into each stride
@@ -539,6 +546,12 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
   }
   if (o.glow) { ctx.strokeStyle = o.glow; ctx.lineWidth = c * 0.1; ell(0, 0, h * 0.56, Math.max(w * 0.6, c * 0.32)); ctx.stroke(); }
   ctx.rotate(Math.PI / 2); // the sprite's own frame: nose up
+  if ((drv != null || walkPh != null) && o.trail !== false) { // speed streaks behind the tail while under way
+    ctx.strokeStyle = E.move === 'walk' ? 'rgba(255,240,210,0.55)' : 'rgba(255,255,255,0.6)'; ctx.lineWidth = Math.max(2, w * 0.05);
+    const L = h * tune.streak_len, ph = ((o.gait || 0) / 40) % 1;
+    for (const k of [-0.28, 0, 0.28]) { const x = k * w, y0 = h * 0.5 + 4 + ph * 10; ctx.globalAlpha = a0 * (k ? 0.45 : 0.7); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + L * (k ? 0.7 : 1)); ctx.stroke(); }
+    ctx.globalAlpha = a0;
+  }
   if (cover < 1) { if (okImg(img)) ctx.drawImage(img, -w / 2, -h / 2, w, h); else fallbackVehicle(w, h, PAL[ci].base); }
   if (cover > 0) { // a colourless body under the cover: every covered vehicle looks the same
     ctx.globalAlpha = a0 * cover;
@@ -1598,7 +1611,8 @@ function trainPose(path, s, len, cell, phase) {
 function tripPose(i) {
   const w = state.vc[i].trip, u = (state.t - w.t0) / (w.t1 - w.t0);
   const s = w.s0 + (w.path.total - w.s0) * travel(u);
-  const cell = s <= w.sExit ? w.gc : lerp(w.gc, w.bc, clamp((s - w.sExit) / 170, 0, 1));
+  const roadC = Math.max(w.bc, w.gc * tune.road_scale), tail = tune.dock_shrink;
+  const cell = s <= w.sExit ? w.gc : s < w.path.total - tail ? lerp(w.gc, roadC, clamp((s - w.sExit) / 120, 0, 1)) : lerp(roadC, w.bc, clamp((s - (w.path.total - tail)) / tail, 0, 1));
   const p = trainPose(w.path, s, w.len, cell, 'trip');
   if (ERAS[eraNow()].move === 'fly') { p.alt = tune.hover_alt * Math.min(1, u * 7, (1 - u) * 7); p.rotor = 1; }
   else p.gait = s;
@@ -1963,7 +1977,7 @@ function drawPlay() {
     const q = gridGeom(state.hint), k = Math.sin(t * 5) * 10;
     drawHand(q.cx + 18 + k * 0.5, q.cy + 16 + k, -0.45);
   }
-  if (!state.warn && t - state.bannerT < 4.2 && !(state.tapped && t > 1.2)) {
+  if (!state.warn && t - state.bannerT < 4.2 && !state.tapped) { // gone at the first tap, so the road below is clear to watch
     const a = clamp(Math.min((t - state.bannerT) / 0.3, (4.2 - (t - state.bannerT)) / 0.5), 0, 1);
     ctx.globalAlpha = a; drawBanner(); ctx.globalAlpha = 1;
   }
@@ -2441,12 +2455,27 @@ function updatePlayWorld(dt) {
     const v = state.vc[i], moving = (v.trip && t >= v.trip.t0 && t < v.trip.t1) || (v.leave && v.leave.kind === 'ground' && t >= v.leave.go && t < v.leave.mv.t1);
     const idle = E.move === 'drive' && !v.trip && !v.gone && !v.parked && t >= v.rollT && canExit(lv, state.S, i) && !state.pending;
     if (!moving && !idle) continue;
-    const period = moving ? (E.move === 'fly' ? 0.11 : 0.06) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
+    const period = moving ? (E.move === 'fly' ? 0.09 : E.move === 'walk' ? 0.075 : 0.05) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
     if (Math.floor((t + ph) / period) === Math.floor((t - dt + ph) / period)) continue;
     const p = taxiPose(i); if (!p) continue;
-    if (E.move === 'fly') { spawn(2, p.x + 6, p.y + 10, 0, 0, p.cell * 0.3, 0.4, '170,240,255', 0, true, p.cell * 0.5, 0.6); continue; }
-    const back = lv.taxis[i].len * p.cell * 0.5;
-    puff(p.x - Math.cos(p.ang) * back, p.y - Math.sin(p.ang) * back, moving ? 1 : 0.6, E.lot.puff);
+    const ca = Math.cos(p.ang), sa = Math.sin(p.ang), back = lv.taxis[i].len * p.cell * 0.5, side = p.cell * 0.28;
+    const bx = p.x - ca * back, by = p.y - sa * back, fx = tune.fx;
+    if (E.move === 'fly') { // rotor wash: rings and a cool downdraft
+      spawn(2, p.x + 6, p.y + 10, 0, 0, p.cell * 0.32, 0.45, '170,240,255', 0, true, p.cell * 0.7 * fx, 0.7);
+      if (moving) spawn(1, bx, by, -ca * 60, -sa * 60, 5 * fx, 0.5, '210,245,255', 0, true, 22 * fx, 0.45);
+      continue;
+    }
+    if (E.move === 'walk') { // hooves kick up sand: a cloud behind each side, now and then a bigger one
+      const k = moving ? 1.6 * fx : 0.6;
+      for (const sd of [-1, 1]) spawn(1, bx - sa * side * sd + (rng() - 0.5) * 10, by + ca * side * sd + (rng() - 0.5) * 10, -ca * 50 + (rng() - 0.5) * 40, -sa * 50 - 20 + (rng() - 0.5) * 30, 5 * k, 0.75, E.lot.puff, 0, true, 20 * k, 0.6);
+      if (moving && rng() < 0.3) spawn(1, bx, by, -ca * 30, -sa * 30 - 15, 8 * k, 1.0, E.lot.puff, 0, true, 34 * k, 0.45);
+      continue;
+    }
+    // engines: dark exhaust smoke from the tailpipe that billows and rises, plus road dust
+    const k = moving ? 1.5 * fx : 0.8, px = bx + sa * side * 0.6, py = by - ca * side * 0.6;
+    spawn(1, px, py, -ca * 70 + (rng() - 0.5) * 25, -sa * 70 - 35 + (rng() - 0.5) * 20, 5 * k, moving ? 1.1 : 0.8, moving ? '165,165,172' : '150,150,158', 0, false, 32 * k, moving ? 0.62 : 0.35);
+    if (moving) spawn(1, px, py, -ca * 50, -sa * 50 - 20, 3 * k, 0.5, '60,60,66', 0, false, 12 * k, 0.6); // a dark core at the pipe
+    if (moving && rng() < 0.5) spawn(1, bx - sa * side, by + ca * side, -ca * 40, -sa * 40, 4 * k, 0.6, E.lot.puff, 0, true, 16 * k, 0.4);
   }
   // the line shuffles forward on its conveyor
   while (state.qv < lv.queue.length) { const tr = state.tr[state.qv]; if (tr.done || (tr.startT != null && t >= tr.startT)) state.qv++; else break; }

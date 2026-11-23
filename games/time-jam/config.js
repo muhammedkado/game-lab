@@ -118,11 +118,18 @@ window.CONFIG = {
   corner_r: { value: 56, min: 10, max: 120, step: 2 },         // radius of the road's rounded corners
   approach: { value: 150, min: 80, max: 260, step: 5 },        // length of the S that swings a vehicle into its bay
   bump_time: { value: 0.32, min: 0.1, max: 0.8, step: 0.02 },  // the squash and dock bump on arrival
-  bob: { value: 0.06, min: 0, max: 0.15, step: 0.005 },         // how much a walking animal bobs (scale)
-  sway: { value: 0.08, min: 0, max: 0.25, step: 0.005 },        // how far a walking animal's body swings side to side (radians)
-  stride: { value: 26, min: 10, max: 80, step: 1 },             // logical px walked per half step (shorter = quicker steps)
-  hop: { value: 5, min: 0, max: 16, step: 0.5 },                // logical px a walking animal lifts on each step
-  step_shear: { value: 0.09, min: 0, max: 0.3, step: 0.01 },    // how much a walking animal's body leans into each stride
+  bob: { value: 0.08, min: 0, max: 0.15, step: 0.005 },         // how much a walking animal bobs (scale)
+  sway: { value: 0.12, min: 0, max: 0.25, step: 0.005 },        // how far a walking animal's body swings side to side (radians)
+  stride: { value: 55, min: 10, max: 80, step: 1 },             // logical px walked per half step (shorter = quicker steps)
+  drive_bounce: { value: 0.025, min: 0, max: 0.08, step: 0.005 }, // a road vehicle's suspension bounce (scale) under way
+  drive_roll: { value: 0.05, min: 0, max: 0.2, step: 0.005 },     // a road vehicle's body roll side to side (radians)
+  rumble: { value: 1.6, min: 0, max: 5, step: 0.1 },              // engine rumble shake (logical px)
+  streak_len: { value: 0.45, min: 0, max: 1.2, step: 0.05 },      // speed streaks behind a moving vehicle (share of its length)
+  road_scale: { value: 0.9, min: 0.4, max: 1.2, step: 0.05 },    // a vehicle's size on the road, as a share of its lot size
+  dock_shrink: { value: 140, min: 20, max: 400, step: 10 },     // logical px before the stop over which it shrinks to the bay size
+  fx: { value: 1.2, min: 0, max: 3, step: 0.1 },                // strength of dust, exhaust smoke and rotor wash
+  hop: { value: 10, min: 0, max: 16, step: 0.5 },                // logical px a walking animal lifts on each step
+  step_shear: { value: 0.15, min: 0, max: 0.3, step: 0.01 },    // how much a walking animal's body leans into each stride
   hover_alt: { value: 0.14, min: 0, max: 0.4, step: 0.02 },    // how high a gliding air taxi hovers (scale and shadow)
   roll_time: { value: 0.45, min: 0.1, max: 1.2, step: 0.05 },  // a garage vehicle rolling out onto its strip
 
