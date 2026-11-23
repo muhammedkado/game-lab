@@ -168,8 +168,18 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
     else { sweep(160, 520, 0.22, 'sawtooth', 0.06); tone(660, 0.07, 'sine', 0.16, 0.05); }
   },
   blocked() { tone(140, 0.12, 'square', 0.1); tone(104, 0.2, 'square', 0.09, 0.09); },
-  dock() { tone(784, 0.09, 'sine', 0.18); tone(1175, 0.16, 'sine', 0.14, 0.07); },
-  board(k) { tone(660 + k * 70, 0.07, 'sine', 0.2); },
+  dock(e) { // arriving at a stop: a soft clop and bell, a brake hiss and chime, a landing chime
+    const m = ERAS[e].move;
+    if (m === 'walk') { tone(300, 0.05, 'triangle', 0.18); tone(1046, 0.18, 'sine', 0.1, 0.06); }
+    else if (m === 'drive') { rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.12, 0.08); }
+    else { tone(784, 0.09, 'sine', 0.18); tone(1175, 0.16, 'sine', 0.14, 0.07); }
+  },
+  board(k) { tone(560 + k * 62, 0.08, 'sine', 0.2); tone(1120 + k * 124, 0.04, 'triangle', 0.06); }, // a pop that rises seat by seat
+  full() { [523, 659, 784].forEach(f => tone(f, 0.26, 'triangle', 0.13)); tone(1047, 0.3, 'sine', 0.1, 0.06); }, // a short chord
+  combo(n) { for (let k = 0; k < Math.min(5, n + 1); k++) tone(660 * Math.pow(1.122, k + n), 0.1, 'square', 0.07, k * 0.06); },
+  roll() { rush(0.35, 300, 900, 0.12); tone(196, 0.12, 'triangle', 0.12, 0.05); }, // a garage door rattles open
+  grumble(k) { tone(150 - k * 20, 0.18, 'sawtooth', 0.06); tone(130 - k * 20, 0.24, 'sawtooth', 0.06, 0.14); },
+  warn() { [110, 110, 98].forEach((f, i) => tone(f, 0.22, 'square', 0.12, i * 0.2)); tone(880, 0.5, 'sawtooth', 0.05, 0.6); },
   go(e) { // a full ground vehicle leaves through its stop
     if (ERAS[e].move === 'walk') { [0, 0.15, 0.3, 0.45].forEach((d, k) => tone(k % 2 ? 235 : 295, 0.06, 'triangle', 0.18, d)); tone(1320, 0.4, 'sine', 0.07); rush(0.5, 400, 1200, 0.12); }
     else { sweep(80, 380, 0.6, 'sawtooth', 0.07); if (e === 3) { tone(440, 0.14, 'square', 0.06, 0.05); tone(554, 0.2, 'square', 0.06, 0.2); } else tone(660, 0.12, 'square', 0.05, 0.08); }
@@ -279,52 +289,58 @@ const ERAS = [
     accent: '255,198,112', base: '#3a2410', greyTint: '#cfc2aa',
     lot: { lane: 'rgba(96,52,16,0.42)', mat: 'rgba(66,34,10,0.48)', edge: 'rgba(255,224,165,0.78)', cell: 'rgba(255,220,160,0.12)',
       cellEdge: 'rgba(255,228,178,0.45)', bay: 'rgba(66,34,10,0.36)', bayEdge: 'rgba(255,228,178,0.65)', dash: true,
-      floor: 'rgba(250,234,200,0.55)', floorEdge: 'rgba(120,66,22,0.7)', puff: '226,190,140' } },
+      floor: 'rgba(250,234,200,0.55)', floorEdge: 'rgba(120,66,22,0.7)', puff: '226,190,140',
+      road: 'rgba(196,150,96,0.62)', roadEdge: 'rgba(92,54,20,0.55)', roadDash: 'rgba(255,236,200,0.55)' } },
   { name: 'عصر الحمير والعربات', tab: 'الحمير', bg: 'bg-2', small: 'donkey', big: 'donkey-cart', riders: 'rider-old',
     stop: 'stall', cover: 'sack', move: 'walk', noun: 'حمار',
     smallName: 'حمار', bigName: 'حمار بعربة', coverName: 'مغطى بالخيش', stopName: 'مظلة السوق',
     accent: '244,214,160', base: '#2c241c', greyTint: '#c8c0b4',
     lot: { lane: 'rgba(60,46,34,0.45)', mat: 'rgba(36,28,22,0.52)', edge: 'rgba(244,226,196,0.75)', cell: 'rgba(244,230,206,0.1)',
       cellEdge: 'rgba(244,230,206,0.42)', bay: 'rgba(36,28,22,0.38)', bayEdge: 'rgba(244,226,196,0.62)', dash: true,
-      floor: 'rgba(246,238,224,0.55)', floorEdge: 'rgba(92,70,48,0.7)', puff: '205,190,165' } },
+      floor: 'rgba(246,238,224,0.55)', floorEdge: 'rgba(92,70,48,0.7)', puff: '205,190,165',
+      road: 'rgba(120,104,88,0.66)', roadEdge: 'rgba(50,38,28,0.6)', roadDash: 'rgba(244,226,196,0.55)' } },
   { name: 'عصر المواتير', tab: 'المواتير', bg: 'bg-3', small: 'motorbike', big: 'tuktuk', riders: 'rider',
-    stop: 'tin', cover: 'grey', move: 'drive', noun: 'مركبة',
+    stop: 'tin', cover: 'grey', move: 'drive', noun: 'مركبة', garage: 'shed', garageName: 'ورشة تنك',
     smallName: 'دراجة نارية', bigName: 'توك توك', coverName: 'غطاء رمادي', stopName: 'سقف التنك',
     accent: '255,164,84', base: '#2a2826', greyTint: '#c4c8cc',
     lot: { lane: 'rgba(255,255,255,0.5)', mat: 'rgba(32,34,38,0.52)', edge: 'rgba(255,255,255,0.8)', cell: 'rgba(255,255,255,0.05)',
       cellEdge: 'rgba(255,255,255,0.58)', bay: 'rgba(32,34,38,0.34)', bayEdge: 'rgba(255,255,255,0.75)', dash: false,
-      floor: 'rgba(246,242,234,0.55)', floorEdge: 'rgba(196,70,50,0.75)', puff: '150,150,156' } },
+      floor: 'rgba(246,242,234,0.55)', floorEdge: 'rgba(196,70,50,0.75)', puff: '150,150,156',
+      road: 'rgba(58,60,64,0.78)', roadEdge: 'rgba(230,230,230,0.6)', roadDash: 'rgba(255,255,255,0.8)' } },
   { name: 'عصر التكسي', tab: 'التكسي', bg: 'bg-4', small: 'car', big: 'van', riders: 'rider',
-    stop: 'bay', cover: 'grey', move: 'drive', noun: 'سيارة',
+    stop: 'bay', cover: 'grey', move: 'drive', noun: 'سيارة', garage: 'garage', garageName: 'كراج',
     smallName: 'سيارة تكسي', bigName: 'سيارة فان', coverName: 'غطاء رمادي', stopName: 'موقف تكسي',
     accent: '255,214,60', base: '#18181c', greyTint: '#c2c6cc',
     lot: { lane: 'rgba(255,214,60,0.5)', mat: 'rgba(12,12,16,0.45)', edge: 'rgba(255,214,60,0.85)', cell: 'rgba(255,255,255,0.04)',
       cellEdge: 'rgba(255,214,60,0.55)', bay: 'rgba(12,12,16,0.32)', bayEdge: 'rgba(255,214,60,0.78)', dash: false,
-      floor: 'rgba(238,238,240,0.55)', floorEdge: 'rgba(255,214,60,0.8)', puff: '160,160,170' } },
+      floor: 'rgba(238,238,240,0.55)', floorEdge: 'rgba(255,214,60,0.8)', puff: '160,160,170',
+      road: 'rgba(30,30,36,0.8)', roadEdge: 'rgba(255,214,60,0.7)', roadDash: 'rgba(255,214,60,0.9)' } },
   { name: 'عصر التاكسي الطائر', tab: 'الطائر', bg: 'bg-5', small: 'taxi-small', big: 'taxi-big', riders: 'rider',
-    stop: 'glass', cover: 'charge', move: 'fly', noun: 'تاكسي',
+    stop: 'glass', cover: 'charge', move: 'fly', noun: 'تاكسي', garage: 'hangar', garageName: 'حظيرة شحن',
     smallName: 'تاكسي طائر', bigName: 'مكوك طائر', coverName: 'تاكسي يشحن', stopName: 'بوابة زجاج',
     accent: '110,230,255', base: '#060a14', greyTint: '#b8c2d0',
     lot: { lane: 'rgba(110,225,255,0.24)', mat: 'rgba(2,10,24,0.5)', edge: 'rgba(90,220,255,0.6)', cell: 'rgba(40,95,150,0.2)',
       cellEdge: 'rgba(100,225,255,0.45)', bay: 'rgba(18,42,78,0.34)', bayEdge: 'rgba(110,225,255,0.5)', dash: true,
-      floor: 'rgba(110,150,200,0.4)', floorEdge: 'rgba(110,225,255,0.45)', puff: '200,240,255' } },
+      floor: 'rgba(110,150,200,0.4)', floorEdge: 'rgba(110,225,255,0.45)', puff: '200,240,255',
+      road: 'rgba(14,40,80,0.62)', roadEdge: 'rgba(90,220,255,0.55)', roadDash: 'rgba(160,240,255,0.8)' } },
 ];
 const eraOf = L => clamp(Math.floor((L - 1) / ERA_LEVELS), 0, ERAS.length - 1);
-// Each sprite's fit: length as a share of its cells, a slight widening for the thinnest animals,
-// its seats as [along the facing, across] in cells from its middle, and the part a cover hides
-// (fractions of its length from the nose). Air taxis also name their rotors and lights.
+// Each sprite's fit: a slight widening for the thinnest animals, where its riders sit (zone: the
+// share of its length from the nose; across: each of the two seat columns' offset as a share of its
+// width), and the part a cover hides (fractions of its length from the nose). Air taxis also name
+// their rotors and lights; the square small air taxi is never squeezed (it sits on a landing pad).
 const KIND = {
-  'camel': { fill: 0.98, widen: 1.22, sr: 0.85, aspect: 0.355, cov: [0.2, 0.7], seats: [[0.2, 0], [0.07, 0], [-0.06, 0]] },
-  'camel-howdah': { fill: 0.97, widen: 1.04, aspect: 0.39, cov: [0.14, 0.82], seats: [[0.38, -0.1], [0.38, 0.1], [0.1, -0.1], [0.1, 0.1], [-0.18, -0.1], [-0.18, 0.1]] },
-  'donkey': { fill: 0.98, widen: 1.06, sr: 0.9, aspect: 0.475, cov: [0.26, 0.72], seats: [[0.1, 0], [0, 0], [-0.1, 0]] },
-  'donkey-cart': { fill: 0.98, widen: 1.1, aspect: 0.315, cov: [0.56, 1.0], seats: [[-0.36, -0.1], [-0.36, 0.1], [-0.57, -0.1], [-0.57, 0.1], [-0.78, -0.1], [-0.78, 0.1]] },
-  'motorbike': { fill: 0.96, widen: 1.2, sr: 0.8, aspect: 0.445, cov: [0.04, 0.96], seats: [[0.05, 0], [-0.07, 0], [-0.19, 0]] },
-  'tuktuk': { fill: 0.96, widen: 1, aspect: 0.415, cov: [0.03, 0.98], seats: [[0.26, -0.1], [0.26, 0.1], [-0.12, -0.1], [-0.12, 0.1], [-0.5, -0.1], [-0.5, 0.1]] },
-  'car': { fill: 0.96, widen: 1.1, sr: 0.9, aspect: 0.415, cov: [0.02, 0.98], seats: [[0.08, 0], [-0.06, 0], [-0.2, 0]] },
-  'van': { fill: 0.96, widen: 1, aspect: 0.45, cov: [0.02, 0.98], seats: [[0.34, -0.1], [0.34, 0.1], [-0.04, -0.1], [-0.04, 0.1], [-0.42, -0.1], [-0.42, 0.1]] },
-  'taxi-small': { fill: 0.94, widen: 1, aspect: 0.93, cov: [0.12, 0.88], seats: [[0.14, 0], [0, 0], [-0.14, 0]],
+  'camel': { widen: 1.22, aspect: 0.355, zone: [0.27, 0.62], across: 0.2, cov: [0.2, 0.7] },
+  'camel-howdah': { widen: 1.04, aspect: 0.388, zone: [0.24, 0.66], across: 0.17, cov: [0.14, 0.82] },
+  'donkey': { widen: 1.06, aspect: 0.43, zone: [0.34, 0.66], across: 0.19, cov: [0.26, 0.72] },
+  'donkey-cart': { widen: 1.1, aspect: 0.312, zone: [0.6, 0.94], across: 0.2, cov: [0.56, 1.0] },
+  'motorbike': { widen: 1.2, aspect: 0.425, zone: [0.4, 0.74], across: 0.17, cov: [0.04, 0.96] },
+  'tuktuk': { widen: 1, aspect: 0.415, zone: [0.32, 0.8], across: 0.2, cov: [0.03, 0.98] },
+  'car': { widen: 1.1, aspect: 0.415, zone: [0.34, 0.72], across: 0.2, cov: [0.02, 0.98] },
+  'van': { widen: 1, aspect: 0.473, zone: [0.26, 0.78], across: 0.2, cov: [0.02, 0.98] },
+  'taxi-small': { widen: 1, aspect: 0.935, zone: [0.3, 0.7], across: 0.11, cov: [0.12, 0.88], pad: true,
     rotors: [[0.165, 0.165], [0.835, 0.16], [0.155, 0.84], [0.845, 0.84]], r: 0.145, nose: 0.12, tail: 0.1 },
-  'taxi-big': { fill: 0.95, widen: 1, aspect: 0.5, cov: [0.12, 0.88], seats: [[0.42, -0.075], [0.42, 0.075], [0.04, -0.075], [0.04, 0.075], [-0.34, -0.075], [-0.34, 0.075]],
+  'taxi-big': { widen: 1, aspect: 0.506, zone: [0.24, 0.72], across: 0.1, cov: [0.12, 0.88],
     rotors: [[0.173, 0.227], [0.822, 0.227], [0.173, 0.557], [0.822, 0.557], [0.173, 0.807], [0.822, 0.807]], r: 0.15, nose: 0.06, tail: 0.045 },
 };
 
@@ -426,11 +442,20 @@ let viewEra = -1;    // the era the current screen shows (-1: the title's own lo
 const eraNow = () => state ? eraOf(state.level) : 0;
 const accent = () => viewEra >= 0 ? ERAS[viewEra].accent : '110,230,255';
 
-function seatLocal(len, c, k, e = eraNow()) { const E = ERAS[e], S = KIND[len === 2 ? E.big : E.small].seats, s = S[k % S.length]; return [s[0] * c, s[1] * c]; }
-function vehSize(len, c, ci, e) { // drawn length (along the facing) and width
-  const E = ERAS[e], K = KIND[len === 2 ? E.big : E.small], set = len === 2 ? E.bigImg : E.smallImg, img = set ? set[ci] : null;
-  const h = len * c * K.fill, aspect = okImg(img) ? img.naturalWidth / img.naturalHeight : K.aspect;
-  return { img, h, w: h * aspect * K.widen, K };
+// A vehicle's drawn length (along the facing) and width on a footprint of len cells of size c: the
+// sprite fills about veh_fill of it. A sprite too wide for one cell is narrowed a little (never below
+// squeeze_min) and, past that, drawn shorter; the square air taxi is only ever scaled whole.
+const big3 = len => len >= 3;
+function vehSize(len, c, ci, e) {
+  const E = ERAS[e], K = KIND[big3(len) ? E.big : E.small], set = big3(len) ? E.bigImg : E.smallImg, img = set ? set[ci] : null;
+  const aspect = okImg(img) ? img.naturalWidth / img.naturalHeight : K.aspect;
+  let h = len * c * tune.veh_fill, w = h * aspect * K.widen;
+  const wMax = c * tune.veh_fill_w;
+  if (w > wMax) {
+    if (!K.pad) w *= Math.max(tune.squeeze_min, wMax / w);
+    if (w > wMax) { h *= wMax / w; w = wMax; }
+  }
+  return { img, h, w, K };
 }
 function fallbackVehicle(w, h, col) { // only if a sprite failed to load
   ctx.fillStyle = col; rrect(-w * 0.45, -h * 0.46, w * 0.9, h * 0.92, w * 0.3); ctx.fill();
@@ -438,10 +463,10 @@ function fallbackVehicle(w, h, col) { // only if a sprite failed to load
   ctx.fillStyle = 'rgba(10,20,35,0.5)'; ell(0, -h * 0.3, w * 0.25, w * 0.2); ctx.fill();
 }
 // A soft drop shadow in the vehicle's own outline. Higher (alt) = further away, smaller and fainter.
-function drawVehShadow(cx, cy, ang, len, c, alt, e = eraNow(), alpha = 1) {
-  const S = len === 2 ? SHADOW[e].big : SHADOW[e].small, { h, w } = vehSize(len, c, 0, e);
+function drawVehShadow(cx, cy, ang, len, c, alt, e = eraNow(), alpha = 1, sqA = 1, sqC = 1) {
+  const S = big3(len) ? SHADOW[e].big : SHADOW[e].small, { h, w } = vehSize(len, c, 0, e);
   const ox = 4 + alt * 46, oy = 7 + alt * 70, ss = (1 + alt * 0.28) * (1 - alt * 0.38), a = 0.5 * (1 - alt * 0.45) * alpha;
-  ctx.save(); ctx.translate(cx + ox, cy + oy); ctx.rotate(ang + Math.PI / 2); ctx.scale(ss, ss); ctx.globalAlpha *= a;
+  ctx.save(); ctx.translate(cx + ox, cy + oy); ctx.rotate(ang); ctx.scale(ss * sqA, ss * sqC); ctx.rotate(Math.PI / 2); ctx.globalAlpha *= a;
   if (S) { const kx = w / S.w, ky = h / S.h; ctx.drawImage(S.c, -w / 2 - S.pad * kx, -h / 2 - S.pad * ky, S.c.width * kx, S.c.height * ky); }
   else { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ell(0, 0, w * 0.45, h * 0.47); ctx.fill(); }
   ctx.restore();
@@ -492,7 +517,7 @@ function drawCoverShape(style, w, h, c, K, cover) {
 // o: era, alt (air taxi hover), rotor (blur), gait/breath (animals), cover, glow, flash, seats, alpha.
 function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
   o = o || {};
-  const e = o.era != null ? o.era : eraNow(), E = ERAS[e], big = len === 2;
+  const e = o.era != null ? o.era : eraNow(), E = ERAS[e], big = big3(len);
   const { img, h, w, K } = vehSize(len, c, ci, e);
   const alt = o.alt || 0, cover = o.cover || 0, rot = o.rotor || 0;
   let sc = 1 + alt * 0.28, sway = 0;
@@ -500,10 +525,15 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     if (o.gait != null) { const g = Math.sin(o.gait * Math.PI / 36); sc *= 1 + tune.bob * Math.abs(g); sway = 0.045 * g; }
     if (o.breath != null) sc *= 1 + 0.014 * o.breath;
   }
-  ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang + sway); ctx.scale(sc, sc);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang + sway); ctx.scale(sc * (o.sqA || 1), sc * (o.sqC || 1));
   if (o.alpha != null) ctx.globalAlpha *= o.alpha;
   const a0 = ctx.globalAlpha;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  if (K.pad && o.padCol !== false) { // the small air taxi's landing pad: its whole footprint, lit
+    ctx.fillStyle = 'rgba(20,60,110,0.55)'; rrect(-len * c * 0.47, -c * 0.46, len * c * 0.94, c * 0.92, c * 0.2); ctx.fill();
+    ctx.strokeStyle = 'rgba(120,235,255,0.75)'; ctx.lineWidth = Math.max(1.5, c * 0.025); ctx.stroke();
+    ctx.strokeStyle = 'rgba(120,235,255,0.45)'; for (const sx of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sx * len * c * 0.36, -c * 0.3); ctx.lineTo(sx * len * c * 0.36, c * 0.3); ctx.stroke(); }
+  }
   if (o.glow) { ctx.strokeStyle = o.glow; ctx.lineWidth = c * 0.1; ell(0, 0, h * 0.56, Math.max(w * 0.6, c * 0.32)); ctx.stroke(); }
   ctx.rotate(Math.PI / 2); // the sprite's own frame: nose up
   if (cover < 1) { if (okImg(img)) ctx.drawImage(img, -w / 2, -h / 2, w, h); else fallbackVehicle(w, h, PAL[ci].base); }
@@ -524,10 +554,12 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
       ctx.strokeStyle = `rgba(90,225,255,${0.95 * rot})`; ctx.lineWidth = Math.max(1.5, R * 0.16); ell(rx, ry, R * 1.02, R * 1.02); ctx.stroke();
     }
   }
-  // seats: empty rings; a rider who boarded shows as shoulders in the colour and a bare dark head
-  const seats = o.seats != null ? o.seats : (big ? 6 : 3), sr = c * (big ? 0.058 : 0.062) * (K.sr || 1);
+  // seats: empty rings; a rider who boarded shows as shoulders in the colour and a bare dark head,
+  // popping in as it lands
+  const seats = o.seats != null ? o.seats : (big ? tune.seats_big : tune.seats_small), sr0 = seats ? seatRadiusOf(h, w, K, seats, c) : 0;
   for (let k = 0; k < seats; k++) {
-    const [a, b] = seatLocal(len, c, k, e), x = b, y = -a;
+    const sl = seatAt(h, w, K, k, seats), x = sl[1], y = -sl[0];
+    const sr = o.pop && o.pop.k === k ? sr0 * (1 + 0.6 * Math.sin(o.pop.u * Math.PI)) : sr0;
     if (k < fill) {
       ctx.fillStyle = PAL[ci].base; ell(x, y, sr, sr); ctx.fill();
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, c * 0.018); ctx.stroke();
@@ -549,6 +581,7 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     for (const s of [-1, 1]) { ell(s * w * 0.09, ty, c * 0.03, c * 0.024); ctx.fill(); }
   }
   if (o.flash) { ctx.fillStyle = `rgba(255,50,80,${o.flash})`; ell(0, 0, Math.max(w * 0.5, c * 0.3), h * 0.5); ctx.fill(); }
+  if (o.white) { ctx.fillStyle = `rgba(255,255,240,${o.white})`; ell(0, 0, Math.max(w * 0.56, c * 0.3), h * 0.54); ctx.fill(); }
   ctx.restore();
   if (cover > 0.02) { // the cover's signs stay upright
     const s = c * (big ? 0.36 : 0.34);
@@ -752,6 +785,19 @@ function hardPill(cx, cy, s = 1) {
   ctx.lineTo(px + 4 * s, py - 12 * s); ctx.lineTo(px + 11 * s, py); ctx.closePath(); ctx.fill();
   text('صعبة', cx - 17 * s, cy + 1, Math.max(24, Math.round(24 * s)), '#ffffff');
 }
+// The very hard label: a darker red pill with three peaks and "صعبة جداً".
+function veryHardPill(cx, cy, s = 1) {
+  const w = Math.max(150 * s, 136), h = 38 * s;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; rrect(cx - w / 2 + 2, cy - h / 2 + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = '#a8001c'; rrect(cx - w / 2, cy - h / 2, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2.5; ctx.stroke();
+  const px = cx + w / 2 - 24 * s, py = cy + 8 * s;
+  ctx.fillStyle = '#ffe3ee'; ctx.beginPath();
+  ctx.moveTo(px - 16 * s, py); ctx.lineTo(px - 9 * s, py - 13 * s); ctx.lineTo(px - 4 * s, py - 6 * s); ctx.lineTo(px + 1 * s, py - 15 * s);
+  ctx.lineTo(px + 6 * s, py - 7 * s); ctx.lineTo(px + 10 * s, py - 12 * s); ctx.lineTo(px + 15 * s, py); ctx.closePath(); ctx.fill();
+  text('صعبة جداً', cx - 14 * s, cy + 1, 24, '#ffffff');
+}
+function tierPill(L, cx, cy, s = 1) { const k = tierOf(L); if (k === 1) hardPill(cx, cy, s); else if (k === 2) veryHardPill(cx, cy, s); }
 function glassButton(x, y, w, h, on = true, hot = false) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)'; rrect(x + 2, y + 4, w, h, 18); ctx.fill();
   const gr = ctx.createLinearGradient(0, y, 0, y + h);
@@ -771,18 +817,22 @@ function bigButton(x, y, w, h, label, kind = 'primary') {
 }
 
 // ---- Layout -------------------------------------------------------------------------------
-// Each ground spans the canvas. The lot (cells) sits in the top two thirds inside a loop of lanes,
-// the bays and stops at its bottom edge, the riders' line in the bottom third. An 8x8 lot keeps
-// 72 px cells, the smallest tap target. Nothing is drawn over Dreamina's two AI marks.
-const XL = 44, XR = 676, YT = 196, YB = 848;          // lanes around the lot
-const AV = { x0: 72, x1: 648, y0: 226, y1: 826 };     // the box a lot may use
-const BAY_TOP = 862, BAY_HEAD = 1022, DOOR_Y = 1026, DOOR_H = 48;
+// The lot sits in the top two thirds inside a road loop with rounded corners. Three wide bays sit
+// side by side under the loop's bottom edge: a vehicle swings into its bay sideways, its stop drawn
+// along the bay's kerb. The riders' line, a conveyor, fills the bottom. An 8x10 lot keeps 76 px
+// cells. Nothing is drawn over Dreamina's two AI marks.
+const XL = 26, XR = 694, YT = 118, YB = 952;          // the road loop round the lot (centre lines)
+const AV = { x0: 56, x1: 664, y0: 150, y1: 912 };     // the box a lot may use
+const BAY_Y = 1028, BAY_X0 = 60, BAY_W = 600;          // where parked vehicles sit; the bays' span
+const DOOR_Y = 1062, DOOR_H = 26;                      // each stop, drawn along its bay's kerb
 const Q_ROW1 = 1150, Q_ROW2 = 1218, Q_FRONT_X = 516, Q_GAP = 42, Q_PER_ROW = 12; // riders' feet
 const BTN = { mute: [56, 12, 76, 72], menu: [142, 12, 76, 72], undo: [530, 12, 82, 72], restart: [624, 12, 82, 72] };
 // Stops in use now: the config's stops plus the free extra one once it is taken.
 const nGates = () => tune.gates + (state ? state.extra : 0);
-const bayXn = (slot, n) => 60 + (600 / n) * (slot + 0.5);
+const bayXn = (slot, n) => BAY_X0 + (BAY_W / n) * (slot + 0.5);
 const bayX = slot => bayXn(slot, nGates());
+const bayCellN = n => Math.min(tune.bay_cell, (BAY_W / n - 14) / (3 * tune.veh_fill)); // a big vehicle fits its bay
+const bayCell = () => bayCellN(nGates());
 function slotPos(k) {
   if (k < Q_PER_ROW) return [Q_FRONT_X - k * Q_GAP, Q_ROW1];
   if (k < Q_PER_ROW * 2) return [Q_FRONT_X - (Q_PER_ROW - 1) * Q_GAP + (k - Q_PER_ROW) * Q_GAP, Q_ROW2];
@@ -791,90 +841,153 @@ function slotPos(k) {
 
 // ---- The level dealer: build, then keep only what the solver can win -----------------------
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
-// One row of config.js's level_table per level: vehicles, colours, lot, big vehicles, covered,
-// and the bands its chain depth and trap count must fall in.
+// Sets of vehicles are plain numbers: bit i is vehicle i. Up to 52 vehicles fit exactly in a double
+// (dividing by a power of two is exact), so a level may hold more than 32-bit masks allow.
+const P2 = []; for (let i = 0; i <= 52; i++) P2.push(2 ** i);
+const bit = (m, i) => ((m / P2[i]) & 1) === 1;
+const fullMask = n => P2[n] - 1;
+// The tier of level L, by its place in its era (config.js tiers): 0 plain, 1 "صعبة", 2 "صعبة جداً".
+const tierOf = L => CONFIG.tiers[(L - 1) % ERA_LEVELS] | 0;
+const isHard = L => tierOf(L) > 0;
+// One row of config.js's level_table per level: vehicles (garage stock included), colours, lot,
+// big vehicles, covered, garages and their stock, and the bands its chain depth and traps must fall in.
 function levelSpec(L) {
   const T = CONFIG.level_table, r = T[clamp(L, 1, T.length) - 1];
-  const [n, colours, cols, rows, nBig, nHidden, minDepth, maxDepth, trapLo, trapHi] = r;
-  const plan = L === 1 ? 1 : L <= 3 ? 2 : L >= tune.tight_from ? tune.gates : tune.plan_gates;
-  return { L, cols, rows, n, colours, nBig, plan, minDepth, maxDepth, nHidden, trapLo, trapHi, hard: isHard(L) };
+  const [n, colours, cols, rows, nBig, nHidden, nGar, stock, minDepth, maxDepth, trapLo, trapHi] = r;
+  const plan = L === 1 ? 1 : L < tune.tight_from ? tune.plan_gates : tune.gates;
+  return { L, cols, rows, n, colours, nBig, nHidden, nGar, stock, plan, minDepth, maxDepth, trapLo, trapHi, tier: tierOf(L), hard: tierOf(L) > 0 };
 }
-// The last level of each era is meant to be harder, said openly before it starts.
-function isHard(L) { return L % tune.hard_every === 0; }
-// Each new vehicle is set down only where its own lane out is clear, so leaving in reverse order
-// always works: no vehicle can ever be locked in for good. A small one takes 1 cell, a big one 2.
+// Garages go down first: a garage cell, the two cells in front that its vehicles roll out onto (its
+// strip), and their way out to the lot's edge, crossing no other garage or strip. Then each ordinary
+// vehicle is set down only where its own lane out is clear of every vehicle already down and of every
+// garage and strip, so leaving in reverse order always works: no vehicle is ever locked in for good.
+// A small vehicle takes 2 cells and a big one 3; garage vehicles are small.
 function placeTaxis(sp) {
-  const { cols, rows, n, nBig } = sp;
-  const occ = new Int8Array(cols * rows).fill(-1), taxis = [];
-  let bigLeft = nBig, tries = 0;
-  while (taxis.length < n && tries < 1500) {
+  const { cols, rows, n, nBig, nGar, stock } = sp, N = cols * rows;
+  const occ = new Int16Array(N).fill(-1);   // an ordinary vehicle's id, or -2 - g on garage g's cell
+  const strip = new Int16Array(N).fill(-1); // the garage whose vehicles roll out onto this cell
+  const gLane = new Uint8Array(N);          // a garage vehicle's way out crosses this cell
+  const inLot = (c, r) => c >= 0 && r >= 0 && c < cols && r < rows;
+  const garages = [], taxis = [];
+  let tries = 0;
+  while (garages.length < nGar && tries < 800) {
     tries++;
-    const len = bigLeft > 0 && (n - taxis.length <= bigLeft || rng() < 0.45) ? 2 : 1;
+    const d = Math.floor(rng() * 4), [dx, dy] = DIRS[d], c = Math.floor(rng() * cols), r = Math.floor(rng() * rows);
+    const k0 = r * cols + c;
+    if (occ[k0] !== -1 || strip[k0] >= 0 || gLane[k0]) continue;
+    if (!inLot(c + 2 * dx, r + 2 * dy)) continue;
+    const k1 = (r + dy) * cols + c + dx, k2 = (r + 2 * dy) * cols + c + 2 * dx;
+    if (occ[k1] !== -1 || strip[k1] >= 0 || gLane[k1] || occ[k2] !== -1 || strip[k2] >= 0 || gLane[k2]) continue;
+    const lane = []; let ok = true;
+    for (let a = c + 3 * dx, b = r + 3 * dy; inLot(a, b); a += dx, b += dy) { const k = b * cols + a; if (occ[k] !== -1 || strip[k] >= 0) { ok = false; break; } lane.push(k); }
+    if (!ok) continue;
+    const g = garages.length;
+    occ[k0] = -2 - g; strip[k1] = g; strip[k2] = g; lane.forEach(k => { gLane[k] = 1; });
+    garages.push({ id: g, c, r, d, cell: k0, strip: [k2, k1], stack: [] });
+  }
+  if (garages.length < nGar) return null;
+  const nOrd = n - stock;
+  let bigLeft = nBig; tries = 0;
+  while (taxis.length < nOrd && tries < 5000) {
+    tries++;
+    const len = bigLeft > 0 && (nOrd - taxis.length <= bigLeft || rng() < 0.4) ? 3 : 2;
     const d = Math.floor(rng() * 4), [dx, dy] = DIRS[d];
     const hc = Math.floor(rng() * cols), hr = Math.floor(rng() * rows);
     let ok = true; const cells = [];
     for (let i = 0; i < len; i++) {
       const c = hc - dx * i, r = hr - dy * i;
-      if (c < 0 || r < 0 || c >= cols || r >= rows || occ[r * cols + c] >= 0) { ok = false; break; }
+      if (!inLot(c, r) || occ[r * cols + c] !== -1) { ok = false; break; }
       cells.push(r * cols + c);
     }
     if (!ok) continue;
-    for (let c = hc + dx, r = hr + dy; c >= 0 && r >= 0 && c < cols && r < rows; c += dx, r += dy) if (occ[r * cols + c] >= 0) { ok = false; break; }
+    for (let c = hc + dx, r = hr + dy; inLot(c, r); c += dx, r += dy) { const k = r * cols + c; if (occ[k] !== -1 || strip[k] >= 0) { ok = false; break; } }
     if (!ok) continue;
     const id = taxis.length;
     cells.forEach(k => { occ[k] = id; });
-    taxis.push({ id, hc, hr, d, len, cells });
-    if (len === 2) bigLeft--;
+    taxis.push({ id, hc, hr, d, len, cells, garage: -1, gpos: 0 });
+    if (len === 3) bigLeft--;
   }
-  if (taxis.length < n || bigLeft > 0) return null;
-  return { taxis, occ };
+  if (taxis.length < nOrd || bigLeft > 0) return null;
+  for (let k = 0; k < stock; k++) { // the garages' stock, shared out in turn
+    const g = garages[k % nGar], [dx, dy] = DIRS[g.d], id = taxis.length;
+    taxis.push({ id, hc: g.c + 2 * dx, hr: g.r + 2 * dy, d: g.d, len: 2, cells: g.strip.slice(), garage: g.id, gpos: g.stack.length });
+    g.stack.push(id);
+  }
+  return { taxis, occ, garages };
 }
-function computeBlock(taxis, cols, rows, occ) {
-  return taxis.map(cm => {
-    const [dx, dy] = DIRS[cm.d]; let m = 0;
-    for (let c = cm.hc + dx, r = cm.hr + dy; c >= 0 && r >= 0 && c < cols && r < rows; c += dx, r += dy) { const o = occ[r * cols + c]; if (o >= 0) m |= 1 << o; }
-    return m;
-  });
-}
-// Vehicles that share a cell edge: when one leaves, a covered neighbour's cover slides off.
-function neighbours(taxis, cols, rows, occ) {
-  return taxis.map(cm => {
-    let m = 0;
-    for (const k of cm.cells) {
+// Who can stand in whose way, worked out once per deal: the vehicles that can stand on each lane
+// (the cells ahead of a nose to the lot's edge); a garage vehicle's predecessor in its stack and the
+// ordinary vehicles parked on its strip; and, for covers, each ordinary vehicle's ordinary neighbours.
+function linkTaxis(taxis, cols, rows) {
+  const N = cols * rows, on = Array.from({ length: N }, () => []);
+  taxis.forEach(t => t.cells.forEach(k => on[k].push(t.id)));
+  for (const t of taxis) {
+    const [dx, dy] = DIRS[t.d], lane = new Set();
+    for (let c = t.hc + dx, r = t.hr + dy; c >= 0 && r >= 0 && c < cols && r < rows; c += dx, r += dy) for (const j of on[r * cols + c]) if (j !== t.id) lane.add(j);
+    t.laneOcc = [...lane];
+    t.pre = -1; t.stripOcc = [];
+    if (t.garage >= 0) {
+      const p = taxis.find(o => o.garage === t.garage && o.gpos === t.gpos - 1); if (p) t.pre = p.id;
+      for (const k of t.cells) for (const j of on[k]) if (taxis[j].garage < 0) t.stripOcc.push(j);
+    }
+    const nb = new Set();
+    if (t.garage < 0) for (const k of t.cells) {
       const c = k % cols, r = Math.floor(k / cols);
-      for (const [dx, dy] of DIRS) {
-        const c2 = c + dx, r2 = r + dy;
-        if (c2 < 0 || r2 < 0 || c2 >= cols || r2 >= rows) continue;
-        const o = occ[r2 * cols + c2]; if (o >= 0 && o !== cm.id) m |= 1 << o;
+      for (const [ex, ey] of DIRS) {
+        const c2 = c + ex, r2 = r + ey; if (c2 < 0 || r2 < 0 || c2 >= cols || r2 >= rows) continue;
+        for (const j of on[r2 * cols + c2]) if (j !== t.id && taxis[j].garage < 0) nb.add(j);
       }
     }
-    return m;
-  });
+    t.nbr = [...nb];
+  }
+  return on;
+}
+// On the lot: still there, and (a garage vehicle) rolled out: the one before it in its garage has
+// left and no ordinary vehicle stands on its strip.
+function onLot(lv, m, i) {
+  if (!bit(m, i)) return false;
+  const t = lv.taxis[i]; if (t.garage < 0) return true;
+  if (t.pre >= 0 && bit(m, t.pre)) return false;
+  for (const j of t.stripOcc) if (bit(m, j)) return false;
+  return true;
+}
+function canExit(lv, S, i) {
+  if (!onLot(lv, S.mask, i)) return false;
+  for (const j of lv.taxis[i].laneOcc) if (onLot(lv, S.mask, j)) return false;
+  return true;
 }
 // A covered vehicle is seen once any neighbour has left; the mask alone says which have.
-const isCovered = (lv, mask, i) => (lv.hidden >> i & 1) === 1 && !(lv.nbr[i] & ~mask);
-function depthOf(block, n) {
-  let mask = (1 << n) - 1, d = 0;
-  while (mask) {
-    let rm = 0;
-    for (let i = 0; i < n; i++) if ((mask >> i & 1) && !(block[i] & mask)) rm |= 1 << i;
+function isCovered(lv, m, i) {
+  if (!bit(lv.hidden, i)) return false;
+  for (const j of lv.taxis[i].nbr) if (!bit(m, j)) return false;
+  return true;
+}
+function depthOf(lv) {
+  const n = lv.taxis.length; let m = fullMask(n), d = 0;
+  while (m) {
+    const S = { mask: m }; let rm = 0;
+    for (let i = 0; i < n; i++) if (canExit(lv, S, i)) rm += P2[i];
     if (!rm) return 99;
-    mask &= ~rm; d++;
+    m -= rm; d++;
   }
   return d;
 }
-// The dealer's own way out: free vehicles in a random order, leaning towards ones that block others.
-function exitOrder(block, n) {
-  let mask = (1 << n) - 1; const order = [];
-  while (mask) {
-    const free = []; let tw = 0;
-    for (let i = 0; i < n; i++) if ((mask >> i & 1) && !(block[i] & mask)) {
-      let w = 1; for (let j = 0; j < n; j++) if ((mask >> j & 1) && (block[j] >> i & 1)) w += 2;
+// The dealer's own way out: free vehicles in a random order, leaning towards ones that block others
+// or keep a garage shut.
+function exitOrder(lv) {
+  const n = lv.taxis.length; let m = fullMask(n); const order = [];
+  while (m) {
+    const S = { mask: m }, free = []; let tw = 0;
+    for (let i = 0; i < n; i++) if (canExit(lv, S, i)) {
+      let w = 1;
+      for (let j = 0; j < n; j++) if (bit(m, j) && lv.taxis[j].laneOcc.includes(i)) w += 2;
+      for (const t of lv.taxis) if (bit(m, t.id) && (t.pre === i || t.stripOcc.includes(i))) w += 2;
       free.push([i, w]); tw += w;
     }
+    if (!free.length) return null;
     let r = rng() * tw, pick = free[0][0];
     for (const [i, w] of free) { r -= w; if (r <= 0) { pick = i; break; } }
-    order.push(pick); mask &= ~(1 << pick);
+    order.push(pick); m -= P2[pick];
   }
   return order;
 }
@@ -890,13 +1003,19 @@ function makeQueue(taxis, order, plan) {
   }
   return q;
 }
+// For the solver: the first place at or after qi where colour c waits (one lookup, not a scan).
+function nextColours(queue) {
+  const Q = queue.length, nx = new Int32Array((Q + 1) * 5).fill(Q);
+  for (let qi = Q - 1; qi >= 0; qi--) { for (let c = 0; c < 5; c++) nx[qi * 5 + c] = nx[(qi + 1) * 5 + c]; nx[qi * 5 + queue[qi]] = qi; }
+  return nx;
+}
 // One tap, as the rules say: the vehicle takes the first free stop, then the line boards until the
 // front rider fits no vehicle at the stops. Used by the game and by the solver alike.
 function applyTap(S, i, lv, evs) {
   const gates = S.gates.map(p => ({ id: p.id, fill: p.fill, slot: p.slot }));
   let slot = 0; while (gates.some(p => p.slot === slot)) slot++;
   gates.push({ id: i, fill: 0, slot });
-  let qi = S.qi; const mask = S.mask & ~(1 << i);
+  let qi = S.qi; const mask = S.mask - P2[i];
   if (evs) evs.push({ type: 'gate', id: i, slot });
   while (qi < lv.queue.length) {
     const c = lv.queue[qi];
@@ -909,25 +1028,42 @@ function applyTap(S, i, lv, evs) {
   }
   return { mask, gates, qi };
 }
-function canExit(lv, S, i) { return (S.mask >> i & 1) === 1 && !(lv.block[i] & S.mask); }
-// Depth-first search with a memo; returns a winning tap order or null. `dead`, when given, is a
-// set shared between searches of one level: states fully searched and found lost.
-function solve(lv, limit, start, dead) {
-  const n = lv.taxis.length, Q = lv.queue.length, NG = tune.gates;
+// Depth-first search with a memo; returns a winning tap order or null. `dead`, when given, is a set
+// shared between searches of one level: states fully searched and found lost. `hint`, when given, is
+// a tap order tried first at each step (the dealer's own way out): the search still checks every
+// tap against the rules, it only looks there first. Each state's vehicles are decoded once per node.
+function solve(lv, limit, start, dead, hint) {
+  const n = lv.taxis.length, Q = lv.queue.length, NG = tune.gates, nx = lv.nextCol, T = lv.taxis;
+  const pres = new Uint8Array(n), onl = new Uint8Array(n), hid = new Uint8Array(n);
+  for (let i = 0; i < n; i++) hid[i] = bit(lv.hidden, i) ? 1 : 0;
   const seen = new Set(), path = []; let nodes = 0;
-  const firstIdx = (qi, col) => { for (let k = qi; k < Q; k++) if (lv.queue[k] === col) return k; return Q; };
   function rec(S) {
     if (S.qi >= Q) return true;
     if (S.gates.length >= NG) return false;
     if (++nodes > limit) return false;
-    const key = S.mask + '|' + S.qi + '|' + S.gates.map(p => p.id + ':' + p.fill).join(',');
+    let key = S.mask + '|' + S.qi;
+    for (const p of S.gates) key += ',' + p.id + ':' + p.fill;
     if (seen.has(key) || (dead && dead.has(key))) return false;
     seen.add(key);
-    const cand = [];
-    // The proof never taps a covered vehicle: a win always exists without guessing.
-    for (let i = 0; i < n; i++) if (canExit(lv, S, i) && !isCovered(lv, S.mask, i)) cand.push([i, firstIdx(S.qi, lv.taxis[i].colour)]);
-    cand.sort((a, b) => a[1] - b[1]);
-    for (const [i] of cand) {
+    const m = S.mask;
+    for (let i = 0; i < n; i++) pres[i] = (m / P2[i]) & 1;
+    for (let i = 0; i < n; i++) {
+      let o = pres[i]; const t = T[i];
+      if (o && t.garage >= 0) { if (t.pre >= 0 && pres[t.pre]) o = 0; else for (const j of t.stripOcc) if (pres[j]) { o = 0; break; } }
+      onl[i] = o;
+    }
+    const cand = [], want = hint ? hint[path.length] : -1;
+    for (let i = 0; i < n; i++) {
+      if (!onl[i]) continue;
+      let free = true; for (const j of T[i].laneOcc) if (onl[j]) { free = false; break; }
+      if (!free) continue;
+      if (hid[i]) { let cov = true; for (const j of T[i].nbr) if (!pres[j]) { cov = false; break; } if (cov) continue; } // never a covered tap
+      cand.push(i === want ? -1 : nx[S.qi * 5 + T[i].colour], i);
+    }
+    const order = []; for (let k = 0; k < cand.length; k += 2) order.push(k);
+    order.sort((a, b) => cand[a] - cand[b]);
+    for (const k of order) {
+      const i = cand[k + 1];
       path.push(i);
       if (rec(applyTap(S, i, lv))) return true;
       path.pop();
@@ -936,7 +1072,7 @@ function solve(lv, limit, start, dead) {
     if (dead) dead.add(key); // every move from here was searched to the end and lost
     return false;
   }
-  const ok = rec(start || { mask: (1 << n) - 1, gates: [], qi: 0 });
+  const ok = rec(start || { mask: fullMask(n), gates: [], qi: 0 });
   return { ok, path: ok ? path.slice() : null, nodes };
 }
 function seatsMatch(lv) {
@@ -945,22 +1081,22 @@ function seatsMatch(lv) {
   lv.queue.forEach(c => { trav[c]++; });
   return seats.every((v, i) => v === trav[i]);
 }
-// Covered vehicles are chosen so the dealer's own way out sees each one before it is its turn:
-// some neighbour leaves earlier in that order.
-function pickHidden(order, nbr, k) {
+// Covered vehicles (ordinary ones only) are chosen so the dealer's own way out sees each one before
+// it is its turn: some neighbour leaves earlier in that order.
+function pickHidden(order, taxis, k) {
   if (k <= 0) return 0;
   const pos = []; order.forEach((id, j) => { pos[id] = j; });
-  const ok = order.filter(id => order.some(o => (nbr[id] >> o & 1) && pos[o] < pos[id]));
+  const ok = order.filter(id => taxis[id].garage < 0 && taxis[id].nbr.some(o => pos[o] < pos[id]));
   for (let i = ok.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [ok[i], ok[j]] = [ok[j], ok[i]]; }
-  let m = 0; ok.slice(0, k).forEach(id => { m |= 1 << id; });
+  let m = 0; ok.slice(0, k).forEach(id => { m += P2[id]; });
   return m;
 }
-// Traps: along the proven way out, the free (uncovered) taps after which the level can no
-// longer be won. More traps = more ways to go wrong = a harder level, measured, not guessed.
-// A search that runs out of budget counts as a trap; the whole count stops at tune.trap_nodes,
-// or as soon as it passes `cap` (the deal is then over its band anyway).
+const countBits = (m, n) => { let k = 0; for (let i = 0; i < n; i++) if (bit(m, i)) k++; return k; };
+// Traps: along the proven way out, the free (uncovered) taps after which the level can no longer be
+// won. More traps = more ways to go wrong = a harder level, measured, not guessed. A search that runs
+// out of budget counts as a trap; the count stops at tune.trap_nodes, or once it passes `cap`.
 function trapCount(lv, cap = Infinity) {
-  let S = { mask: (1 << lv.taxis.length) - 1, gates: [], qi: 0 }, n = 0, spent = 0;
+  let S = { mask: fullMask(lv.taxis.length), gates: [], qi: 0 }, n = 0, spent = 0;
   const dead = new Set();
   for (const m of lv.solution) {
     for (let i = 0; i < lv.taxis.length && spent < tune.trap_nodes; i++) {
@@ -975,31 +1111,46 @@ function trapCount(lv, cap = Infinity) {
   }
   return n;
 }
-// Every level is dealt until a solvable deal has its depth and trap count inside the level's
-// bands; a hard level compares several such deals and keeps the one with the most traps.
-// A deal depends only on the seed, the level and config.js, so each is dealt once and kept
-// (a restart is instant); the game never changes a dealt level.
+// Every level is dealt until a solvable deal has its depth and trap count inside the level's bands; a
+// "صعبة" level compares several such deals and keeps the one with the most traps, a "صعبة جداً" one
+// compares more. A deal depends only on the seed, the level and config.js, so each is dealt once and
+// kept (a restart is instant); the game never changes a dealt level.
 const dealCache = new Map();
 function dealLevel(L) {
   const key = L + '|' + (Number(params.get('seed')) || CONFIG.seed) + '|' + JSON.stringify(CONFIG);
   if (dealCache.has(key)) return dealCache.get(key);
   const lv = dealFresh(L); dealCache.set(key, lv); return lv;
 }
-// Each attempt has its own seed (game seed, level, attempt number), so any one deal can be made
-// again on its own. config.js's deal_bookmarks hold, for the shipped seed, the attempt where this
-// scan ends: the game deals that attempt first and keeps it if it still fits its bands (the same
-// deal the whole scan would end on); otherwise (other seed, changed config) it scans from 0.
+// Each attempt has its own seed (game seed, level, attempt number), so any one deal can be made again
+// on its own. config.js's deal_bookmarks hold, for the shipped seed, the attempt where the full scan
+// ends: the game deals that attempt first and keeps it if it still fits its bands (the very deal the
+// scan would end on); otherwise (another seed, a changed value) it scans from 0.
 const seedFor = (base, L, a) => (Math.imul(base, 7919) + Math.imul(L, 104729) + Math.imul(a + 1, 0x9E3779B1 | 0)) | 0;
+// A short fingerprint of a deal: where every vehicle stands, its colour and the whole line.
+function dealHash(lv) {
+  let h = 2166136261;
+  const add = v => { h ^= v & 255; h = Math.imul(h, 16777619); h ^= (v >> 8) & 255; h = Math.imul(h, 16777619); };
+  for (const t of lv.taxis) { add(t.hc); add(t.hr); add(t.d); add(t.len); add(t.colour); add(t.garage + 1); }
+  for (const c of lv.queue) add(c);
+  for (let i = 0; i < lv.taxis.length; i++) add(bit(lv.hidden, i) ? 1 : 0);
+  return (h >>> 0).toString(36);
+}
 function trapsOff(lv, base) { return lv.traps < base.trapLo ? base.trapLo - lv.traps : lv.traps > base.trapHi ? lv.traps - base.trapHi : 0; }
 function dealFresh(L, noBookmark) {
-  const base = levelSpec(L), want = base.hard ? Math.max(1, tune.hard_candidates) : 1;
+  const t0 = clock.now(), base = levelSpec(L);
+  const want = base.tier === 2 ? Math.max(1, tune.super_candidates) : base.tier === 1 ? Math.max(1, tune.hard_candidates) : 1;
   const s0 = Number(params.get('seed')) || CONFIG.seed, marks = CONFIG.deal_bookmarks || [];
   let best = null, found = 0, tried = 0, near = null, nearD = 1e9, fromMark = false;
-  const k = marks[L - 1];
+  const mk = marks[L - 1], k = Array.isArray(mk) ? mk[0] : mk;
   if (!noBookmark && s0 === CONFIG.seed && k != null) {
     seed = seedFor(s0, L, k);
     const lv = dealOnce(L, base);
-    if (lv) { lv.traps = trapCount(lv, base.trapHi); if (!trapsOff(lv, base)) { best = lv; lv.attempt = k; found = 1; tried = k + 1; fromMark = true; } }
+    if (lv) {
+      // the very deal the offline proof measured (same hash): its trap count is taken from there,
+      // so the phone never recounts; any other deal is counted here
+      lv.traps = Array.isArray(mk) && mk[2] === dealHash(lv) ? mk[1] : trapCount(lv, base.trapHi);
+      if (!trapsOff(lv, base)) { best = lv; lv.attempt = k; found = 1; tried = k + 1; fromMark = true; }
+    }
   }
   for (let attempt = 0; !best || (!fromMark && found < want); attempt++) {
     if (fromMark || attempt >= tune.deal_attempts) break;
@@ -1015,53 +1166,107 @@ function dealFresh(L, noBookmark) {
   const outOfBand = !best;
   if (!best) best = near; // never a dead end: the nearest solvable deal (the proof shows this never happens as shipped)
   if (!best) throw new Error('dealer found no solvable level ' + L);
-  best.attempts = tried; best.candidates = found; best.hard = base.hard; best.outOfBand = outOfBand; best.fromBookmark = fromMark;
+  best.attempts = tried; best.candidates = found; best.tier = base.tier; best.hard = base.hard; best.outOfBand = outOfBand; best.fromBookmark = fromMark;
   const cell = Math.min((AV.x1 - AV.x0) / best.cols, (AV.y1 - AV.y0) / best.rows, tune.cell_max);
   best.geo = { cell, gx: (AV.x0 + AV.x1) / 2 - cell * best.cols / 2, gy: (AV.y0 + AV.y1) / 2 - cell * best.rows / 2 };
-  let nh = 0; for (let i = 0; i < best.taxis.length; i++) if (best.hidden >> i & 1) nh++;
-  events.push({ type: 'dealt', level: L, era: eraOf(L) + 1, taxis: best.taxis.length, shuttles: best.taxis.filter(c => c.len === 2).length, colours: best.colours, lot: best.cols + 'x' + best.rows, travellers: best.queue.length, depth: best.depth, attempts: tried, attempt: best.attempt, bookmark: fromMark, solverNodes: best.solverNodes, hard: base.hard, candidates: found, traps: best.traps, hidden: nh, outOfBand });
+  best.dealMs = (clock.now() - t0) * 1000;
+  events.push({ type: 'dealt', level: L, era: eraOf(L) + 1, taxis: best.taxis.length, big: best.taxis.filter(c => c.len === 3).length, garages: best.garages.length, stock: best.taxis.filter(c => c.garage >= 0).length, colours: best.colours, lot: best.cols + 'x' + best.rows, travellers: best.queue.length, depth: best.depth, attempts: tried, attempt: best.attempt, bookmark: fromMark, solverNodes: best.solverNodes, tier: base.tier, candidates: found, traps: best.traps, hidden: countBits(best.hidden, best.taxis.length), outOfBand, ms: Math.round(best.dealMs) });
   return best;
 }
 function dealOnce(L, sp) {
   const g = placeTaxis(sp); if (!g) return null;
-  const block = computeBlock(g.taxis, sp.cols, sp.rows, g.occ);
-  const depth = depthOf(block, sp.n);
+  const on = linkTaxis(g.taxis, sp.cols, sp.rows);
+  const lv = { L, cols: sp.cols, rows: sp.rows, taxis: g.taxis, garages: g.garages, occ: Array.from(g.occ), on, colours: sp.colours, hidden: 0 };
+  const depth = depthOf(lv);
   if (depth < sp.minDepth || depth > sp.maxDepth) return null;
-  if (L === 2 && block.filter(b => b).length !== 1) return null; // level 2 teaches one block
+  lv.depth = depth;
   const list = []; for (let i = 0; i < sp.n; i++) list.push(i % sp.colours);
   for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
-  g.taxis.forEach((c, i) => { c.colour = list[i]; c.seats = c.len === 2 ? tune.seats_big : tune.seats_small; });
-  const order = exitOrder(block, sp.n);
-  const queue = makeQueue(g.taxis, order, sp.plan);
-  const nbr = neighbours(g.taxis, sp.cols, sp.rows, g.occ);
-  const hidden = pickHidden(order, nbr, sp.nHidden);
-  const lv = { L, cols: sp.cols, rows: sp.rows, taxis: g.taxis, occ: Array.from(g.occ), block, queue, depth, colours: sp.colours, nbr, hidden };
+  g.taxis.forEach((c, i) => { c.colour = list[i]; c.seats = c.len === 3 ? tune.seats_big : tune.seats_small; });
+  const order = exitOrder(lv); if (!order) return null;
+  lv.queue = makeQueue(g.taxis, order, sp.plan);
+  lv.nextCol = nextColours(lv.queue);
+  lv.hidden = pickHidden(order, g.taxis, sp.nHidden);
   if (!seatsMatch(lv)) return null;
-  let nh = 0; for (let i = 0; i < sp.n; i++) if (hidden >> i & 1) nh++;
-  if (nh < sp.nHidden) return null; // the row's covered count, exactly
+  if (countBits(lv.hidden, sp.n) < sp.nHidden) return null; // the row's covered count, exactly
   // Never a level whose first move must be a guess: some free vehicle is uncovered at the start.
-  const full = (1 << sp.n) - 1;
-  if (hidden && !g.taxis.some(c => !(block[c.id] & full) && !isCovered(lv, full, c.id))) return null;
-  const res = solve(lv, tune.solver_nodes);
+  const S0 = { mask: fullMask(sp.n) };
+  if (lv.hidden && !g.taxis.some(c => canExit(lv, S0, c.id) && !isCovered(lv, S0.mask, c.id))) return null;
+  const res = solve(lv, tune.solver_nodes, null, null, order);
   if (!res.ok) return null;
   lv.solution = res.path; lv.solverNodes = res.nodes;
   return lv;
 }
 
-// ---- Paths: out along the lane, round the lanes, down to a stop ------------------------------
-function mkPath(pts) {
-  const P = [pts[0]];
-  for (let i = 1; i < pts.length; i++) { const a = P[P.length - 1], b = pts[i]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.5) P.push(b); }
-  const cum = [0];
-  for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
-  return { pts: P, cum, total: cum[cum.length - 1] };
+// ---- Paths: every trip is a curve, built once when it starts and sampled every 3 px -------------
+// Waypoints along the road loop with their corners rounded (quadratic Béziers), then one cubic
+// Bézier swinging into the bay, resampled to equal steps of arc length so a pose is one lookup.
+const PATH_DS = 3;
+function curvePath(P, end, extra) {
+  const raw = [P[0][0], P[0][1]];
+  let cut = 0;
+  for (let i = 1; i < P.length; i++) {
+    const A = P[i - 1], B = P[i];
+    if (i === P.length - 1) { raw.push(B[0], B[1]); break; }
+    const C = P[i + 1], l1 = Math.hypot(B[0] - A[0], B[1] - A[1]), l2 = Math.hypot(C[0] - B[0], C[1] - B[1]);
+    if (l1 < 0.01 || l2 < 0.01) continue;
+    const ax = (B[0] - A[0]) / l1, ay = (B[1] - A[1]) / l1, bx = (C[0] - B[0]) / l2, by = (C[1] - B[1]) / l2;
+    if (Math.abs(ax * by - ay * bx) < 1e-3 && ax * bx + ay * by > 0) { cut = 0; continue; } // straight on
+    const r = Math.max(0, Math.min(tune.corner_r, l1 - cut, i === P.length - 2 && !end ? l2 / 2 : i === P.length - 2 ? l2 * 0.95 : l2 / 2));
+    const px = B[0] - ax * r, py = B[1] - ay * r, qx = B[0] + bx * r, qy = B[1] + by * r;
+    raw.push(px, py);
+    for (let k = 1; k <= 10; k++) { const u = k / 10, a = (1 - u) * (1 - u), b = 2 * (1 - u) * u, c = u * u; raw.push(a * px + b * B[0] + c * qx, a * py + b * B[1] + c * qy); }
+    cut = r;
+  }
+  if (end) { // a cubic from the last waypoint along its heading, arriving along end.ang
+    const n = P.length, A = P[n - 1], B0 = P[n - 2], l = Math.hypot(A[0] - B0[0], A[1] - B0[1]) || 1;
+    const ux = (A[0] - B0[0]) / l, uy = (A[1] - B0[1]) / l, ex = Math.cos(end.ang), ey = Math.sin(end.ang);
+    const p1x = A[0] + ux * end.k1, p1y = A[1] + uy * end.k1, p2x = end.x - ex * end.k2, p2y = end.y - ey * end.k2;
+    for (let k = 1; k <= 28; k++) {
+      const u = k / 28, v = 1 - u, a = v * v * v, b = 3 * v * v * u, c = 3 * v * u * u, d = u * u * u;
+      raw.push(a * A[0] + b * p1x + c * p2x + d * end.x, a * A[1] + b * p1y + c * p2y + d * end.y);
+    }
+  }
+  if (extra) for (const [x, y] of extra) raw.push(x, y);
+  return resample(raw);
 }
-function pathAt(p, s) {
-  const n = p.pts.length; if (n === 1) return p.pts[0].slice();
-  let i = 0;
-  if (s >= p.total) i = n - 2; else if (s > 0) while (i < n - 2 && p.cum[i + 1] < s) i++;
-  const a = p.pts[i], b = p.pts[i + 1], u = (s - p.cum[i]) / Math.max(0.001, p.cum[i + 1] - p.cum[i]);
-  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+function resample(raw) {
+  const n = raw.length / 2, cum = new Float64Array(n);
+  for (let i = 1; i < n; i++) cum[i] = cum[i - 1] + Math.hypot(raw[2 * i] - raw[2 * i - 2], raw[2 * i + 1] - raw[2 * i - 1]);
+  const total = cum[n - 1], m = Math.max(2, Math.ceil(total / PATH_DS) + 1);
+  const xs = new Float32Array(m), ys = new Float32Array(m);
+  let j = 0;
+  for (let k = 0; k < m; k++) {
+    const s = Math.min(total, k * PATH_DS);
+    while (j < n - 2 && cum[j + 1] < s) j++;
+    const seg = n > 1 ? cum[j + 1] - cum[j] : 0, u = seg > 1e-9 ? (s - cum[j]) / seg : 0;
+    xs[k] = raw[2 * j] + ((n > 1 ? raw[2 * j + 2] : raw[2 * j]) - raw[2 * j]) * u;
+    ys[k] = raw[2 * j + 1] + ((n > 1 ? raw[2 * j + 3] : raw[2 * j + 1]) - raw[2 * j + 1]) * u;
+  }
+  return { xs, ys, m, total };
+}
+const PT_A = [0, 0], PT_B = [0, 0]; // scratch points: poses allocate nothing per frame
+function pathAt(p, s, out) {
+  const last = p.m - 1;
+  if (s <= 0 || s >= p.total) { // past an end: straight on along the first or last step
+    const k = s <= 0 ? 0 : last - 1, dx = p.xs[k + 1] - p.xs[k], dy = p.ys[k + 1] - p.ys[k], l = Math.hypot(dx, dy) || 1;
+    const o = s <= 0 ? s : s - p.total, bx = s <= 0 ? p.xs[0] : p.xs[last], by = s <= 0 ? p.ys[0] : p.ys[last];
+    out[0] = bx + dx / l * o; out[1] = by + dy / l * o; return out;
+  }
+  const k = Math.min(last - 1, Math.floor(s / PATH_DS)), seg = k + 1 === last ? p.total - k * PATH_DS : PATH_DS;
+  const u = seg > 1e-9 ? (s - k * PATH_DS) / seg : 0;
+  out[0] = p.xs[k] + (p.xs[k + 1] - p.xs[k]) * u; out[1] = p.ys[k] + (p.ys[k + 1] - p.ys[k]) * u;
+  return out;
+}
+// A vehicle's speed over a trip: it speeds up, cruises and brakes (a trapezoid of speed), so it never
+// starts or stops with a jerk. a = the share of the trip spent speeding up (and again braking).
+function travel(u, a = tune.trip_ease, brake = true) {
+  u = clamp(u, 0, 1);
+  if (!brake) { const v = 1 / (1 - a / 2); return u < a ? v * u * u / (2 * a) : v * (u - a / 2); }
+  const v = 1 / (1 - a);
+  if (u < a) return v * u * u / (2 * a);
+  if (u > 1 - a) return 1 - v * (1 - u) * (1 - u) / (2 * a);
+  return v * (u - a / 2);
 }
 function gridGeom(i) {
   const lv = state.lv, cm = lv.taxis[i], g = lv.geo, [dx, dy] = DIRS[cm.d];
@@ -1069,17 +1274,44 @@ function gridGeom(i) {
   const fx = hx + dx * g.cell / 2, fy = hy + dy * g.cell / 2, L = cm.len * g.cell;
   return { fx, fy, cx: fx - dx * L / 2, cy: fy - dy * L / 2, ang: Math.atan2(dy, dx), dx, dy, L };
 }
-function glidePath(i, slot) {
-  const lv = state.lv, cm = lv.taxis[i], q = gridGeom(i);
-  const pts = [[q.fx - q.dx * q.L, q.fy - q.dy * q.L], [q.fx, q.fy]];
-  if (cm.d === 2) pts.push([q.fx, YB]);
-  else if (cm.d === 1) pts.push([XR, q.fy], [XR, YB]);
-  else if (cm.d === 3) pts.push([XL, q.fy], [XL, YB]);
-  else { const sx = q.fx < W / 2 ? XL : XR; pts.push([q.fx, YT], [sx, YT], [sx, YB]); }
-  const bx = bayX(slot);
-  pts.push([bx, YB], [bx, BAY_HEAD]);
-  const path = mkPath(pts);
-  return { path, s0: q.L, sExit: path.cum[Math.min(2, path.cum.length - 1)] };
+// The trip from the lot to bay `slot`: out along the lane to the road, round the loop on the shorter
+// side, along the bottom road, then a smooth S into the bay, parked sideways facing the way it was
+// going. A vehicle whose lane points down near its bay swings straight in.
+function tripPath(i, slot, n) {
+  const lv = state.lv, cm = lv.taxis[i], q = gridGeom(i), g = lv.geo, bc = bayCellN(n);
+  const bx = bayXn(slot, n), D = tune.approach;
+  const P = [[q.fx - q.dx * q.L, q.fy - q.dy * q.L], [q.fx, q.fy]];
+  const lotB = g.gy + lv.rows * g.cell;
+  let dir, k1, k2, nx;
+  if (cm.d === 2) {
+    dir = bx > q.fx + 1 ? 1 : bx < q.fx - 1 ? -1 : (slot < n / 2 ? 1 : -1);
+    nx = bx + dir * cm.len * bc / 2;
+    if (Math.abs(nx - q.fx) < D + 40) { // straight down into the bay
+      const y0 = Math.max(q.fy, lotB) + 8; P.push([q.fx, y0]);
+      k1 = 0.5 * (BAY_Y - y0); k2 = Math.max(60, 0.6 * Math.abs(nx - q.fx));
+    } else { dir = Math.sign(nx - q.fx); nx = bx + dir * cm.len * bc / 2; P.push([q.fx, YB], [nx - dir * D, YB]); k1 = k2 = D * 0.5; }
+  } else {
+    const side = cm.d === 1 ? XR : cm.d === 3 ? XL : ((q.fx - XL) + Math.abs(bx - XL) <= (XR - q.fx) + Math.abs(XR - bx) ? XL : XR);
+    if (cm.d === 0) P.push([q.fx, YT], [side, YT]); else P.push([side, q.fy]);
+    dir = side === XL ? 1 : -1; nx = bx + dir * cm.len * bc / 2;
+    const qx = nx - dir * D;
+    if ((qx - side) * dir < tune.corner_r + 30) { // the bay is by the corner: one swoop off the side road
+      const y0 = Math.max(P[P.length - 1][1] + 30, YB - 60); P.push([side, y0]);
+      k1 = 0.5 * (BAY_Y - y0); k2 = Math.max(60, 0.6 * Math.abs(nx - side));
+    } else { P.push([side, YB], [qx, YB]); k1 = k2 = D * 0.5; }
+  }
+  const path = curvePath(P, { x: nx, y: BAY_Y, ang: dir > 0 ? 0 : Math.PI, k1, k2 });
+  const ahead = cm.d === 0 ? q.fy - g.gy : cm.d === 1 ? g.gx + lv.cols * g.cell - q.fx : cm.d === 2 ? lotB - q.fy : q.fx - g.gx;
+  return { path, s0: q.L, sExit: q.L + ahead, dir, bc, len: cm.len, gc: g.cell };
+}
+// After boarding, a ground vehicle pulls forward with a hard turn up onto the bottom road and drives
+// along it off the screen; an air taxi climbs away along its own curve.
+function leavePath(i, fly) {
+  const v = state.vc[i], cm = state.lv.taxis[i], p = parkPose(i), dir = v.dir, bc = p.cell;
+  const nose = [p.x + dir * cm.len * bc / 2, p.y], P = [[nose[0] - dir * cm.len * bc, nose[1]], nose];
+  if (fly) return curvePath(P, { x: nose[0] + dir * 140, y: -260, ang: -Math.PI / 2, k1: 170, k2: 420 });
+  const ex = nose[0] + dir * 116;
+  return curvePath(P, { x: ex, y: YB, ang: dir > 0 ? 0 : Math.PI, k1: 34, k2: 58 }, [[dir > 0 ? W + 260 : -260, YB]]);
 }
 const moveSpeed = e => ERAS[e].move === 'walk' ? tune.speed_walk : ERAS[e].move === 'drive' ? tune.speed_drive : tune.glide_speed;
 
@@ -1093,23 +1325,27 @@ function reset() { // ?level=N starts on that level (a tester's shortcut, like ?
   const want = Math.floor(Number(params.get('level')) || 0);
   startLevel(want >= 1 ? Math.min(want, tune.levels) : nextLevel());
 }
-function startLevel(L) {
+function startLevel(L, again) {
   requestEra(eraOf(L));
-  const lv = dealLevel(L);
+  const lv = dealLevel(L), n = lv.taxis.length;
   state = {
     t: 0, score: totalStars(), gained: '', level: L, lv,
-    S: { mask: (1 << lv.taxis.length) - 1, gates: [], qi: 0 },
+    S: { mask: fullMask(n), gates: [], qi: 0 },
     hist: [], undos: tune.undos, undosUsed: 0, pending: '', stars: 0,
-    vc: [], tr: [], qv: 0, lastBoard: -9, gateFree: [], busyUntil: 0,
-    fx: [], parts: [], msg: '', msgT: -9, flashGatesT: -9, blockLine: null,
+    vc: [], tr: [], moves: [], qv: 0, lastBoard: -9, gateFree: [], busyUntil: 0,
+    fx: [], msg: '', msgT: -9, flashGatesT: -9, blockLine: null,
     cursor: -1, kbd: false, tapped: false, bannerT: 0, won: false, winT: 0, prevBest: 0, hint: -1,
     extra: 0, extraLeft: tune.extra_gates, extraT: -9, // the free extra stop
-    revealed: ((1 << lv.taxis.length) - 1) & ~lv.hidden, // vehicles whose colour has been seen (only grows)
+    revealed: fullMask(n) - lv.hidden, // vehicles whose colour has been seen (only grows)
     counted: false, firstTry: false, // an attempt is logged from its first vehicle tap
+    anger: 0, angryHit: false, calmT: 0, grumbleAt: 0, // the line's patience (riders get cross when vehicles are late)
+    combo: 0, lastFullT: -9, belt: 0,
+    warn: tierOf(L) === 2 && !again ? 1 : 0, // the red "صعبة جداً" banner before a very hard level
   };
   uiEra = eraOf(L);
   settle();
-  const free = lv.taxis.filter(c => canExit(lv, state.S, c.id));
+  if (state.warn) { sfx.warn(); events.push({ type: 'warn', level: L }); }
+  const free = lv.taxis.filter(c => canExit(lv, state.S, c.id) && !isCovered(lv, state.S.mask, c.id));
   const want = free.find(c => c.colour === lv.queue[0]) || free[0];
   state.cursor = want ? want.id : 0; // the keyboard cursor starts where the hint points
   state.hint = want ? want.id : -1;
@@ -1118,119 +1354,150 @@ function startLevel(L) {
 // Rebuild the picture from the rules state at once (start, undo, restart).
 function settle() {
   const lv = state.lv, S = state.S, t = state.t;
-  state.vc = lv.taxis.map(() => ({ walk: null, leave: null, slot: -1, parked: false, gone: false, fillBase: 0, shakeT: -9, flashT: -9, revealT: -9 }));
-  lv.taxis.forEach((c, i) => { if (!(S.mask >> i & 1)) state.vc[i].gone = true; });
-  S.gates.forEach(p => { const v = state.vc[p.id]; v.gone = false; v.parked = true; v.slot = p.slot; v.fillBase = p.fill; });
+  state.vc = lv.taxis.map(() => ({ trip: null, leave: null, slot: -1, parked: false, gone: false, fillBase: 0, dir: 1,
+    shakeT: -9, flashT: -9, revealT: -9, arriveT: -9, squashT: -9, fullT: -9, rollT: -9 }));
+  lv.taxis.forEach((c, i) => { const v = state.vc[i]; if (!bit(S.mask, i)) v.gone = true; else if (!onLot(lv, S.mask, i)) v.rollT = Infinity; });
+  S.gates.forEach(p => { const v = state.vc[p.id]; v.gone = false; v.parked = true; v.slot = p.slot; v.fillBase = p.fill; v.dir = bayX(p.slot) < W / 2 ? 1 : -1; });
   state.tr = lv.queue.map((col, k) => ({ col, x: null, y: null, startT: null, endT: null, taxi: -1, seat: 0, done: k < S.qi, fx0: 0, fy0: 0 }));
-  state.qv = S.qi;
+  state.qv = S.qi; state.moves = [];
   for (let k = S.qi; k < Math.min(lv.queue.length, S.qi + 26); k++) { const p = slotPos(k - S.qi); state.tr[k].x = p[0]; state.tr[k].y = p[1]; }
-  state.lastBoard = t - 1; state.gateFree = new Array(nGates()).fill(t - 1); state.busyUntil = t; state.fx = [];
+  state.lastBoard = t - 1; state.gateFree = new Array(nGates() + 1).fill(t - 1); state.busyUntil = t; state.fx = [];
+  clearParts();
 }
-// Seconds after a full air taxi starts flying until it has climbed `target` px (eased in).
-function flyTimeTo(L, target) {
-  for (let u = 0; u <= 1.0001; u += 0.01) if (L.dist * easeIn(u) >= target) return u * L.flyDur;
-  return L.flyDur;
+// ---- Scheduling a tap's moves: trips, boarding hops, celebrations and departures ---------------
+// Every move is planned when its tap happens, as a timed curve. Before it is accepted it is checked
+// against every move already planned (trips and departures alike) and starts later until the two
+// never touch: vehicles on the road queue, they never drive through each other.
+function moveSeg(mv, tau, out) { // a planned move's body (tail to nose) and half width at time tau
+  const u = (tau - mv.t0) / (mv.t1 - mv.t0);
+  let s, cell;
+  if (mv.kind === 'trip') {
+    s = mv.s0 + (mv.path.total - mv.s0) * travel(u);
+    cell = s <= mv.sExit ? mv.gc : lerp(mv.gc, mv.bc, clamp((s - mv.sExit) / 170, 0, 1));
+  } else { s = mv.s0 + (mv.path.total - mv.s0) * travel(u, 0.4, false); cell = mv.bc; }
+  const a = pathAt(mv.path, s - mv.len * cell, PT_A), b = pathAt(mv.path, s, PT_B);
+  out.ax = a[0]; out.ay = a[1]; out.bx = b[0]; out.by = b[1]; out.hw = cell * 0.44; out.onLot = mv.kind === 'trip' && s - mv.len * cell < mv.sExit;
+  return out;
 }
-function schedule(evs) {
-  const t = state.t, lv = state.lv, e = eraOf(state.level), fly = ERAS[e].move === 'fly';
-  for (const ev of evs) {
-    const v = state.vc[ev.id], cm = lv.taxis[ev.id];
-    if (ev.type === 'gate') {
-      const w = glidePath(ev.id, ev.slot), d = Math.max(0.5, w.path.total / moveSpeed(e));
-      const t0 = clearGlideStart(ev.id, w, d, Math.max(t + d, state.gateFree[ev.slot] + 0.05) - d), t1 = t0 + d;
-      v.walk = Object.assign(w, { t0, t1 }); v.slot = ev.slot;
-      revealAround(ev.id, t0);
-      state.fx.push({ t: t1, k: 'dock', id: ev.id });
-      state.busyUntil = Math.max(state.busyUntil, t1);
-    } else if (ev.type === 'board') {
-      const tr = state.tr[ev.qi];
-      const arrive = v.walk ? v.walk.t1 : t;
-      tr.startT = Math.max(state.lastBoard + tune.board_interval, arrive, t);
-      tr.endT = tr.startT + tune.board_flight; tr.taxi = ev.id; tr.seat = ev.seat;
-      state.lastBoard = tr.startT; v.lastBoardEnd = tr.endT;
-      state.fx.push({ t: tr.endT, k: 'board', id: ev.id, seat: ev.seat });
-      state.busyUntil = Math.max(state.busyUntil, tr.endT);
-    } else if (ev.type === 'depart') {
-      const t0 = Math.max(v.lastBoardEnd || t, t) + tune.depart_delay;
-      if (fly) { // spin up, rise and turn to face the city, then fly off the top of the screen
-        const y0 = BAY_HEAD - cm.len * tune.bay_cell / 2, dist = y0 + 300;
-        v.leave = { t0, dist, flyDur: Math.max(0.6, dist / tune.fly_speed) };
-        const tLift = t0 + tune.spin_time, tFly = tLift + tune.rise_time;
-        state.gateFree[ev.slot] = tFly + flyTimeTo(v.leave, 200);
-        state.fx.push({ t: t0, k: 'spin' }, { t: tLift, k: 'lift', id: ev.id });
-        state.busyUntil = Math.max(state.busyUntil, tFly + flyTimeTo(v.leave, Math.min(dist, 650)));
-      } else { // ready (engine rev, a shake of the head), then out through the stop
-        const go = t0 + tune.rev_time;
-        v.leave = { t0, go, dur: tune.leave_time, ground: true };
-        state.gateFree[ev.slot] = go + tune.leave_time * 0.75;
-        state.fx.push({ t: go, k: 'go', id: ev.id });
-        state.busyUntil = Math.max(state.busyUntil, go + tune.leave_time);
-      }
-    }
-  }
-}
-// ---- Queueing: vehicles on the lanes wait so they never drive through each other ---------------
-// A vehicle's body as a segment (tail to nose) and its half width, at time tau of its move.
-function glideSeg(i, w, tau) {
-  const lv = state.lv, cm = lv.taxis[i], gc = lv.geo.cell, bc = tune.bay_cell;
-  const u = clamp((tau - w.t0) / (w.t1 - w.t0), 0, 1), s = w.s0 + (w.path.total - w.s0) * easeInOut(u);
-  const cell = s <= w.sExit ? gc : lerp(gc, bc, clamp((s - w.sExit) / 170, 0, 1));
-  return { a: pathAt(w.path, s - cm.len * cell), b: pathAt(w.path, s), hw: cell * 0.4, onPad: s - cm.len * cell < w.sExit };
-}
-function gridSeg(i) {
+function gridSegOf(i, out) {
   const q = gridGeom(i), c = state.lv.geo.cell;
-  return { a: [q.fx - q.dx * q.L, q.fy - q.dy * q.L], b: [q.fx, q.fy], hw: c * 0.4 };
+  out.ax = q.fx - q.dx * q.L; out.ay = q.fy - q.dy * q.L; out.bx = q.fx; out.by = q.fy; out.hw = c * 0.44;
+  return out;
 }
-function segDist(p, q, r, s) { // shortest distance between segments pq and rs
-  const d = (a, b, c) => { const vx = b[0] - a[0], vy = b[1] - a[1], l = vx * vx + vy * vy || 1, u = clamp(((c[0] - a[0]) * vx + (c[1] - a[1]) * vy) / l, 0, 1); return Math.hypot(c[0] - a[0] - vx * u, c[1] - a[1] - vy * u); };
-  const o = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
-  if (o(p, q, r) * o(p, q, s) < 0 && o(r, s, p) * o(r, s, q) < 0) return 0;
-  return Math.min(d(p, q, r), d(p, q, s), d(r, s, p), d(r, s, q));
+function segDist(ax, ay, bx, by, cx, cy, dx, dy) { // shortest distance between segments ab and cd
+  const d = (px, py, qx, qy, rx, ry) => { const vx = qx - px, vy = qy - py, l = vx * vx + vy * vy || 1, u = clamp(((rx - px) * vx + (ry - py) * vy) / l, 0, 1); return Math.hypot(rx - px - vx * u, ry - py - vy * u); };
+  const o = (px, py, qx, qy, rx, ry) => Math.sign((qx - px) * (ry - py) - (qy - py) * (rx - px));
+  if (o(ax, ay, bx, by, cx, cy) * o(ax, ay, bx, by, dx, dy) < 0 && o(cx, cy, dx, dy, ax, ay) * o(cx, cy, dx, dy, bx, by) < 0) return 0;
+  return Math.min(d(ax, ay, bx, by, cx, cy), d(ax, ay, bx, by, dx, dy), d(cx, cy, dx, dy, ax, ay), d(cx, cy, dx, dy, bx, by));
 }
-// The earliest start from t0 at which vehicle i's move never touches another vehicle moving to the
-// stops, or (while i is still on its own cells) one waiting on its cell for its turn.
-function clearGlideStart(i, w, d, t0) {
-  const others = state.vc.map((v, j) => j).filter(j => j !== i && state.vc[j].walk && state.vc[j].walk.t1 > t0);
+const SEG_A = {}, SEG_B = {};
+// The earliest start from t0 at which move mv never touches another planned move, or (while mv's
+// vehicle is still on its own cells) a vehicle waiting on its cell for its turn.
+function clearStart(mv, t0) {
+  const d = mv.t1 - mv.t0, others = state.moves.filter(o => o !== mv && o.t1 > t0 && o.kind !== 'fly');
   if (!others.length) return t0;
   const hit = start => {
-    const me = Object.assign({}, w, { t0: start, t1: start + d });
+    mv.t0 = start; mv.t1 = start + d;
     for (let tau = start; tau <= start + d + 1e-6; tau += 1 / 40) {
-      const A = glideSeg(i, me, tau);
-      for (const j of others) {
-        const wj = state.vc[j].walk; if (tau >= wj.t1 || (tau < wj.t0 && !A.onPad)) continue;
-        const B = tau < wj.t0 ? gridSeg(j) : glideSeg(j, wj, tau);
-        if (segDist(A.a, A.b, B.a, B.b) < A.hw + B.hw + tune.fly_gap) return true;
+      const A = moveSeg(mv, tau, SEG_A);
+      for (const o of others) {
+        if (tau >= o.t1) continue;
+        let B;
+        if (tau < o.t0) { if (!(A.onLot && o.kind === 'trip')) continue; B = gridSegOf(o.id, SEG_B); }
+        else B = moveSeg(o, tau, SEG_B);
+        if (segDist(A.ax, A.ay, A.bx, A.by, B.ax, B.ay, B.bx, B.by) < A.hw + B.hw + tune.fly_gap) return true;
       }
     }
     return false;
   };
-  for (let k = 0; k < 400 && hit(t0); k++) t0 += 1 / 30;
+  // coarse steps first, then back in fine steps while still clear (a tap stays cheap on a phone)
+  const base = t0;
+  for (let k = 0; k < 140 && hit(t0); k++) t0 += 0.1;
+  for (let j = 0; j < 2 && t0 - 1 / 30 >= base && !hit(t0 - 1 / 30); j++) t0 -= 1 / 30;
+  mv.t0 = t0; mv.t1 = t0 + d;
   return t0;
+}
+function schedule(evs) {
+  const t = state.t, lv = state.lv, e = eraOf(state.level), fly = ERAS[e].move === 'fly', NG = nGates();
+  for (const ev of evs) {
+    const v = state.vc[ev.id], cm = lv.taxis[ev.id];
+    if (ev.type === 'gate') {
+      const w = tripPath(ev.id, ev.slot, NG), d = Math.max(0.6, w.path.total / moveSpeed(e) + 0.25);
+      const mv = Object.assign(w, { kind: 'trip', id: ev.id, t0: 0, t1: d });
+      const early = Math.max(t, v.rollT > -9 && v.rollT < Infinity ? v.rollT + tune.roll_time : t);
+      clearStart(mv, Math.max(early, state.gateFree[ev.slot] + 0.05 - d));
+      state.moves.push(mv);
+      v.trip = mv; v.slot = ev.slot; v.dir = w.dir;
+      revealAround(ev.id, mv.t0);
+      state.fx.push({ t: mv.t0, k: 'depart-lot', id: ev.id }, { t: mv.t1, k: 'dock', id: ev.id });
+      state.busyUntil = Math.max(state.busyUntil, mv.t1);
+    } else if (ev.type === 'board') {
+      const tr = state.tr[ev.qi], arrive = v.trip ? v.trip.t1 + 0.12 : t;
+      tr.startT = Math.max(state.lastBoard + tune.board_interval, arrive, t);
+      tr.endT = tr.startT + tune.board_flight; tr.taxi = ev.id; tr.seat = ev.seat;
+      state.lastBoard = tr.startT; v.lastBoardEnd = tr.endT;
+      state.fx.push({ t: tr.endT, k: 'board', id: ev.id, seat: ev.seat, full: ev.seat + 1 >= cm.seats });
+      state.busyUntil = Math.max(state.busyUntil, tr.endT);
+    } else if (ev.type === 'depart') {
+      const t0 = Math.max(v.lastBoardEnd || t, t) + tune.depart_delay;
+      if (fly) { // spin up, rise and climb away along its own curve, over everything
+        const tLift = t0 + tune.spin_time, tFly = tLift + tune.rise_time, path = leavePath(ev.id, true);
+        const flyDur = Math.max(0.7, path.total / tune.fly_speed);
+        v.leave = { kind: 'fly', t0, tLift, tFly, path, flyDur, s0: cm.len * parkPose(ev.id).cell };
+        state.gateFree[ev.slot] = tFly + 0.35;
+        state.fx.push({ t: t0, k: 'spin' }, { t: tLift, k: 'lift', id: ev.id });
+        state.busyUntil = Math.max(state.busyUntil, tFly + 0.6);
+      } else { // a bounce of joy, then out along the road (later if the road is busy)
+        const path = leavePath(ev.id, false), bc = parkPose(ev.id).cell, d = Math.max(0.5, path.total / tune.leave_speed);
+        const mv = { kind: 'leave', id: ev.id, path, s0: cm.len * bc, len: cm.len, bc, t0: 0, t1: d };
+        const go = clearStart(mv, t0 + tune.celebrate_time);
+        state.moves.push(mv);
+        v.leave = { kind: 'ground', t0, go, mv };
+        state.gateFree[ev.slot] = go + Math.min(d, 0.5);
+        state.fx.push({ t: go, k: 'go', id: ev.id });
+        state.busyUntil = Math.max(state.busyUntil, go + Math.min(d, 0.6));
+      }
+    }
+  }
+  // drop moves long finished, so the checks stay short
+  state.moves = state.moves.filter(m => m.t1 > t - 0.5);
 }
 // When vehicle i leaves, covered neighbours show their colour as it starts to move.
 function revealAround(i, when) {
   const lv = state.lv;
-  if (!(state.revealed >> i & 1)) { state.revealed |= 1 << i; state.vc[i].revealT = state.t; }
-  for (let h = 0; h < lv.taxis.length; h++) {
-    if ((lv.nbr[i] >> h & 1) && !(state.revealed >> h & 1)) { state.revealed |= 1 << h; state.vc[h].revealT = when + 0.05; events.push({ type: 'reveal', id: h }); }
+  if (!bit(state.revealed, i)) { state.revealed += P2[i]; state.vc[i].revealT = state.t; }
+  for (const h of lv.taxis[i].nbr) {
+    if (!bit(state.revealed, h)) { state.revealed += P2[h]; state.vc[h].revealT = when + 0.05; events.push({ type: 'reveal', id: h }); }
   }
 }
 function coverOf(i) { // 1 covered, 0 open; in between while the cover slides off
-  if (!(state.lv.hidden >> i & 1)) return 0;
-  if (!(state.revealed >> i & 1)) return 1;
+  if (!bit(state.lv.hidden, i)) return 0;
+  if (!bit(state.revealed, i)) return 1;
   return clamp(1 - (state.t - state.vc[i].revealT) / tune.reveal_time, 0, 1);
+}
+// Garage vehicles that the last tap let out roll onto their strip once the way is clear.
+function rollOut(before) {
+  const lv = state.lv, S = state.S;
+  for (const t of lv.taxis) {
+    if (t.garage < 0 || !bit(S.mask, t.id) || onLot(lv, before, t.id) || !onLot(lv, S.mask, t.id)) continue;
+    let when = state.t;
+    for (const j of [t.pre, ...t.stripOcc]) if (j >= 0 && state.vc[j].trip) when = Math.max(when, state.vc[j].trip.t0 + 0.42);
+    state.vc[t.id].rollT = when;
+    state.fx.push({ t: when, k: 'roll', id: t.id });
+    events.push({ type: 'garage-out', id: t.id, garage: t.garage });
+  }
 }
 function toast(s) { state.msg = s; state.msgT = state.t; }
 function doTap(i) {
   const lv = state.lv, S = state.S;
-  if (!(S.mask >> i & 1) || state.pending) return;
+  if (!onLot(lv, S.mask, i) || state.pending) return;
   state.tapped = true; state.hint = -1;
-  if (lv.block[i] & S.mask) { // blocked: shake it, flash the vehicle in the way
+  if (!canExit(lv, S, i)) { // blocked: shake it, flash the vehicle in the way
     const v = state.vc[i]; v.shakeT = state.t;
     const cm = lv.taxis[i], [dx, dy] = DIRS[cm.d];
     for (let c = cm.hc + dx, r = cm.hr + dy; c >= 0 && r >= 0 && c < lv.cols && r < lv.rows; c += dx, r += dy) {
-      const o = lv.occ[r * lv.cols + c];
-      if (o >= 0 && (S.mask >> o & 1)) {
+      const o = lv.on[r * lv.cols + c].find(j => onLot(lv, S.mask, j));
+      if (o != null) {
         state.vc[o].flashT = state.t;
         const q = gridGeom(i), g = lv.geo;
         state.blockLine = { x0: q.fx, y0: q.fy, x1: g.gx + (c + 0.5) * g.cell, y1: g.gy + (r + 0.5) * g.cell, t: state.t };
@@ -1249,6 +1516,8 @@ function doTap(i) {
   const evs = [];
   state.S = applyTap(S, i, lv, evs);
   schedule(evs);
+  rollOut(S.mask);
+  state.lastTapT = state.t;
   sfx.tap(eraOf(state.level)); events.push({ type: 'tap', id: i });
   const S2 = state.S;
   if (S2.qi >= lv.queue.length) state.pending = 'win';
@@ -1261,7 +1530,7 @@ function takeExtra() {
   state.extra++; state.extraLeft--; state.extraT = state.t; state.gateFree.push(state.t - 1);
   state.pending = ''; scene = 'play'; bgKey = '';
   const r = logRec(state.level); r.extraGates = (r.extraGates || 0) + 1; logSave();
-  sfx.dock(); tone(988, 0.12, 'triangle', 0.2, 0.08); toast('موقف إضافي: هدية مجانية');
+  sfx.dock(eraNow()); tone(988, 0.12, 'triangle', 0.2, 0.08); toast('موقف إضافي: هدية مجانية');
   events.push({ type: 'extra', level: state.level });
   return true;
 }
@@ -1270,13 +1539,14 @@ function doUndo() {
   if (state.undos <= 0) { toast('انتهت مرات التراجع'); return false; }
   state.S = JSON.parse(state.hist.pop()); state.undos--; state.undosUsed++;
   { const r = logRec(state.level); r.undos++; logSave(); }
-  state.pending = ''; state.parts = []; settle(); sfx.undo(); events.push({ type: 'undo' });
+  state.pending = ''; settle(); sfx.undo(); events.push({ type: 'undo' });
   scene = 'play'; return true;
 }
-function doRestart() { const L = state.level; startLevel(L); state.tapped = true; state.hint = -1; scene = 'play'; sfx.ui(); events.push({ type: 'restart', level: L }); }
+function doRestart() { const L = state.level; startLevel(L, true); state.tapped = true; state.hint = -1; scene = 'play'; sfx.ui(); events.push({ type: 'restart', level: L }); }
 function finishLevel() {
   const L = state.level;
-  const stars = state.undosUsed === 0 ? 3 : state.undosUsed <= 2 ? 2 : 1;
+  let stars = state.undosUsed === 0 ? 3 : state.undosUsed <= 2 ? 2 : 1;
+  if (state.angryHit) stars = Math.max(1, stars - 1); // the line lost its patience: one star less, never a loss
   state.stars = stars; state.prevBest = save.stars[L - 1] || 0;
   save.stars[L - 1] = Math.max(state.prevBest, stars);
   save.unlocked = Math.max(save.unlocked || 1, Math.min(tune.levels, L + 1));
@@ -1285,11 +1555,12 @@ function finishLevel() {
   if (L % ERA_LEVELS === 0 && L < tune.levels) requestEra(eraOf(L + 1)); // the next era's art starts now
   state.score = totalStars(); state.gained = `المرحلة ${L}: ${stars} نجوم`;
   const r = logRec(L); r.wins++; if (state.firstTry) r.firstTryWin = 1;
+  if (state.angryHit) r.angry = (r.angry || 0) + 1;
   const secs = Math.round(state.t * 10) / 10; if (r.bestTime == null || secs < r.bestTime) r.bestTime = secs;
   logSave();
   state.won = true; scene = 'results'; sfx.win();
-  for (let k = 0; k < 40; k++) state.parts.push({ x: W / 2, y: 470, vx: (rng() - 0.5) * 700, vy: -rng() * 600 - 100, r: 5 + rng() * 6, life: 1.6, max: 1.6, col: PAL[k % 5].base, g: 700 });
-  events.push({ type: 'win', level: L, stars });
+  for (let k = 0; k < 40; k++) spawn(0, W / 2, 470, (rng() - 0.5) * 700, -rng() * 600 - 100, 5 + rng() * 6, 1.6, PAL[k % 5].base, 700, false);
+  events.push({ type: 'win', level: L, stars, angry: state.angryHit });
 }
 function openEra(e) { uiEra = e; requestEra(e); const L = nextLevel(); eraSel = eraOf(L) === e ? (L - 1) % ERA_LEVELS : 0; scene = 'era'; sfx.ui(); }
 function openUnlock(e, L) {
@@ -1303,21 +1574,14 @@ function playLevel(L) { // from a menu: a new era's first visit shows its "ان�
 }
 
 // ---- Poses: where each vehicle is drawn right now --------------------------------------------
-// phase: grid (on its cell), glide (moving to a stop), park (at a stop), leave (going away).
+// phase: grid (on its cells), trip (on its way to a stop), park (at a stop), leave (going away).
+// A pose may also carry sq (squash along and across), alt (an air taxi's height), gait or breath.
 function taxiPose(i) {
-  const lv = state.lv, cm = lv.taxis[i], v = state.vc[i], t = state.t, bc = tune.bay_cell, gc = lv.geo.cell;
-  if (v.leave && t >= v.leave.t0) return v.leave.ground ? drivePose(i) : liftPose(i);
-  if (v.walk) {
-    if (t < v.walk.t0) return gridPose(i);
-    if (t < v.walk.t1) {
-      const u = (t - v.walk.t0) / (v.walk.t1 - v.walk.t0);
-      const s = v.walk.s0 + (v.walk.path.total - v.walk.s0) * easeInOut(u);
-      const cell = s <= v.walk.sExit ? gc : lerp(gc, bc, clamp((s - v.walk.sExit) / 170, 0, 1));
-      const p = trainPose(v.walk.path, s, cm.len, cell, 'glide');
-      if (ERAS[eraNow()].move === 'fly') { p.alt = tune.hover_alt * Math.min(1, u * 7, (1 - u) * 7); p.rotor = 1; }
-      else p.gait = s;
-      return p;
-    }
+  const v = state.vc[i], t = state.t;
+  if (v.leave && t >= v.leave.t0) return leavePose(i);
+  if (v.trip) {
+    if (t < v.trip.t0) return gridPose(i);
+    if (t < v.trip.t1) return tripPose(i);
     return parkPose(i);
   }
   if (v.gone) return null;
@@ -1325,58 +1589,132 @@ function taxiPose(i) {
   return gridPose(i);
 }
 function trainPose(path, s, len, cell, phase) {
-  const h = pathAt(path, s), tl = pathAt(path, s - len * cell);
-  return { x: (h[0] + tl[0]) / 2, y: (h[1] + tl[1]) / 2, ang: Math.atan2(h[1] - tl[1], h[0] - tl[0]), cell, phase, alt: 0, rotor: 0 };
+  const h = pathAt(path, s, PT_A), hx = h[0], hy = h[1], tl = pathAt(path, s - len * cell, PT_B);
+  return { x: (hx + tl[0]) / 2, y: (hy + tl[1]) / 2, ang: Math.atan2(hy - tl[1], hx - tl[0]), cell, phase, alt: 0, rotor: 0, sqA: 1, sqC: 1 };
+}
+function tripPose(i) {
+  const w = state.vc[i].trip, u = (state.t - w.t0) / (w.t1 - w.t0);
+  const s = w.s0 + (w.path.total - w.s0) * travel(u);
+  const cell = s <= w.sExit ? w.gc : lerp(w.gc, w.bc, clamp((s - w.sExit) / 170, 0, 1));
+  const p = trainPose(w.path, s, w.len, cell, 'trip');
+  if (ERAS[eraNow()].move === 'fly') { p.alt = tune.hover_alt * Math.min(1, u * 7, (1 - u) * 7); p.rotor = 1; }
+  else p.gait = s;
+  p.u = u;
+  return p;
 }
 function parkPose(i) {
-  const cm = state.lv.taxis[i], bc = tune.bay_cell, slot = state.vc[i].slot;
-  let bx = bayX(slot);
-  const ue = (state.t - state.extraT) / 0.45; // the bays make room for the extra stop: parked vehicles slide over
-  if (state.extra && ue < 1) bx = lerp(bayXn(slot, nGates() - 1), bx, easeInOut(clamp(ue, 0, 1)));
-  return { x: bx, y: BAY_HEAD - cm.len * bc / 2, ang: Math.PI / 2, cell: bc, phase: 'park', alt: 0, rotor: 0 };
+  const cm = state.lv.taxis[i], v = state.vc[i], t = state.t, slot = v.slot;
+  let bx = bayX(slot), bc = bayCell();
+  const ue = (t - state.extraT) / 0.45; // the bays make room for the extra stop: parked vehicles slide over
+  if (state.extra && ue < 1) { const k = easeInOut(clamp(ue, 0, 1)); bx = lerp(bayXn(slot, nGates() - 1), bx, k); bc = lerp(bayCellN(nGates() - 1), bc, k); }
+  const p = { x: bx, y: BAY_Y, ang: v.dir > 0 ? 0 : Math.PI, cell: bc, phase: 'park', alt: 0, rotor: 0, sqA: 1, sqC: 1 };
+  const ua = (t - v.arriveT) / tune.bump_time; // arrival: a squash and a little bump forward against the kerb
+  if (ua >= 0 && ua < 1) { const k = Math.sin(ua * Math.PI) * (1 - ua); p.x += v.dir * 5 * k; p.sqA = 1 - 0.12 * k; p.sqC = 1 + 0.1 * k; }
+  const ub = (t - v.squashT) / 0.16; // each rider who lands squashes it a little
+  if (ub >= 0 && ub < 1) { const k = Math.sin(ub * Math.PI); p.sqA *= 1 - tune.squash * k; p.sqC *= 1 + tune.squash * 1.2 * k; }
+  return p;
 }
-function liftPose(i) { // air taxis: spin up, rise and turn, fly off the top
-  const v = state.vc[i], L = v.leave, base = parkPose(i), u = state.t - L.t0;
-  base.phase = 'leave';
-  if (u < tune.spin_time) { base.rotor = clamp(u / tune.spin_time, 0.2, 1); return base; } // rotors spin up
-  const r = u - tune.spin_time, dir = base.x < W / 2 ? -1 : 1;
-  if (r < tune.rise_time) { // rises (grows, shadow shrinks) and turns to face the city
-    const k = easeInOut(r / tune.rise_time);
-    return { x: base.x, y: base.y - k * 24, ang: Math.PI / 2 + dir * k * Math.PI, cell: base.cell, phase: 'leave', alt: k * 0.55, rotor: 1 };
+function leavePose(i) {
+  const v = state.vc[i], L = v.leave, t = state.t, cm = state.lv.taxis[i];
+  if (L.kind === 'fly') { // spin up, rise and turn, then climb away along the curve
+    const base = parkPose(i); base.phase = 'leave';
+    if (t < L.tLift) { base.rotor = clamp((t - L.t0) / tune.spin_time, 0.2, 1); return base; }
+    if (t < L.tFly) { const k = easeInOut((t - L.tLift) / tune.rise_time); base.alt = k * 0.5; base.rotor = 1; base.y -= k * 18; return base; }
+    const f = (t - L.tFly) / L.flyDur; if (f >= 1) return null;
+    const s = L.s0 + (L.path.total - L.s0) * travel(f, 0.5, false);
+    const p = trainPose(L.path, s, cm.len, base.cell, 'leave'); p.y -= 18; p.alt = 0.5 + 0.8 * f; p.rotor = 1;
+    return p;
   }
-  const f = r - tune.rise_time; if (f >= L.flyDur) return null;
-  const e = easeIn(f / L.flyDur), s = e * L.dist;
-  return { x: base.x + (W / 2 - base.x) * 0.3 * e, y: base.y - 24 - s, ang: Math.PI / 2 + dir * Math.PI, cell: base.cell, phase: 'leave', alt: 0.55 + 0.7 * e, rotor: 1 };
-}
-function drivePose(i) { // ground vehicles: ready, then out through the stop (clipped there)
-  const v = state.vc[i], L = v.leave, base = parkPose(i), t = state.t, cm = state.lv.taxis[i];
-  base.phase = 'leave'; base.clip = true;
-  if (t < L.go) { const u = t - L.t0; base.gait = u * 120; base.x += Math.sin(u * 70) * (ERAS[eraNow()].move === 'drive' ? 0.9 : 0); return base; }
-  const u = (t - L.go) / L.dur; if (u >= 1) return null;
-  const d = easeIn(u) * (50 + cm.len * base.cell);
-  base.y += d; base.gait = 40 + d; base.alpha = 1 - clamp((u - 0.55) / 0.45, 0, 1);
-  return base;
+  if (t < L.go) { // a bounce of joy at the stop
+    const p = parkPose(i), u = t - L.t0, k = Math.abs(Math.sin(u * 15)) * Math.max(0, 1 - u * 1.6);
+    p.sqA = 1 + 0.07 * k; p.sqC = 1 + 0.07 * k; p.gait = u * 120; p.phase = 'leave';
+    if (ERAS[eraNow()].move === 'drive') p.x += Math.sin(u * 70) * 0.8;
+    return p;
+  }
+  const mv = L.mv, u = (t - mv.t0) / (mv.t1 - mv.t0); if (u >= 1) return null;
+  const s = mv.s0 + (mv.path.total - mv.s0) * travel(u, 0.4, false);
+  const p = trainPose(mv.path, s, cm.len, mv.bc, 'leave'); p.gait = s;
+  return p;
 }
 function gridPose(i) {
-  const q = gridGeom(i), v = state.vc[i], t = state.t;
+  const q = gridGeom(i), v = state.vc[i], t = state.t, c = state.lv.geo.cell;
+  if (t < v.rollT) return null; // still inside its garage
   let off = 0;
-  if (t - v.shakeT < 0.4) off = Math.sin((t - v.shakeT) * 45) * state.lv.geo.cell * 0.07 * (1 - (t - v.shakeT) / 0.4);
-  return { x: q.cx + q.dx * off, y: q.cy + q.dy * off, ang: q.ang, cell: state.lv.geo.cell, phase: 'grid', alt: 0, rotor: 0 };
+  if (t - v.shakeT < 0.4) off = Math.sin((t - v.shakeT) * 45) * c * 0.07 * (1 - (t - v.shakeT) / 0.4);
+  const p = { x: q.cx + q.dx * off, y: q.cy + q.dy * off, ang: q.ang, cell: c, phase: 'grid', alt: 0, rotor: 0, sqA: 1, sqC: 1 };
+  const ur = (t - v.rollT) / tune.roll_time;
+  if (ur >= 0 && ur < 1) { // rolling out of its garage onto the strip
+    const g = state.lv.geo, gar = state.lv.garages[state.lv.taxis[i].garage];
+    const gx = g.gx + (gar.c + 0.5) * c, gy = g.gy + (gar.r + 0.5) * c, k = easeOut(ur);
+    p.x = lerp(gx, p.x, k); p.y = lerp(gy, p.y, k); p.sqA = p.sqC = lerp(0.5, 1, k) * (1 + 0.08 * Math.sin(ur * Math.PI)); p.alpha = clamp(ur * 3, 0, 1); p.rolling = true;
+  }
+  return p;
 }
-function seatWorld(i, k) {
-  const cm = state.lv.taxis[i], p = parkPose(i), [sx, sy] = seatLocal(cm.len, p.cell, k);
-  return [p.x - sy, p.y + sx];
+// Seat k of n on a sprite h long and w wide: two columns, rows spread over the kind's seat zone.
+// Written into out as [along the facing, across] in px from the middle.
+const SEAT = [0, 0];
+function seatAt(h, w, K, k, n, out = SEAT) {
+  const rows = Math.max(1, Math.ceil(n / 2)), r = Math.floor(k / 2), single = n % 2 === 1 && k === n - 1;
+  out[0] = h * (0.5 - (K.zone[0] + (K.zone[1] - K.zone[0]) * (r + 0.5) / rows));
+  out[1] = single ? 0 : (k % 2 ? 1 : -1) * w * K.across;
+  return out;
+}
+function seatRadiusOf(h, w, K, n, c) { return clamp(Math.min(h * (K.zone[1] - K.zone[0]) / Math.max(1, Math.ceil(n / 2)), 2 * w * K.across) * 0.42, 3, c * 0.13); }
+function seatWorld(i, k, out = PT_A) {
+  const cm = state.lv.taxis[i], p = parkPose(i), { h, w, K } = vehSize(cm.len, p.cell, 0, eraNow()), sl = seatAt(h, w, K, k, cm.seats), a = sl[0], b = sl[1];
+  const ca = Math.cos(p.ang), sa = Math.sin(p.ang);
+  out[0] = p.x + ca * a - sa * b; out[1] = p.y + sa * a + ca * b;
+  return out;
 }
 
+
+// ---- Particles: one fixed pool, reused, so effects never make garbage frame after frame ------------
+// kind 0 a dot (col), 1 a puff (rgb, grows), 2 a ring (rgb, grows), 3 a spark streak (col).
+const PARTS = []; for (let k = 0; k < 280; k++) PARTS.push({ life: 0, max: 1, kind: 0, x: 0, y: 0, vx: 0, vy: 0, r: 0, grow: 0, g: 0, a: 1, col: '#fff', rgb: '255,255,255', under: false });
+let partNext = 0;
+function spawn(kind, x, y, vx, vy, r, life, col, g = 0, under = false, grow = 0, a = 1) {
+  const p = PARTS[partNext]; partNext = (partNext + 1) % PARTS.length;
+  p.kind = kind; p.x = x; p.y = y; p.vx = vx; p.vy = vy; p.r = r; p.life = life; p.max = life; p.g = g; p.under = under; p.grow = grow; p.a = a;
+  if (kind === 1 || kind === 2) p.rgb = col; else p.col = col;
+  return p;
+}
+function clearParts() { for (const p of PARTS) p.life = 0; if (state) state.floats = []; }
+function stepParts(dt) {
+  for (const p of PARTS) {
+    if (p.life <= 0) continue;
+    p.life -= dt; if (p.kind === 2) continue;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 1 - dt * 2; if (!p.g) p.vy *= 1 - dt * 2;
+  }
+}
+function drawParts(under) {
+  for (const p of PARTS) {
+    if (p.life <= 0 || p.under !== under) continue;
+    const u = 1 - p.life / p.max, a = clamp(p.life / p.max, 0, 1) * p.a;
+    if (p.kind === 2) { const r = p.r + p.grow * u; ctx.strokeStyle = `rgba(${p.rgb},${a})`; ctx.lineWidth = 1 + 4 * (1 - u); ell(p.x, p.y, r, r * 0.8); ctx.stroke(); }
+    else if (p.kind === 1) { const r = p.r + p.grow * u; ctx.fillStyle = `rgba(${p.rgb},${a * (1 - u * 0.4)})`; ell(p.x, p.y, r, r); ctx.fill(); }
+    else if (p.kind === 3) { ctx.globalAlpha = a; ctx.strokeStyle = p.col; ctx.lineWidth = p.r; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 0.04, p.y - p.vy * 0.04); ctx.stroke(); ctx.globalAlpha = 1; }
+    else { ctx.globalAlpha = a; ctx.fillStyle = p.col; ell(p.x, p.y, p.r, p.r); ctx.fill(); ctx.globalAlpha = 1; }
+  }
+}
+function puff(x, y, k, rgb) { spawn(1, x + (rng() - 0.5) * 8, y + (rng() - 0.5) * 8, (rng() - 0.5) * 40, (rng() - 0.5) * 40, 4 * k, 0.6, rgb, 0, true, 14 * k, 0.55); }
+function floater(text, x, y, size, col, life = 0.8, rise = 60) { state.floats.push({ text, x, y, size, col, t0: state.t, life, rise }); }
+
 // ---- Backgrounds painted once into a cached canvas -----------------------------------------------
+function roadLoop(c2) { rrect(XL, YT, XR - XL, YB - YT, tune.corner_r); }
 function paintBackground(lv, e) {
   const E = ERAS[e], S = E.lot;
   ctx.fillStyle = E.base; ctx.fillRect(0, 0, W, H);
   if (okImg(E.bgImg)) ctx.drawImage(E.bgImg, 0, 0, W, H);
   if (!lv) return;
-  // the lanes: a dashed loop round the lot
-  ctx.setLineDash(S.dash ? [10, 12] : [22, 16]); ctx.strokeStyle = S.lane; ctx.lineWidth = S.dash ? 3 : 4;
-  ctx.beginPath(); ctx.moveTo(XL, YB); ctx.lineTo(XL, YT); ctx.lineTo(XR, YT); ctx.lineTo(XR, YB); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+  // the road: a loop round the lot, and the bottom road running on off both sides of the screen
+  ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
+  const strokeRoad = (wid, col, dash) => {
+    ctx.strokeStyle = col; ctx.lineWidth = wid; ctx.setLineDash(dash || []);
+    roadLoop(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-20, YB); ctx.lineTo(W + 20, YB); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  strokeRoad(66, S.roadEdge); strokeRoad(58, S.road); strokeRoad(3, S.roadDash, S.dash ? [10, 14] : [22, 16]);
   // the lot: a darker mat so every colour reads, cells outlined in the era's paint
   const g = lv.geo, c = g.cell;
   ctx.fillStyle = 'rgba(0,0,0,0.18)'; rrect(g.gx - 8, g.gy - 6, c * lv.cols + 20, c * lv.rows + 20, 16); ctx.fill();
@@ -1389,25 +1727,39 @@ function paintBackground(lv, e) {
     ctx.strokeStyle = S.cellEdge; ctx.lineWidth = 1.5; ctx.stroke();
     if (E.move === 'fly') { ctx.strokeStyle = 'rgba(100,225,255,0.13)'; ell(x + c / 2, y + c / 2, c * 0.3, c * 0.3); ctx.stroke(); }
   }
-  // bays above the stops, with chevrons pointing to them
-  const NG = nGates(), bw = 600 / NG;
+  // each garage's strip: a painted driveway with two arrows pointing out of the garage
+  for (const gar of lv.garages) {
+    const [dx, dy] = DIRS[gar.d];
+    for (const k of gar.strip) {
+      const x = g.gx + (k % lv.cols + 0.5) * c, y = g.gy + (Math.floor(k / lv.cols) + 0.5) * c;
+      ctx.strokeStyle = `rgba(${E.accent},0.55)`; ctx.lineWidth = 3; ctx.setLineDash([7, 6]);
+      rrect(x - c * 0.44, y - c * 0.44, c * 0.88, c * 0.88, c * 0.12); ctx.stroke(); ctx.setLineDash([]);
+      const px = -dy, py = dx, s = c * 0.16;
+      ctx.strokeStyle = `rgba(${E.accent},0.6)`; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x - dx * s + px * s, y - dy * s + py * s); ctx.lineTo(x + dx * s * 0.6, y + dy * s * 0.6); ctx.lineTo(x - dx * s - px * s, y - dy * s - py * s); ctx.stroke();
+    }
+  }
+  // the bays under the road, wide and painted
+  const NG = nGates(), bw = BAY_W / NG;
   for (let i = 0; i < NG; i++) {
-    const x0 = 60 + bw * i, cx = x0 + bw / 2;
-    rrect(x0 + 10, BAY_TOP, bw - 20, BAY_HEAD - BAY_TOP + 4, 14);
+    const x0 = BAY_X0 + bw * i;
+    rrect(x0 + 7, BAY_Y - 38, bw - 14, 76, 14);
     ctx.fillStyle = S.bay; ctx.fill();
     if (S.dash) ctx.setLineDash([8, 7]);
     ctx.strokeStyle = S.bayEdge; ctx.lineWidth = S.dash ? 2 : 3; ctx.stroke(); ctx.setLineDash([]);
-    ctx.strokeStyle = S.bayEdge; ctx.globalAlpha = 0.6; ctx.lineWidth = 3; ctx.lineCap = 'round';
-    for (let k = 0; k < 2; k++) { const y = BAY_TOP + 16 + k * 14; ctx.beginPath(); ctx.moveTo(cx - 12, y); ctx.lineTo(cx, y + 9); ctx.lineTo(cx + 12, y); ctx.stroke(); }
-    ctx.globalAlpha = 1;
   }
-  // the floor where the line waits: two light strips (dark hair stands out on them)
+  // the conveyor where the line waits: two belts (dark hair reads on their light top)
   for (const [y0, y1] of [[Q_ROW1 - 64, Q_ROW1 + 4], [Q_ROW2 - 62, Q_ROW2 + 6]]) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(24, y0 - 2, 520, y1 - y0 + 8, 18); ctx.fill();
     rrect(28, y0, 512, y1 - y0, 16);
     if (E.move === 'fly') { ctx.fillStyle = 'rgba(10,18,34,0.45)'; ctx.fill(); }
     ctx.fillStyle = S.floor; ctx.fill();
     ctx.strokeStyle = S.floorEdge; ctx.lineWidth = 2; ctx.stroke();
+    for (const ex of [36, 532]) { ctx.fillStyle = S.floorEdge; ell(ex, (y0 + y1) / 2, 7, (y1 - y0) / 2 - 6); ctx.fill(); } // the rollers at each end
   }
+  // the turn between the two belts (left) and the head of the line by the stops (right)
+  ctx.strokeStyle = S.floorEdge; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(28, (Q_ROW1 + Q_ROW2) / 2 - 30, 34, Math.PI * 0.5, Math.PI * 1.5); ctx.stroke();
 }
 function paintTitleBg() {
   ctx.fillStyle = '#1a1438'; ctx.fillRect(0, 0, W, H);
@@ -1445,10 +1797,10 @@ function drawLoading(e) {
 }
 
 // ---- Drawing the play scene ----------------------------------------------------------------
-function poseExtras(i, p, S) { // what a vehicle on its cell does while it waits
+function poseExtras(i, p, S) { // what a vehicle on its cells does while it waits
   const v = state.vc[i], t = state.t, mv = ERAS[eraNow()].move;
-  if (p.phase !== 'grid') return;
-  if (v.walk && t < v.walk.t0) { p.waiting = true; if (mv === 'fly') { p.rotor = 1; p.alt = 0.05; } else if (mv === 'walk') p.gait = t * 90; return; }
+  if (p.phase !== 'grid' || p.rolling) return;
+  if (v.trip && t < v.trip.t0) { p.waiting = true; if (mv === 'fly') { p.rotor = 1; p.alt = 0.05; } else if (mv === 'walk') p.gait = t * 90; return; }
   if (canExit(state.lv, S, i) && !state.pending) { // free to go: rotors turn, animals breathe, engines idle (exhaust)
     if (mv === 'fly') { p.rotor = 0.3; p.alt = 0.025 + 0.015 * Math.sin(t * 3 + i * 1.3); }
     else if (mv === 'walk') p.breath = Math.sin(t * 3.2 + i * 1.3);
@@ -1456,49 +1808,96 @@ function poseExtras(i, p, S) { // what a vehicle on its cell does while it waits
 }
 function drawGroup(ids, poses, fills) {
   const lv = state.lv, t = state.t, e = eraNow();
-  for (const i of ids) { const p = poses[i]; drawVehShadow(p.x, p.y, p.ang, lv.taxis[i].len, p.cell, p.alt, e, p.alpha == null ? 1 : p.alpha); }
+  for (const i of ids) { const p = poses[i]; drawVehShadow(p.x, p.y, p.ang, lv.taxis[i].len, p.cell, p.alt, e, p.alpha == null ? 1 : p.alpha, p.sqA, p.sqC); }
   for (const i of ids) {
     const p = poses[i], cm = lv.taxis[i], v = state.vc[i];
-    const flash = t - v.flashT < 0.6 ? 0.55 * (1 - (t - v.flashT) / 0.6) * (0.5 + 0.5 * Math.sin((t - v.flashT) * 30)) : 0;
+    let flash = t - v.flashT < 0.6 ? 0.55 * (1 - (t - v.flashT) / 0.6) * (0.5 + 0.5 * Math.sin((t - v.flashT) * 30)) : 0;
+    const full = t - v.fullT < 0.35 ? 0.7 * (1 - (t - v.fullT) / 0.35) : 0;
     drawVehicle(p.x, p.y, p.ang, cm.len, p.cell, cm.colour, v.fillBase + fills[i], {
-      era: e, alt: p.alt, rotor: p.rotor, flash, seats: cm.seats, cover: coverOf(i), gait: p.gait, breath: p.breath, alpha: p.alpha,
+      era: e, alt: p.alt, rotor: p.rotor, flash, white: full, seats: cm.seats, cover: coverOf(i), gait: p.gait, breath: p.breath, alpha: p.alpha, sqA: p.sqA, sqC: p.sqC,
+      pop: v.popSeat != null && t - v.popT < 0.25 ? { k: v.popSeat, u: (t - v.popT) / 0.25 } : null,
       glow: p.waiting ? `rgba(255,190,60,${0.55 + 0.3 * Math.sin(t * 7)})` : null,
     });
   }
 }
 // A pad under each vehicle on the lot in its colour (grey while covered): a stitched rug for the
-// animals, a painted bay for road vehicles, a lit pad for air taxis. Colour reads at phone size
-// even on the thinnest sprites.
+// animals, a painted bay for road vehicles, a lit pad for air taxis. Colour reads at phone size even
+// on the thinnest sprites; the square air taxi sits on its pad, centred, not stretched.
 function drawMat(i, e) {
   const lv = state.lv, cm = lv.taxis[i], g = lv.geo, c = g.cell, E = ERAS[e], cov = coverOf(i);
   let c0 = 99, r0 = 99, c1 = -1, r1 = -1;
   cm.cells.forEach(k => { const q = k % lv.cols, r = Math.floor(k / lv.cols); c0 = Math.min(c0, q); c1 = Math.max(c1, q); r0 = Math.min(r0, r); r1 = Math.max(r1, r); });
-  const ins = c * 0.07, x = g.gx + c0 * c + ins, y = g.gy + r0 * c + ins, w = (c1 - c0 + 1) * c - ins * 2, h = (r1 - r0 + 1) * c - ins * 2, rad = c * 0.16;
+  const ins = c * 0.05, x = g.gx + c0 * c + ins, y = g.gy + r0 * c + ins, w = (c1 - c0 + 1) * c - ins * 2, h = (r1 - r0 + 1) * c - ins * 2, rad = c * 0.16;
   const col = cov > 0.5 ? '#9aa1ad' : PAL[cm.colour].base;
   ctx.globalAlpha = 0.34; ctx.fillStyle = col; rrect(x, y, w, h, rad); ctx.fill();
   ctx.globalAlpha = 0.95; ctx.strokeStyle = col; ctx.lineWidth = Math.max(2.5, c * 0.035); ctx.stroke();
   if (E.move === 'walk') { ctx.globalAlpha = 0.6; ctx.strokeStyle = 'rgba(255,244,220,1)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 5]); rrect(x + 5, y + 5, w - 10, h - 10, rad * 0.7); ctx.stroke(); ctx.setLineDash([]); }
-  else if (E.move === 'fly') { ctx.globalAlpha = 0.25; ctx.lineWidth = Math.max(6, c * 0.08); rrect(x, y, w, h, rad); ctx.stroke(); }
+  else if (E.move === 'fly') {
+    ctx.globalAlpha = 0.25; ctx.lineWidth = Math.max(6, c * 0.08); rrect(x, y, w, h, rad); ctx.stroke();
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = 'rgba(200,245,255,1)'; ctx.lineWidth = 2; const cx = x + w / 2, cy = y + h / 2, R = Math.min(w, h) * 0.46;
+    ell(cx, cy, R, R); ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx - R * 0.3, cy - R * 0.35); ctx.lineTo(cx - R * 0.3, cy + R * 0.35); ctx.moveTo(cx + R * 0.3, cy - R * 0.35); ctx.lineTo(cx + R * 0.3, cy + R * 0.35); ctx.moveTo(cx - R * 0.3, cy); ctx.lineTo(cx + R * 0.3, cy); ctx.stroke();
+  }
   ctx.globalAlpha = 1;
+}
+// A garage on the lot: a small building whose door faces its strip, a count of the vehicles still
+// inside and a light for each of their colours, the next one first, so the player can plan ahead.
+function drawGarage(gar, e) {
+  const lv = state.lv, g = lv.geo, c = g.cell, x = g.gx + (gar.c + 0.5) * c, y = g.gy + (gar.r + 0.5) * c, t = state.t;
+  const inside = gar.stack.filter(id => bit(state.S.mask, id) && !(state.vc[id].rollT <= t));
+  drawGarageShape(x, y, c, gar.d, e, inside.map(id => lv.taxis[id].colour), t);
+}
+function drawGarageShape(x, y, c, d, e, cols, t = gt) {
+  const E = ERAS[e], st = E.garage || 'stable', s = c * 0.45;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(DIRS[d][1], DIRS[d][0]) + Math.PI / 2); // door up in this frame
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(-s + 4, -s + 6, s * 2, s * 2, c * 0.12); ctx.fill();
+  const body = st === 'hangar' ? ['#16304e', '#0a1628'] : st === 'garage' ? ['#a4503a', '#6e2e20'] : st === 'shed' ? ['#7d9aa0', '#4c6468'] : ['#9a6a3a', '#5c3a1a'];
+  const gr = ctx.createLinearGradient(-s, 0, s, 0); gr.addColorStop(0, body[1]); gr.addColorStop(0.5, body[0]); gr.addColorStop(1, body[1]);
+  ctx.fillStyle = gr; rrect(-s, -s, s * 2, s * 2, c * 0.12); ctx.fill();
+  ctx.strokeStyle = st === 'hangar' ? `rgba(${E.accent},0.9)` : 'rgba(20,14,10,0.8)'; ctx.lineWidth = Math.max(2, c * 0.03); ctx.stroke();
+  // the roof: ribs (tin), bricks (garage), panels (hangar), planks (stable)
+  ctx.strokeStyle = st === 'hangar' ? `rgba(${E.accent},0.35)` : 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1.5;
+  for (let k = 1; k < 5; k++) { const yy = -s + s * 2 * k / 5; ctx.beginPath(); ctx.moveTo(-s + 4, yy); ctx.lineTo(s - 4, yy); ctx.stroke(); }
+  // the door, on the side facing its strip, with roller slats and a light strip over it
+  const dw = s * 1.5, dh = s * 0.62;
+  ctx.fillStyle = st === 'hangar' ? 'rgba(120,230,255,0.35)' : '#2b2622'; rrect(-dw / 2, -s - 2, dw, dh, c * 0.05); ctx.fill();
+  ctx.strokeStyle = st === 'hangar' ? `rgba(${E.accent},0.9)` : 'rgba(220,220,220,0.45)'; ctx.lineWidth = 1.5;
+  for (let k = 1; k < 4; k++) { const yy = -s - 2 + dh * k / 4; ctx.beginPath(); ctx.moveTo(-dw / 2 + 3, yy); ctx.lineTo(dw / 2 - 3, yy); ctx.stroke(); }
+  ctx.fillStyle = cols.length ? '#ffd34d' : '#6d7480'; rrect(-dw / 2, -s - 6, dw, 5, 2); ctx.fill();
+  ctx.restore();
+  // upright: the count inside and a light per vehicle in its colour, the next one first
+  const n = cols.length;
+  ctx.fillStyle = 'rgba(10,12,24,0.88)'; ell(x, y + c * 0.04, c * 0.2, c * 0.2); ctx.fill();
+  ctx.strokeStyle = n ? '#ffffff' : 'rgba(200,210,225,0.5)'; ctx.lineWidth = 2.5; ctx.stroke();
+  text(String(n), x, y + c * 0.05, Math.max(24, Math.round(c * 0.3)), n ? '#ffffff' : '#9aa3b2', 'center', 800);
+  const dr = c * 0.07;
+  for (let k = 0; k < n; k++) {
+    const dx = x + (k - (n - 1) / 2) * dr * 2.4, dy = y + c * 0.33;
+    ctx.fillStyle = PAL[cols[k]].base; ell(dx, dy, dr * (k === 0 ? 1.2 : 1), dr * (k === 0 ? 1.2 : 1)); ctx.fill();
+    ctx.strokeStyle = k === 0 ? '#ffffff' : 'rgba(255,255,255,0.6)'; ctx.lineWidth = k === 0 ? 2 : 1; ctx.stroke();
+  }
 }
 function drawLaneFor(i) { // the vehicle's lane: light to the lot's edge when clear, red up to a blocker
   const lv = state.lv, cm = lv.taxis[i], g = lv.geo, [dx, dy] = DIRS[cm.d], q = gridGeom(i);
   let steps = 0, blockedAt = -1;
   for (let c = cm.hc + dx, r = cm.hr + dy; c >= 0 && r >= 0 && c < lv.cols && r < lv.rows; c += dx, r += dy) {
-    const o = lv.occ[r * lv.cols + c];
-    if (blockedAt < 0 && o >= 0 && (state.S.mask >> o & 1)) blockedAt = steps;
+    if (blockedAt < 0 && lv.on[r * lv.cols + c].some(j => onLot(lv, state.S.mask, j))) blockedAt = steps;
     steps++;
   }
   const clear = blockedAt < 0;
   laneArrow(q.fx, q.fy, dx, dy, clear ? steps * g.cell + 22 : blockedAt * g.cell + g.cell * 0.18, clear ? '150,240,255' : '255,90,110', clear);
 }
-function drawParts(under) {
-  for (const p of state.parts) {
-    if (!!p.under !== under) continue;
-    const a = clamp(p.life / p.max, 0, 1) * (p.a || 1);
-    if (p.ring) { const u = 1 - p.life / p.max, r = p.r + p.grow * u; ctx.strokeStyle = `rgba(${p.rgb},${a})`; ctx.lineWidth = 1 + 4 * (1 - u); ell(p.x, p.y, r, r * 0.8); ctx.stroke(); }
-    else if (p.puff) { const u = 1 - p.life / p.max, r = p.r + p.grow * u; ctx.fillStyle = `rgba(${p.rgb},${a * (1 - u * 0.4)})`; ell(p.x, p.y, r, r); ctx.fill(); }
-    else { ctx.globalAlpha = a; ctx.fillStyle = p.col; ell(p.x, p.y, p.r, p.r); ctx.fill(); ctx.globalAlpha = 1; }
+const COMBO_WORDS = ['رائع!', 'ممتاز!', 'مذهل!', 'خارق!'];
+function drawFloats() {
+  const t = state.t;
+  for (const f of state.floats) {
+    const u = (t - f.t0) / f.life; if (u < 0 || u >= 1) continue;
+    // "+1" appears at once on its badge (it pops); combo words fade in; both fade out at the end
+    const a = u < 0.15 && f.big ? u / 0.15 : 1 - Math.max(0, (u - 0.6) / 0.4), sc = f.big ? 1 + 0.35 * Math.max(0, 1 - u * 5) : 1 + 0.25 * Math.max(0, 1 - u * 6);
+    ctx.globalAlpha = a;
+    const y = f.y - f.rise * easeOut(u), fs = Math.round(f.size * sc);
+    if (!f.big) { ctx.fillStyle = 'rgba(16,10,28,0.88)'; rrect(f.x - fs * 0.95, y - fs * 0.62, fs * 1.9, fs * 1.24, fs * 0.6); ctx.fill(); } // a dark badge: reads on sand and glass alike
+    textOutline(f.text, f.x, y, fs, f.col, 'rgba(20,10,30,0.85)', Math.max(4, f.size * 0.18));
+    ctx.globalAlpha = 1;
   }
 }
 function drawPlay() {
@@ -1508,29 +1907,31 @@ function drawPlay() {
   const taken = S.gates.length, flashG = t - state.flashGatesT < 0.6, pulse = 0.55 + 0.45 * Math.sin(t * 6);
   const gcol = taken === NG || flashG ? `255,70,95` : taken === NG - 1 ? `255,176,40` : null;
   if (gcol) for (let i = 0; i < NG; i++) {
-    const x = bayX(i), y = DOOR_Y + DOOR_H / 2, gr = ctx.createRadialGradient(x, y, 6, x, y, 84);
-    gr.addColorStop(0, `rgba(${gcol},${0.8 * pulse})`); gr.addColorStop(1, `rgba(${gcol},0)`);
-    ctx.fillStyle = gr; ell(x, y, 84, 70); ctx.fill();
+    const x = bayX(i), y = BAY_Y, gr = ctx.createRadialGradient(x, y, 6, x, y, 120);
+    gr.addColorStop(0, `rgba(${gcol},${0.6 * pulse})`); gr.addColorStop(1, `rgba(${gcol},0)`);
+    ctx.fillStyle = gr; ell(x, y, 120, 66); ctx.fill();
   }
-  const fills = new Array(lv.taxis.length).fill(0);
-  for (const tr of state.tr) if (tr.taxi >= 0 && tr.endT != null && t >= tr.endT && !tr.done) fills[tr.taxi]++;
+  const fills = state.fills || (state.fills = []);
+  for (let i = 0; i < lv.taxis.length; i++) fills[i] = 0;
+  for (let k = Math.max(0, state.qv - 40); k < lv.queue.length && k < state.qv + 4; k++) { const tr = state.tr[k]; if (tr.taxi >= 0 && tr.endT != null && t >= tr.endT && !tr.done) fills[tr.taxi]++; }
   const poses = lv.taxis.map((c, i) => taxiPose(i));
-  const groups = { grid: [], park: [], glide: [], leave: [] };
+  const groups = { grid: [], park: [], trip: [], leave: [] };
   poses.forEach((p, i) => { if (p) { poseExtras(i, p, S); groups[p.phase].push(i); } });
-  drawParts(true); // dust and exhaust, under the vehicles
+  drawParts(true); // dust, exhaust and rotor wash, under the vehicles
+  for (const gar of lv.garages) drawGarage(gar, e);
   if (state.blockLine && t - state.blockLine.t < 0.7) {
     const b = state.blockLine; ctx.strokeStyle = `rgba(255,70,95,${0.9 * (1 - (t - b.t) / 0.7)})`; ctx.lineWidth = 5; ctx.setLineDash([10, 8]);
     ctx.beginPath(); ctx.moveTo(b.x0, b.y0); ctx.lineTo(b.x1, b.y1); ctx.stroke(); ctx.setLineDash([]);
   }
   // vehicles on their cells: colour pads, facing cues, then shadows, then the vehicles
-  for (const i of groups.grid) drawMat(i, e);
-  for (const i of groups.grid) { const q = gridGeom(i), p = poses[i]; facingCue(p.x + q.dx * (q.L / 2 - lv.geo.cell * 0.06), p.y + q.dy * (q.L / 2 - lv.geo.cell * 0.06), q.dx, q.dy, lv.geo.cell, e); }
+  for (const i of groups.grid) if (!poses[i].rolling) drawMat(i, e);
+  for (const i of groups.grid) { if (poses[i].rolling) continue; const q = gridGeom(i), p = poses[i]; facingCue(p.x + q.dx * (q.L / 2 - lv.geo.cell * 0.06), p.y + q.dy * (q.L / 2 - lv.geo.cell * 0.06), q.dx, q.dy, lv.geo.cell, e); }
   drawGroup(groups.grid, poses, fills);
   // the lane of the hovered (mouse) or cursor (keyboard) vehicle
   const hov = hoverP && scene === 'play' ? taxiAt(hoverP) : -1;
-  const laneOf = hov >= 0 ? hov : state.kbd && state.cursor >= 0 && (S.mask >> state.cursor & 1) ? state.cursor : -1;
+  const laneOf = hov >= 0 ? hov : state.kbd && state.cursor >= 0 && onLot(lv, S.mask, state.cursor) ? state.cursor : -1;
   if (laneOf >= 0 && poses[laneOf] && poses[laneOf].phase === 'grid' && !state.pending) drawLaneFor(laneOf);
-  if (state.kbd && state.cursor >= 0 && (S.mask >> state.cursor & 1)) { // keyboard cursor
+  if (state.kbd && state.cursor >= 0 && onLot(lv, S.mask, state.cursor)) { // keyboard cursor
     const cm = lv.taxis[state.cursor], g = lv.geo;
     let c0 = 99, r0 = 99, c1 = -1, r1 = -1;
     cm.cells.forEach(k => { const q = k % lv.cols, r = Math.floor(k / lv.cols); c0 = Math.min(c0, q); c1 = Math.max(c1, q); r0 = Math.min(r0, r); r1 = Math.max(r1, r); });
@@ -1540,97 +1941,141 @@ function drawPlay() {
       ctx.beginPath(); ctx.moveTo(x + sx * a, y); ctx.lineTo(x, y); ctx.lineTo(x, y + sy * a); ctx.stroke();
     }
   }
-  drawGroup(groups.park, poses, fills);
-  if (E.move !== 'fly' && groups.leave.length) { // ground vehicles pass out through their stop
-    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, DOOR_Y + DOOR_H * 0.55); ctx.clip();
-    drawGroup(groups.leave, poses, fills); ctx.restore();
-  }
-  // the stops: lit in the colour of a parked vehicle
+  // the stops along the bays' kerbs, lit in the colour of a parked vehicle
   const dock = new Array(NG).fill(-1);
   groups.park.forEach(i => { const s = state.vc[i].slot; if (s >= 0 && s < NG) dock[s] = lv.taxis[i].colour; });
-  const dw = Math.min(100, 600 / NG - 24);
+  groups.leave.forEach(i => { const v = state.vc[i], s = v.slot; if (s >= 0 && s < NG && v.leave && (v.leave.kind === 'ground' ? t < v.leave.go : t < v.leave.tFly)) dock[s] = lv.taxis[i].colour; });
+  const dw = Math.min(176, BAY_W / NG - 30);
   for (let i = 0; i < NG; i++) drawStop(bayX(i), dock[i] >= 0 ? dock[i] : null, dock[i] >= 0, dw, DOOR_Y, e);
-  drawGroup(groups.glide, poses, fills);
+  drawGroup(groups.park, poses, fills);
+  if (E.move !== 'fly') drawGroup(groups.leave, poses, fills);
+  drawGroup(groups.trip, poses, fills);
   drawQueue();
   if (E.move === 'fly') drawGroup(groups.leave, poses, fills);
   drawParts(false);
+  drawFloats();
   drawHud();
-  // first-level hand and the level banner
-  if (state.hint >= 0 && !state.tapped && lv.L === 1) {
+  // first-level hand, the level banner, the red "صعبة جداً" warning
+  if (state.hint >= 0 && !state.tapped && lv.L === 1 && !state.warn) {
     const q = gridGeom(state.hint), k = Math.sin(t * 5) * 10;
     drawHand(q.cx + 18 + k * 0.5, q.cy + 16 + k, -0.45);
   }
-  if (t - state.bannerT < 4.2 && !(state.tapped && t > 1.2)) {
-    const a = clamp(Math.min(t / 0.3, (4.2 - t) / 0.5), 0, 1);
+  if (!state.warn && t - state.bannerT < 4.2 && !(state.tapped && t > 1.2)) {
+    const a = clamp(Math.min((t - state.bannerT) / 0.3, (4.2 - (t - state.bannerT)) / 0.5), 0, 1);
     ctx.globalAlpha = a; drawBanner(); ctx.globalAlpha = 1;
   }
+  if (state.warn) drawWarn();
   if (t - state.msgT < 1.4) {
     const a = clamp((1.4 - (t - state.msgT)) / 0.3, 0, 1);
-    ctx.globalAlpha = a; ctx.fillStyle = 'rgba(10,12,26,0.9)'; rrect(W / 2 - 190, 770, 380, 64, 32); ctx.fill();
+    ctx.globalAlpha = a; ctx.fillStyle = 'rgba(10,12,26,0.9)'; rrect(W / 2 - 200, 770, 400, 64, 32); ctx.fill();
     ctx.strokeStyle = `rgba(${accent()},0.8)`; ctx.lineWidth = 2; ctx.stroke();
     text(state.msg, W / 2, 803, 30, '#ffffff'); ctx.globalAlpha = 1;
   }
 }
 const TIPS = {
   1: 'اضغط جملاً طريقه مفتوح وبلون أول مسافر',
-  2: 'جمل يسدّ طريق آخر: أخرج الذي في الأمام',
-  3: 'لون ثالث: اقرأ الطابور قبل أن تضغط',
-  4: 'الجمل بالهودج يأخذ خانتين وستة ركاب',
-  5: 'آخر القوافل: لا تشغل موقفاً بلون لا يُطلب',
-  6: 'الحمير والعربات: القواعد نفسها، زحمة أكبر',
-  7: 'العربة تأخذ خانتين وستة ركاب',
+  2: 'ثلاثة مواقف فقط: لا تشغل موقفاً بلون لا يُطلب',
+  3: 'الجمل بالهودج 3 خانات و8 ركاب',
+  4: 'اقرأ الطابور قبل أن تضغط',
+  5: 'آخر القوافل: كل ضغطة مهمة',
+  6: 'الحمير والعربات: زحمة أكبر',
+  7: 'العربة 3 خانات و8 ركاب',
   8: 'حمار مغطى بالخيش: يظهر لونه حين يتحرك جاره',
-  9: 'سلاسل أعمق: من يخرج أولاً؟',
-  10: 'آخر الحمير: خطّط للمواقف الأربعة',
-  11: 'عصر المواتير: الدراجة 3 ركاب والتوك توك 6',
-  12: 'لون رابع: انظر بعيداً في الطابور',
+  9: 'لون رابع: انظر بعيداً في الطابور',
+  10: 'آخر الحمير: خطّط للمواقف الثلاثة',
+  11: 'المرآب: تخرج منه دراجة حين تفرغ الخانتان أمامه',
+  12: 'أضواء المرآب تريك ألوان ما في داخله',
   13: 'غطاء رمادي: يُكشف حين يتحرك جاره',
-  14: 'ساحة أوسع وطرق أطول',
-  15: 'آخر المواتير: كل ضغطة مهمة',
-  16: 'عصر التكسي: سيارات أكثر وسلاسل أطول',
-  17: 'سيارة الفان تأخذ خانتين وستة ركاب',
-  18: 'الساحة كاملة: ثماني خانات في كل صف',
-  19: 'زحمة الذروة: خطّط قبل أن تضغط',
-  20: 'آخر التكسي: ساعة الذروة',
-  21: 'التاكسي الطائر: لون خامس',
+  14: 'مرائب أكثر: رتّب من يخرج أولاً',
+  15: 'آخر المواتير: زحمة كاملة',
+  16: 'عصر التكسي: مرائب وطوابير أطول',
+  17: 'سيارة الفان 3 خانات و8 ركاب',
+  18: 'لون خامس: خطّط قبل أن تضغط',
+  19: 'ساعة الذروة: لا تترك المسافرين ينتظرون',
+  20: 'آخر التكسي: أصعب زحمة في المدينة',
+  21: 'التاكسي الطائر: المواقف في السماء',
   22: 'تاكسي يشحن: يظهر لونه حين يطير جاره',
-  23: 'المكوك الطويل ستة ركاب: لا تضيّع مقاعده',
+  23: 'المكوك 8 ركاب: لا تضيّع مقاعده',
   24: 'سماء مزدحمة: انظر إلى آخر الطابور',
   25: 'المرحلة الأخيرة: زحمة الزمن كلها',
 };
 function drawBanner() {
   const L = state.level;
-  ctx.fillStyle = 'rgba(10,12,28,0.92)'; rrect(40, 870, 640, 116, 24); ctx.fill();
+  ctx.fillStyle = 'rgba(10,12,28,0.92)'; rrect(40, 962, 640, 112, 24); ctx.fill();
   ctx.strokeStyle = `rgb(${accent()})`; ctx.lineWidth = 2.5; ctx.stroke();
-  text(TIPS[L] || 'خطّط قبل أن تضغط', W / 2, 908, 30, '#ffffff');
-  text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, 954, 26, '#7ef0b0');
-  checkMark(W / 2 + 178, 954, 26, '#7ef0b0');
-  if (state.lv.hard) hardPill(W / 2, 870, 1.1); // said before the level starts
+  text(TIPS[L] || 'خطّط قبل أن تضغط', W / 2, 1000, 30, '#ffffff');
+  text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, 1044, 26, '#7ef0b0');
+  checkMark(W / 2 + 178, 1044, 26, '#7ef0b0');
+  if (state.lv.tier === 1) hardPill(W / 2, 962, 1.1); // said before the level starts
 }
+// The red banner before a "صعبة جداً" level: it slides in, says so, and goes on a tap or by itself.
+function drawWarn() {
+  const u = state.t, k = easeOut(clamp(u / 0.35, 0, 1)), y = 470, h = 300;
+  ctx.fillStyle = `rgba(20,0,6,${0.55 * k})`; ctx.fillRect(0, 0, W, H); keepMarks(ERAS[eraNow()].bgImg);
+  ctx.save(); ctx.translate((1 - k) * -W, 0);
+  const gr = ctx.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, '#d21f3c'); gr.addColorStop(1, '#7a0a1c');
+  ctx.fillStyle = gr; ctx.fillRect(0, y, W, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; for (let x = -40; x < W; x += 56) { ctx.beginPath(); ctx.moveTo(x + (gt * 40) % 56, y); ctx.lineTo(x + 28 + (gt * 40) % 56, y); ctx.lineTo(x - 2 + (gt * 40) % 56, y + 14); ctx.lineTo(x - 30 + (gt * 40) % 56, y + 14); ctx.fill(); }
+  ctx.fillStyle = '#ffd34d'; ctx.fillRect(0, y + 14, W, 4); ctx.fillRect(0, y + h - 18, W, 4);
+  // two drawn peaks: the hard sign, bigger
+  const px = W / 2, py = y + 96;
+  ctx.fillStyle = '#ffe3ee'; ctx.beginPath(); ctx.moveTo(px - 60, py + 26); ctx.lineTo(px - 22, py - 40); ctx.lineTo(px, py - 8); ctx.lineTo(px + 18, py - 30); ctx.lineTo(px + 54, py + 26); ctx.closePath(); ctx.fill();
+  textOutline('صعبة جداً', W / 2, y + 170, 76, '#ffffff', 'rgba(60,0,10,0.9)', 12);
+  text('أصعب مرحلة في هذا العصر · لها حل مؤكد', W / 2, y + 236, 28, '#ffe2e8');
+  ctx.restore();
+  if (u > 0.6) text('اضغط للبدء', W / 2, y + h + 50, 28, `rgba(255,255,255,${0.6 + 0.4 * Math.sin(gt * 5)})`);
+}
+// The line: a conveyor of riders. The belt's slats move as the line shuffles forward; riders who have
+// waited too long get cross (they stamp, steam rises, a red mark shows); boarding riders hop on an arc.
 function drawQueue() {
-  const t = state.t, lv = state.lv, Q = lv.queue.length, RH = tune.rider_h;
+  const t = state.t, lv = state.lv, Q = lv.queue.length, RH = tune.rider_h, E = ERAS[eraNow()];
+  // the belt's slats (one path per belt)
+  ctx.save(); ctx.strokeStyle = E.lot.floorEdge; ctx.globalAlpha = 0.5; ctx.lineWidth = 2;
+  for (const [y0, y1, dirn] of [[Q_ROW1 - 60, Q_ROW1, 1], [Q_ROW2 - 58, Q_ROW2 + 2, -1]]) {
+    const off = ((state.belt * dirn) % 28 + 28) % 28;
+    ctx.beginPath();
+    for (let x = 40 + off; x < 530; x += 28) { ctx.moveTo(x, y0 + 4); ctx.lineTo(x, y1 - 4); }
+    ctx.stroke();
+  }
+  ctx.restore();
   // riders still waiting, back to front so the front one is on top
-  const last = Math.min(Q, state.qv + Q_PER_ROW * 2);
+  const last = Math.min(Q, state.qv + Q_PER_ROW * 2), ang = state.anger;
   for (let k = last - 1; k >= state.qv; k--) {
     const tr = state.tr[k]; if (tr.done || tr.x == null || (tr.startT != null && t >= tr.startT)) continue;
-    if (k === state.qv) { // the front rider: a ring in its colour under its feet
+    const near = k - state.qv;
+    if (near === 0) { // the front rider: a ring in its colour under its feet
       ctx.fillStyle = 'rgba(255,255,255,0.28)'; ell(tr.x, tr.y - 2, 30, 10); ctx.fill();
       ctx.strokeStyle = PAL[tr.col].base; ctx.lineWidth = 3.5; ctx.stroke();
     }
-    drawRider(tr.x, tr.y - (tr.moving ? Math.abs(Math.sin(t * 12 + k)) * 3 : 0), tr.col, RH);
+    let hop = tr.moving ? Math.abs(Math.sin(t * 12 + k)) * 3 : 0, sx = 0;
+    if (ang > 0.35 && near < 14) { const a = (ang - 0.35) / 0.65; hop += Math.max(0, Math.sin(t * (10 + a * 8) + k * 1.7)) * 6 * a; sx = Math.sin(t * 23 + k) * 1.5 * a; }
+    drawRider(tr.x + sx, tr.y - hop, tr.col, RH);
+    if (ang > 0.6 && near < 10 && (k * 7) % 3 !== 1) { // steam from cross riders
+      const a = (ang - 0.6) / 0.4, ph = (t * 1.3 + k * 0.37) % 1, hx = tr.x + sx, hy = tr.y - RH - 6;
+      ctx.fillStyle = `rgba(250,250,255,${0.85 * a * (1 - ph)})`; ell(hx - 8 + ph * 4, hy - ph * 30, 6 + ph * 9, 6 + ph * 9); ctx.fill(); ell(hx + 9 - ph * 3, hy - 6 - ph * 26, 5 + ph * 8, 5 + ph * 8); ctx.fill();
+    }
+    if (ang > 0.8 && near < 6) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ell(tr.x + 15, tr.y - RH - 8, 15, 15); ctx.fill(); angerMark(tr.x + 15, tr.y - RH - 8, 11 + 2 * Math.sin(t * 12 + k)); }
   }
   const rest = Q - last;
   if (rest > 0) {
-    ctx.fillStyle = 'rgba(10,12,26,0.85)'; rrect(548, Q_ROW2 - 52, 64, 44, 22); ctx.fill(); ctx.strokeStyle = `rgba(${accent()},0.8)`; ctx.lineWidth = 2; ctx.stroke();
-    text('+' + rest, 580, Q_ROW2 - 29, 26, '#ffffff');
+    ctx.fillStyle = 'rgba(10,12,26,0.85)'; rrect(548, Q_ROW2 - 52, 70, 44, 22); ctx.fill(); ctx.strokeStyle = `rgba(${accent()},0.8)`; ctx.lineWidth = 2; ctx.stroke();
+    text('+' + rest, 583, Q_ROW2 - 29, 26, '#ffffff');
   }
-  // riders walking up through the stop into their vehicle
+  // riders hopping from the head of the line into their seat, one by one, on an arc
   for (let k = Math.max(0, state.qv - 30); k < Math.min(Q, state.qv + 40); k++) {
     const tr = state.tr[k]; if (tr.done || tr.startT == null || t < tr.startT || t >= tr.endT) continue;
-    const u = (t - tr.startT) / (tr.endT - tr.startT), [sx, sy] = seatWorld(tr.taxi, tr.seat), s = lerp(1, 0.36, u);
-    const x = lerp(tr.fx0, sx, u), cy = lerp(tr.fy0 - RH / 2, sy, u) - Math.sin(u * Math.PI) * 26;
-    drawRider(x, cy + RH * s / 2, tr.col, RH * s, 1 - u * 0.3);
+    const u = (t - tr.startT) / (tr.endT - tr.startT), sp = seatWorld(tr.taxi, tr.seat), sx = sp[0], sy = sp[1];
+    const dist = Math.hypot(sx - tr.fx0, sy - tr.fy0), arc = tune.hop_h + dist * 0.12;
+    const x = lerp(tr.fx0, sx, u), gy = lerp(tr.fy0, sy + RH * 0.2, u), s = lerp(1, 0.4, Math.pow(u, 1.4));
+    ctx.fillStyle = `rgba(0,0,0,${0.25 * (1 - u)})`; ell(x, gy, 14 * s, 5 * s); ctx.fill(); // its shadow on the ground
+    const y = gy - Math.sin(u * Math.PI) * arc, squash = u < 0.12 ? 1 - (0.12 - u) * 2 : 1;
+    drawRider(x, y, tr.col, RH * s * squash, 1, eraNow(), true);
   }
+}
+function angerMark(x, y, s) { // a drawn red cross-vein: a rider who has lost patience
+  ctx.save(); ctx.strokeStyle = '#ff3045'; ctx.lineWidth = Math.max(2.5, s * 0.32); ctx.lineCap = 'round';
+  for (const [a, b] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { ctx.beginPath(); ctx.arc(x + a * s * 0.62, y + b * s * 0.62, s * 0.5, Math.atan2(-b, -a) - 0.9, Math.atan2(-b, -a) + 0.9); ctx.stroke(); }
+  ctx.restore();
 }
 function drawHud() {
   const lv = state.lv, b = BTN;
@@ -1642,11 +2087,24 @@ function drawHud() {
   ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
   text(String(state.undos), b.undo[0] + 70, b.undo[1] + 15, 22, '#fff');
   glassButton(...b.restart); drawIcon('restart', b.restart[0] + 41, b.restart[1] + 36, 46, '#f4f8ff');
-  ctx.fillStyle = 'rgba(8,10,24,0.72)'; rrect(226, 10, 296, 80, 22); ctx.fill();
+  ctx.fillStyle = 'rgba(8,10,24,0.72)'; rrect(226, 8, 296, 98, 22); ctx.fill();
   ctx.strokeStyle = `rgba(${accent()},0.45)`; ctx.lineWidth = 1.5; ctx.stroke();
-  text(`المرحلة ${lv.L}`, lv.hard ? 430 : 374, 34, 34, '#ffffff');
-  if (lv.hard) hardPill(284, 34, 0.95);
-  text(`مسافرون ينتظرون: ${lv.queue.length - state.qv}`, 374, 70, 24, '#dbe6f4', 'center', 700);
+  text(`المرحلة ${lv.L}`, lv.tier === 2 ? 450 : lv.tier ? 440 : 374, 32, lv.tier === 2 ? 28 : 32, '#ffffff');
+  if (lv.tier === 1) hardPill(290, 32, 0.9); else if (lv.tier === 2) veryHardPill(304, 32, 0.8);
+  text(`مسافرون ينتظرون: ${lv.queue.length - state.qv}`, 374, 64, 24, '#dbe6f4', 'center', 700);
+  // the line's patience: green when calm, amber, then red when the riders are cross
+  const a = state.anger, x0 = 266, bw = 236;
+  ctx.fillStyle = 'rgba(255,255,255,0.14)'; rrect(x0, 84, bw, 12, 6); ctx.fill();
+  ctx.fillStyle = a < 0.5 ? '#3fe08f' : a < 0.85 ? '#ffb13d' : '#ff3d55'; rrect(x0, 84, Math.max(12, bw * (1 - a)), 12, 6); ctx.fill();
+  moodFace(248, 90, 11, a);
+}
+function moodFace(x, y, r, a) { // a drawn face: smiling when calm, flat, then frowning with brows when cross
+  ctx.fillStyle = a < 0.5 ? '#3fe08f' : a < 0.85 ? '#ffb13d' : '#ff3d55'; ell(x, y, r, r); ctx.fill();
+  ctx.strokeStyle = '#1a1020'; ctx.fillStyle = '#1a1020'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  ell(x - r * 0.35, y - r * 0.15, r * 0.12, r * 0.12); ctx.fill(); ell(x + r * 0.35, y - r * 0.15, r * 0.12, r * 0.12); ctx.fill();
+  const m = a < 0.5 ? 1 : a < 0.85 ? 0 : -1;
+  ctx.beginPath(); ctx.moveTo(x - r * 0.4, y + r * 0.35); ctx.quadraticCurveTo(x, y + r * 0.35 + m * r * 0.35, x + r * 0.4, y + r * 0.35); ctx.stroke();
+  if (m < 0) { ctx.beginPath(); ctx.moveTo(x - r * 0.6, y - r * 0.55); ctx.lineTo(x - r * 0.15, y - r * 0.35); ctx.moveTo(x + r * 0.6, y - r * 0.55); ctx.lineTo(x + r * 0.15, y - r * 0.35); ctx.stroke(); }
 }
 
 // ---- Overlays ---------------------------------------------------------------------------------
@@ -1712,12 +2170,15 @@ function drawResults() {
     drawStar(W / 2 + (k - 1) * 116, 580 - (k === 1 ? 16 : 0), 46 * (k < state.stars ? 0.6 + 0.4 * pop : 1), k < state.stars && pop > 0);
   }
   const best = save.stars[L - 1] || 0;
-  text(state.stars > state.prevBest ? 'أفضل نتيجة جديدة!' : `أفضل نتيجة: ${best} من 3`, W / 2, 680, 30, '#ffd34d');
-  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : `التراجع المستعمل: ${state.undosUsed}`, W / 2, 736, 28, '#e4ecff', 'center', 700);
+  text(state.stars > state.prevBest ? 'أفضل نتيجة جديدة!' : `أفضل نتيجة: ${best} من 3`, W / 2, 672, 30, '#ffd34d');
+  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : `التراجع المستعمل: ${state.undosUsed}`, W / 2, 718, 28, '#e4ecff', 'center', 700);
+  if (state.angryHit) { moodFace(W / 2 + 170, 762, 14, 1); text('غضب المسافرون من التأخير: نجمة أقل', W / 2 - 14, 762, 26, '#ff8a9a', 'center', 700); }
   bigButton(...RES_BTNS.next, last ? 'القائمة' : eraEnd ? 'العصر التالي' : 'المرحلة التالية', eraEnd ? 'gold' : 'primary');
-  if (!last && isHard(L + 1)) hardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 64, RES_BTNS.next[1], 1); // the next one is hard
+  if (!last && tierOf(L + 1) === 1) hardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 64, RES_BTNS.next[1], 1); // the next one is hard
+  else if (!last && tierOf(L + 1) === 2) veryHardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 84, RES_BTNS.next[1], 1);
   bigButton(...RES_BTNS.again, 'أعد هذه المرحلة', 'secondary');
 }
+
 
 // ---- Title: the name, continue, the era timeline -------------------------------------------------
 const TITLE_BTNS = { start: [150, 282, 420, 104], home: [56, 12, 76, 72], mute: [630, 12, 76, 72], stats: [430, 12, 186, 72] };
@@ -1750,7 +2211,7 @@ function drawTitle() {
     drawStar(586, y + 71, 13, on && s > 0);
     // the era's vehicle, nose up; a locked era shows it dimmed with a padlock
     const g = LOAD[e].ready;
-    if (g) { ctx.save(); if (!on) ctx.globalAlpha = 0.32; drawVehShadow(118, y + h / 2, -Math.PI / 2, 1, 86, 0, e); drawVehicle(118, y + h / 2, -Math.PI / 2, 1, 86, e % 5, 0, { era: e, seats: 0 }); ctx.restore(); }
+    if (g) { ctx.save(); if (!on) ctx.globalAlpha = 0.32; drawVehShadow(118, y + h / 2, -Math.PI / 2, 2, 48, 0, e); drawVehicle(118, y + h / 2, -Math.PI / 2, 2, 48, e % 5, 0, { era: e, seats: 0 }); ctx.restore(); }
     if (!on) { ctx.fillStyle = 'rgba(6,8,18,0.35)'; rrect(x, y, w, h, 18); ctx.fill(); padlock(118, y + h / 2 - 4, 54, '#d7dde8'); }
     else if (s >= ERA_LEVELS * 3) checkMark(200, y + h / 2, 30, '#7ef0b0');
   }
@@ -1780,11 +2241,12 @@ function drawEraScreen() {
   ctx.fillStyle = 'rgba(10,10,24,0.62)'; rrect(40, 246, 640, 246, 24); ctx.fill();
   ctx.strokeStyle = `rgba(${E.accent},0.5)`; ctx.lineWidth = 2; ctx.stroke();
   if (LOAD[e].ready) {
-    drawVehShadow(590, 370, -Math.PI / 2, 1, 118, 0, e); drawVehicle(590, 370, -Math.PI / 2, 1, 118, 1, 0, { era: e, seats: 0 });
-    drawVehShadow(150, 370, -Math.PI / 2, 2, 104, 0, e); drawVehicle(150, 370, -Math.PI / 2, 2, 104, 4, 0, { era: e, seats: 0 });
+    drawVehShadow(600, 370, -Math.PI / 2, 2, 104, 0, e); drawVehicle(600, 370, -Math.PI / 2, 2, 104, 1, 0, { era: e, seats: 0 });
+    drawVehShadow(130, 370, -Math.PI / 2, 3, 74, 0, e); drawVehicle(130, 370, -Math.PI / 2, 3, 74, 4, 0, { era: e, seats: 0 });
   }
-  text(E.smallName, 470, 340, 30, '#ffffff'); text('خانة · 3 ركاب', 470, 384, 24, '#dbe6f4', 'center', 700);
-  text(E.bigName, 290, 340, 30, '#ffffff'); text('خانتان · 6 ركاب', 290, 384, 24, '#dbe6f4', 'center', 700);
+  text(E.smallName, 470, 340, 30, '#ffffff'); text(`خانتان · ${tune.seats_small} ركاب`, 470, 384, 24, '#dbe6f4', 'center', 700);
+  text(E.bigName, 290, 340, 30, '#ffffff'); text(`3 خانات · ${tune.seats_big} ركاب`, 290, 384, 24, '#dbe6f4', 'center', 700);
+  if (E.garage) { text('مرائب من هذا العصر', W / 2, 436, 24, `rgb(${E.accent})`, 'center', 700); }
   // the five level tiles, right to left
   for (let k = 0; k < ERA_LEVELS; k++) {
     const L = e * ERA_LEVELS + k + 1, [x, y, w, h] = eraTile(k), on = L <= (save.unlocked || 1);
@@ -1792,7 +2254,7 @@ function drawEraScreen() {
     text('المرحلة', x + w / 2, y + 40, 24, on ? '#dbe6f4' : '#7d8799', 'center', 700);
     text(String(L), x + w / 2, y + 88, 54, on ? '#ffffff' : '#7d8799', 'center', 800);
     for (let j = 0; j < 3; j++) drawStar(x + w / 2 + (j - 1) * 34, y + 142, 14, j < (save.stars[L - 1] || 0));
-    if (isHard(L)) hardPill(x + w / 2, y + 2, 0.95);
+    tierPill(L, x + w / 2, y + 2, 0.95);
     if (!on) { ctx.fillStyle = 'rgba(6,8,18,0.4)'; rrect(x, y, w, h, 18); ctx.fill(); padlock(x + w - 34, y + 34, 36, '#d7dde8'); }
   }
   const L = e * ERA_LEVELS + eraSel + 1;
@@ -1823,8 +2285,8 @@ function drawUnlock() {
   if (ready) { // the era's vehicle arrives: walks, drives, or flies in and settles
     const k = easeOut(u), y = lerp(1420, 720, k), c = 168, fly = E.move === 'fly';
     const alt = fly ? 0.5 * (1 - k) + 0.04 * Math.sin(unlockT * 3) : 0;
-    drawVehShadow(W / 2, y, -Math.PI / 2, 1, c, alt, e);
-    drawVehicle(W / 2, y, -Math.PI / 2, 1, c, e % 5, 0, { era: e, seats: 0, alt, rotor: fly ? 1 : 0, gait: E.move === 'walk' && u < 1 ? (1420 - y) : null });
+    drawVehShadow(W / 2, y, -Math.PI / 2, 2, c * 0.62, alt, e);
+    drawVehicle(W / 2, y, -Math.PI / 2, 2, c * 0.62, e % 5, 0, { era: e, seats: 0, alt, rotor: fly ? 1 : 0, gait: E.move === 'walk' && u < 1 ? (1420 - y) : null });
     if (E.move !== 'fly' && u < 1) for (let j = 0; j < 3; j++) { ctx.fillStyle = `rgba(${E.lot.puff},${0.3 * (1 - u)})`; ell(W / 2 + (j - 1) * 30, y + c * 0.55 + j * 14, 18 + j * 6, 12 + j * 4); ctx.fill(); }
   } else {
     rrect(160, 700, 400, 18, 9); ctx.strokeStyle = 'rgba(255,214,150,0.75)'; ctx.lineWidth = 2; ctx.stroke();
@@ -1872,7 +2334,7 @@ function drawStats() {
   for (let i = 0; i < ERA_LEVELS; i++) {
     const L = statsEra * ERA_LEVELS + i + 1, r = playLog.levels[String(L)] || null, y = y0 + i * RH;
     if (i % 2) { ctx.fillStyle = 'rgba(95,220,255,0.06)'; rrect(44, y - RH / 2, 632, RH, 8); ctx.fill(); }
-    if (isHard(L)) { ctx.fillStyle = '#e0245e'; rrect(cx(0) - 28, y - 18, 56, 36, 18); ctx.fill(); text(String(L), cx(0), y + 1, 28, '#ffffff'); }
+    if (isHard(L)) { ctx.fillStyle = tierOf(L) === 2 ? '#a8001c' : '#e0245e'; rrect(cx(0) - 28, y - 18, 56, 36, 18); ctx.fill(); if (tierOf(L) === 2) { ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2; ctx.stroke(); } text(String(L), cx(0), y + 1, 28, '#ffffff'); }
     else text(String(L), cx(0), y + 1, 28, '#ffffff');
     if (!r || !r.attempts) { for (let k = 1; k < heads.length; k++) dashMark(cx(k), y, dim); continue; }
     text(String(r.attempts), cx(1), y + 1, 28, '#ffffff');
@@ -1885,8 +2347,10 @@ function drawStats() {
     text(String(r.extraGates || 0), cx(6), y + 1, 28, '#ffffff');
   }
   const ly = y0 + ERA_LEVELS * RH + 6;
-  ctx.fillStyle = '#e0245e'; rrect(W / 2 + 84, ly - 16, 48, 32, 16); ctx.fill(); text(String((statsEra + 1) * ERA_LEVELS), W / 2 + 108, ly + 1, 24, '#ffffff');
-  text('مرحلة صعبة', W / 2 - 4, ly + 1, 24, '#bfe2f6');
+  ctx.fillStyle = '#e0245e'; rrect(W / 2 + 214, ly - 16, 40, 32, 16); ctx.fill();
+  text('صعبة', W / 2 + 160, ly + 1, 24, '#bfe2f6');
+  ctx.fillStyle = '#a8001c'; rrect(W / 2 + 54, ly - 16, 40, 32, 16); ctx.fill(); ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2; ctx.stroke();
+  text('صعبة جداً', W / 2 - 16, ly + 1, 24, '#bfe2f6');
   text(`نجوم ${ERAS[statsEra].name}: ${eraStars(statsEra)} من ${ERA_LEVELS * 3}`, W / 2, ly + 52, 26, '#ffe2a8');
   bigButton(...STATS_BTNS.back, 'رجوع', 'primary');
   const armed = gt - statsClearT < 3;
@@ -1897,91 +2361,125 @@ function drawStats() {
 function drawFigures() {
   const gr = ctx.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#141026'); gr.addColorStop(1, '#221436');
   ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
-  text('الشخصيات · Figures', W / 2, 38, 34, '#ffffff');
+  text('الشخصيات · Figures', W / 2, 30, 30, '#ffffff');
   const lab = (s, x, y, c = '#ffffff') => text(s, x, y, 24, c, 'center', 700);
+  const C = 76; // the lot's cell at its smallest: every vehicle here is the size it plays at
   for (let e = 0; e < ERAS.length; e++) {
-    const E = ERAS[e], y0 = 72 + e * 172, cy = y0 + 86;
-    ctx.fillStyle = `rgba(${E.accent},0.08)`; rrect(12, y0 + 2, 696, 166, 16); ctx.fill();
+    const E = ERAS[e], y0 = 56 + e * 178, cy = y0 + 92;
+    ctx.fillStyle = `rgba(${E.accent},0.08)`; rrect(8, y0 + 2, 704, 172, 16); ctx.fill();
     ctx.strokeStyle = `rgba(${E.accent},0.4)`; ctx.lineWidth = 1.5; ctx.stroke();
-    text(`${e + 1} · ${E.name}`, 692, y0 + 18, 24, `rgb(${E.accent})`, 'right', 800);
-    drawVehShadow(628, cy + 4, -Math.PI / 2, 1, 104, 0, e); drawVehicle(628, cy + 4, -Math.PI / 2, 1, 104, e % 5, 1, { era: e });
-    lab(E.smallName, 628, y0 + 156);
-    drawVehShadow(484, cy + 4, 0, 2, 62, 0, e); drawVehicle(484, cy + 4, 0, 2, 62, (e + 1) % 5, 2, { era: e });
-    lab(E.bigName, 484, y0 + 156);
-    drawVehShadow(332, cy + 4, Math.PI / 2, 1, 104, 0, e); drawVehicle(332, cy + 4, Math.PI / 2, 1, 104, 2, 0, { era: e, cover: 1 });
-    lab(E.coverName, 332, y0 + 156, '#d6dcff');
-    drawStop(180, (e + 3) % 5, true, 84, y0 + 66, e);
-    lab(E.stopName, 180, y0 + 156);
-    drawRider(52, y0 + 138, (e + 2) % 5, 92, 1, e);
+    text(`${e + 1} · ${E.name}`, 700, y0 + 18, 24, `rgb(${E.accent})`, 'right', 800);
+    drawVehShadow(664, cy + 4, -Math.PI / 2, 2, C, 0, e); drawVehicle(664, cy + 4, -Math.PI / 2, 2, C, e % 5, 2, { era: e }); // small, 2 cells
+    lab(E.smallName, 604, y0 + 160);
+    drawVehShadow(494, cy - 8, 0, 3, C, 0, e); drawVehicle(494, cy - 8, 0, 3, C, (e + 1) % 5, 5, { era: e }); // big, 3 cells
+    lab(E.bigName, 494, y0 + 134);
+    drawVehShadow(326, cy + 4, Math.PI / 2, 2, 62, 0, e); drawVehicle(326, cy + 4, Math.PI / 2, 2, 62, 2, 0, { era: e, cover: 1 });
+    lab(E.coverName, 326, y0 + 160, '#d6dcff');
+    drawStop(176, (e + 3) % 5, true, 110, y0 + 104, e);
+    lab(E.stopName, 176, y0 + 160);
+    if (E.garage) { drawGarageShape(68, y0 + 64, 64, 2, e, [e % 5, (e + 2) % 5, (e + 4) % 5]); lab(E.garageName, 72, y0 + 122, `rgb(${E.accent})`); }
   }
-  const y1 = 72 + 5 * 172;
-  lab('ركاب العصور القديمة', 540, y1 + 16, '#ffe2a8'); lab('ركاب العصر الحديث', 180, y1 + 16, '#bfe2f6');
-  for (let c = 0; c < 5; c++) { drawRider(412 + c * 64, y1 + 128, c, 96, 1, 0); drawRider(52 + c * 64, y1 + 128, c, 96, 1, 4); }
-  hardPill(76, y1 + 186, 1); lab('وسم صعبة', 76, y1 + 230);
-  for (let k = 0; k < 3; k++) drawStar(178 + k * 44, y1 + 186, 18, k < 2);
-  lab('النجوم', 222, y1 + 230);
-  drawIcon('gate', 364, y1 + 184, 54, '#f4f8ff'); lab('موقف إضافي', 364, y1 + 230);
-  padlock(512, y1 + 180, 50, '#d7dde8'); lab('عصر مقفل', 512, y1 + 230);
-  drawHand(626, y1 + 150, -0.45); lab('يد الإرشاد', 640, y1 + 252);
+  const y1 = 56 + 5 * 178;
+  lab('ركاب العصور القديمة', 540, y1 + 14, '#ffe2a8'); lab('ركاب العصر الحديث', 180, y1 + 14, '#bfe2f6');
+  for (let c = 0; c < 5; c++) { drawRider(412 + c * 64, y1 + 118, c, 90, 1, 0); drawRider(52 + c * 64, y1 + 118, c, 90, 1, 4); }
+  hardPill(74, y1 + 160, 0.95); veryHardPill(222, y1 + 160, 0.95);
+  lab('الوسوم', 150, y1 + 200);
+  drawIcon('gate', 364, y1 + 160, 50, '#f4f8ff'); lab('موقف إضافي', 364, y1 + 200);
+  moodFace(470, y1 + 160, 18, 0); moodFace(520, y1 + 160, 18, 0.7); moodFace(570, y1 + 160, 18, 1); angerMark(604, y1 + 140, 11);
+  lab('صبر المسافرين', 530, y1 + 200);
+  drawHand(660, y1 + 128, -0.45);
 }
 
 // ---- Scenes ---------------------------------------------------------------------------------
 function takeTap() { return taps.length ? taps.shift() : null; }
-function puff(x, y, k, rgb) {
-  state.parts.push({ x: x + (rng() - 0.5) * 8, y: y + (rng() - 0.5) * 8, vx: (rng() - 0.5) * 40, vy: (rng() - 0.5) * 40, r: 4 * k, grow: 14 * k, life: 0.6, max: 0.6, puff: true, rgb, under: true, a: 0.55 });
-}
 function updatePlayWorld(dt) {
   const t = state.t, lv = state.lv, e = eraNow(), E = ERAS[e];
-  // timed effects: sounds, rings, dust and downwash as scheduled moments are reached
+  // timed effects: sounds, pops, rings, sparks, dust and downwash as scheduled moments are reached
   for (let k = state.fx.length - 1; k >= 0; k--) {
     const f = state.fx[k]; if (f.t > t) continue;
     state.fx.splice(k, 1);
-    if (f.k === 'board') { sfx.board(f.seat); const [x, y] = seatWorld(f.id, f.seat); for (let j = 0; j < 5; j++) state.parts.push({ x, y, vx: (rng() - 0.5) * 120, vy: -rng() * 120, r: 3, life: 0.4, max: 0.4, col: '#ffffff' }); }
-    else if (f.k === 'dock') { sfx.dock(); const p = parkPose(f.id); state.parts.push({ ring: true, x: p.x, y: p.y, r: 24, grow: 40, life: 0.5, max: 0.5, rgb: E.accent }); }
+    const v = state.vc[f.id];
+    if (f.k === 'board') { // a rider lands in a seat: the seat pops, "+1" floats up, the vehicle squashes
+      sfx.board(f.seat); const sp = seatWorld(f.id, f.seat), x = sp[0], y = sp[1];
+      v.popSeat = f.seat; v.popT = t; v.squashT = t; state.lastBoardT = t;
+      state.anger = Math.max(0, state.anger - tune.calm_per_board);
+      spawn(2, x, y, 0, 0, 6, 0.3, '255,255,255', 0, false, 16);
+      for (let j = 0; j < 4; j++) spawn(0, x, y, (rng() - 0.5) * 140, -rng() * 140, 2.5, 0.35, '#ffffff');
+      floater('+1', x, y - 24, 28, '#ffffff', 0.7, 46);
+      if (f.full) { // the vehicle is full: a flash, a chord, sparks; full ones close together build a combo
+        v.fullT = t; sfx.full();
+        const p = parkPose(f.id);
+        for (let j = 0; j < 12; j++) { const a = j * Math.PI / 6; spawn(3, p.x, p.y, Math.cos(a) * 260, Math.sin(a) * 200 - 40, 3, 0.45, j % 2 ? PAL[lv.taxis[f.id].colour].light : '#fff6c8'); }
+        state.combo = t - state.lastFullT <= tune.combo_window ? state.combo + 1 : 1; state.lastFullT = t;
+        if (state.combo >= 2) {
+          const w = COMBO_WORDS[Math.min(COMBO_WORDS.length - 1, state.combo - 2)];
+          state.floats.push({ text: w, x: W / 2, y: 930, size: 56, col: '#ffd34d', t0: t, life: 1.1, rise: 70, big: true });
+          sfx.combo(state.combo); events.push({ type: 'combo', n: state.combo });
+        }
+      }
+    }
+    else if (f.k === 'dock') { // arrival: a dock bump, a ring in the era's light
+      sfx.dock(e); v.arriveT = t; const p = parkPose(f.id);
+      spawn(2, p.x, p.y, 0, 0, 30, 0.5, E.accent, 0, true, 50);
+      for (let j = 0; j < 6; j++) puff(p.x - v.dir * (lv.taxis[f.id].len * p.cell * 0.4) + (rng() - 0.5) * 30, p.y + (rng() - 0.5) * 40, 1.1, E.lot.puff);
+    }
+    else if (f.k === 'depart-lot') events.push({ type: 'trip', id: f.id });
+    else if (f.k === 'roll') sfx.roll();
     else if (f.k === 'spin') sfx.spin();
-    else if (f.k === 'go') { sfx.go(e); const p = parkPose(f.id); for (let j = 0; j < 6; j++) puff(p.x + (j - 2.5) * 10, p.y - 20 + j * 6, 1.3, E.lot.puff); }
+    else if (f.k === 'go') { sfx.go(e); const p = parkPose(f.id); for (let j = 0; j < 6; j++) puff(p.x - v.dir * (j * 12), p.y + (j - 2.5) * 6, 1.3, E.lot.puff); }
     else if (f.k === 'lift') {
       sfx.whoosh(); const p = parkPose(f.id);
-      state.parts.push({ ring: true, x: p.x, y: p.y, r: 30, grow: 90, life: 0.7, max: 0.7, rgb: '170,240,255' });
-      for (let j = 0; j < 12; j++) { const a = j * Math.PI / 6; state.parts.push({ x: p.x + Math.cos(a) * 30, y: p.y + Math.sin(a) * 24, vx: Math.cos(a) * 160, vy: Math.sin(a) * 120, r: 4 + rng() * 4, life: 0.5, max: 0.5, col: '#d8f6ff', a: 0.7 }); }
+      spawn(2, p.x, p.y, 0, 0, 30, 0.7, '170,240,255', 0, true, 90);
+      for (let j = 0; j < 12; j++) { const a = j * Math.PI / 6; spawn(0, p.x + Math.cos(a) * 30, p.y + Math.sin(a) * 24, Math.cos(a) * 160, Math.sin(a) * 120, 4 + rng() * 4, 0.5, '#d8f6ff', 0, false, 0, 0.7); }
     }
   }
-  // dust behind walking animals, exhaust behind moving or idling motor vehicles
-  if (E.move !== 'fly') {
-    for (let i = 0; i < lv.taxis.length; i++) {
-      const v = state.vc[i], moving = v.walk && t >= v.walk.t0 && t < v.walk.t1;
-      const idle = E.move === 'drive' && !v.walk && !v.gone && !v.parked && canExit(lv, state.S, i) && !state.pending;
-      if (!moving && !idle) continue;
-      const period = moving ? 0.07 : 1.3, ph = moving ? 0 : hash(i, 5) * period;
-      if (Math.floor((t + ph) / period) === Math.floor((t - dt + ph) / period)) continue;
-      const p = taxiPose(i); if (!p) continue;
-      const back = lv.taxis[i].len * p.cell * 0.5;
-      puff(p.x - Math.cos(p.ang) * back, p.y - Math.sin(p.ang) * back, moving ? 1 : 0.6, E.lot.puff);
-    }
+  // era effects behind moving vehicles: sand puffs for animals, exhaust for engines, rotor wash for air taxis
+  for (let i = 0; i < lv.taxis.length; i++) {
+    const v = state.vc[i], moving = (v.trip && t >= v.trip.t0 && t < v.trip.t1) || (v.leave && v.leave.kind === 'ground' && t >= v.leave.go && t < v.leave.mv.t1);
+    const idle = E.move === 'drive' && !v.trip && !v.gone && !v.parked && t >= v.rollT && canExit(lv, state.S, i) && !state.pending;
+    if (!moving && !idle) continue;
+    const period = moving ? (E.move === 'fly' ? 0.11 : 0.06) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
+    if (Math.floor((t + ph) / period) === Math.floor((t - dt + ph) / period)) continue;
+    const p = taxiPose(i); if (!p) continue;
+    if (E.move === 'fly') { spawn(2, p.x + 6, p.y + 10, 0, 0, p.cell * 0.3, 0.4, '170,240,255', 0, true, p.cell * 0.5, 0.6); continue; }
+    const back = lv.taxis[i].len * p.cell * 0.5;
+    puff(p.x - Math.cos(p.ang) * back, p.y - Math.sin(p.ang) * back, moving ? 1 : 0.6, E.lot.puff);
   }
-  // the line shuffles forward
+  // the line shuffles forward on its conveyor
   while (state.qv < lv.queue.length) { const tr = state.tr[state.qv]; if (tr.done || (tr.startT != null && t >= tr.startT)) state.qv++; else break; }
+  let moved = false;
   for (let k = state.qv; k < Math.min(lv.queue.length, state.qv + Q_PER_ROW * 2 + 1); k++) {
-    const tr = state.tr[k]; const [tx, ty] = slotPos(k - state.qv);
+    const tr = state.tr[k]; const sp = slotPos(k - state.qv), tx = sp[0], ty = sp[1];
     if (tr.x == null) { const p = slotPos(k - state.qv + 1); tr.x = p[0]; tr.y = p[1]; }
     const dx = tx - tr.x, dy = ty - tr.y, ee = Math.min(1, dt * tune.queue_ease);
-    tr.moving = Math.abs(dx) + Math.abs(dy) > 1.5;
+    tr.moving = Math.abs(dx) + Math.abs(dy) > 1.5; if (tr.moving) moved = true;
     tr.x += dx * ee; tr.y += dy * ee;
   }
-  for (const tr of state.tr) if (tr.startT != null && !tr.flying && t >= tr.startT) { tr.flying = true; tr.fx0 = tr.x == null ? Q_FRONT_X : tr.x; tr.fy0 = tr.y == null ? Q_ROW1 : tr.y; }
-  for (let k = state.parts.length - 1; k >= 0; k--) {
-    const p = state.parts[k]; p.life -= dt; if (p.life <= 0) { state.parts.splice(k, 1); continue; }
-    if (p.ring) continue;
-    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.g || 0) * dt; p.vx *= 1 - dt * 2; if (!p.g) p.vy *= 1 - dt * 2;
+  if (moved) state.belt += dt * 90;
+  for (let k = Math.max(0, state.qv - 30); k < Math.min(lv.queue.length, state.qv + 30); k++) { const tr = state.tr[k]; if (tr.startT != null && !tr.flying && t >= tr.startT) { tr.flying = true; tr.fx0 = tr.x == null ? Q_FRONT_X : tr.x; tr.fy0 = tr.y == null ? Q_ROW1 : tr.y; } }
+  stepParts(dt);
+  if (state.floats.length && t - state.floats[0].t0 > 2) state.floats = state.floats.filter(f => t - f.t0 < f.life);
+  // the line's patience: once play has begun, riders get cross while nothing comes for them
+  if (scene === 'play' && state.tapped && !state.pending && !state.warn && state.S.qi < lv.queue.length) {
+    const idle = t - Math.max(state.lastBoardT || 0, state.lastTapT || 0);
+    if (t > state.busyUntil && idle > tune.patience_grace) {
+      const before = state.anger;
+      state.anger = Math.min(1, state.anger + dt / tune.patience_time);
+      if (before < 0.5 && state.anger >= 0.5) { sfx.grumble(0); events.push({ type: 'impatient' }); }
+      if (before < 1 && state.anger >= 1) {
+        sfx.grumble(1);
+        if (!state.angryHit) { state.angryHit = true; toast('المسافرون غاضبون من التأخير!'); events.push({ type: 'angry', level: state.level }); }
+      }
+    }
   }
 }
 function moveCursor(dx, dy) {
   const lv = state.lv, S = state.S;
   state.kbd = true;
-  const alive = lv.taxis.filter(c => S.mask >> c.id & 1);
+  const alive = lv.taxis.filter(c => onLot(lv, S.mask, c.id));
   if (!alive.length) return;
   const cur = state.cursor;
-  if (cur < 0 || !(S.mask >> cur & 1)) { state.cursor = (alive.find(c => canExit(lv, S, c.id)) || alive[0]).id; return; }
+  if (cur < 0 || !onLot(lv, S.mask, cur)) { state.cursor = (alive.find(c => canExit(lv, S, c.id)) || alive[0]).id; return; }
   const a = gridGeom(cur); let best = -1, bc = 1e9;
   for (const c of alive) {
     if (c.id === cur) continue;
@@ -1991,10 +2489,10 @@ function moveCursor(dx, dy) {
   }
   if (best >= 0) state.cursor = best;
 }
-function taxiAt(p) {
+function taxiAt(p) { // the vehicle on the lot under a tap: its body, a cell wide (>= 76 px)
   const lv = state.lv, S = state.S; let best = -1, bd = 1e9;
   lv.taxis.forEach(c => {
-    if (!(S.mask >> c.id & 1)) return;
+    if (!onLot(lv, S.mask, c.id) || state.vc[c.id].trip) return;
     const q = gridGeom(c.id), hx = q.fx - q.dx * lv.geo.cell * 0.5, hy = q.fy - q.dy * lv.geo.cell * 0.5;
     const tx = q.fx - q.dx * (q.L - lv.geo.cell * 0.5), ty = q.fy - q.dy * (q.L - lv.geo.cell * 0.5);
     const vx = hx - tx, vy = hy - ty, ll = vx * vx + vy * vy || 1;
@@ -2004,7 +2502,17 @@ function taxiAt(p) {
   });
   return bd <= lv.geo.cell * 0.5 ? best : -1;
 }
+function garageAt(p) {
+  const lv = state.lv, g = lv.geo;
+  return lv.garages.find(gar => inRect(p, g.gx + gar.c * g.cell, g.gy + gar.r * g.cell, g.cell, g.cell));
+}
 function playInput() {
+  if (state.warn) { // the red banner: a tap, Enter or Space starts the level (or it goes by itself)
+    let p, go = pressed('Enter') || pressed('Space') || state.t > tune.warn_time;
+    while ((p = takeTap())) go = true;
+    if (go && state.t > 0.3) { state.warn = 0; state.t = 0; state.bannerT = 0; events.push({ type: 'warn-done', level: state.level }); }
+    return;
+  }
   if (pressed('Escape')) { openEra(eraNow()); return; }
   if (pressed('KeyU')) doUndo();
   if (pressed('KeyR')) { doRestart(); return; }
@@ -2013,7 +2521,7 @@ function playInput() {
   if (pressed('ArrowUp')) moveCursor(0, -1);
   if (pressed('ArrowDown')) moveCursor(0, 1);
   if (pressed('Space') || pressed('Enter')) {
-    if (state.cursor < 0 || !(state.S.mask >> state.cursor & 1)) moveCursor(0, 0);
+    if (state.cursor < 0 || !onLot(state.lv, state.S.mask, state.cursor)) moveCursor(0, 0);
     state.kbd = true;
     if (state.cursor >= 0) doTap(state.cursor);
   }
@@ -2024,7 +2532,8 @@ function playInput() {
     if (inRect(p, ...BTN.undo)) { doUndo(); continue; }
     if (inRect(p, ...BTN.restart)) { doRestart(); return; }
     const i = taxiAt(p);
-    if (i >= 0) { state.kbd = false; state.cursor = i; doTap(i); }
+    if (i >= 0) { state.kbd = false; state.cursor = i; doTap(i); continue; }
+    if (garageAt(p)) { toast('تخرج المركبة حين تفرغ الخانتان أمام المرآب'); sfx.blocked(); }
   }
 }
 const scenes = {
