@@ -1,0 +1,113 @@
+# Where each file in assets/ and vendor/ came from, one entry per file.
+# All art below was generated on the owner's Dreamina account (canvas "Sky Taxi · Game Lab", 2026-11-23),
+# model Seedream 5.0 Lite (t2i, 2K), sprite sheets cut out with Dreamina's image cutout, then sliced and
+# scaled locally (scratchpad slice.js). Full-size originals: design/sky-taxi-art/.
+- path: assets/taxi-small-red.png
+  origin: ai
+  tool: "Dreamina (Seedream 5.0 Lite) + Dreamina cutout; sliced from one 5-colour sheet"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-blue.png
+  origin: ai
+  tool: "same sheet as taxi-small-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-green.png
+  origin: ai
+  tool: "same sheet as taxi-small-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-yellow.png
+  origin: ai
+  tool: "same sheet as taxi-small-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-purple.png
+  origin: ai
+  tool: "same sheet as taxi-small-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-red.png
+  origin: ai
+  tool: "Dreamina (Seedream 5.0 Lite) + Dreamina cutout; sliced from one 5-colour sheet"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-blue.png
+  origin: ai
+  tool: "same sheet as taxi-big-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-green.png
+  origin: ai
+  tool: "same sheet as taxi-big-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-yellow.png
+  origin: ai
+  tool: "same sheet as taxi-big-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-purple.png
+  origin: ai
+  tool: "same sheet as taxi-big-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-red.png
+  origin: ai
+  tool: "Dreamina (Seedream 5.0 Lite, t2i 21:9 2K) + Dreamina cutout, at the owner's request (\"استخدم dreamina لانشاء الشخصيه\", \"بلا طاقية\"): canvas node node_rs2qf7sfe5 \"Sprites: passengers, bare heads (hood down)\" (resource 85743a9e-fb41-40ab-aa2f-06bab16bf5b0), cutout node node_h0a5e30f05 (resource 90c432b2-0276-465d-ab11-3a8e75f4f01f); sliced locally into five figures with one shared crop (same scale and foot line), stray watermark specks cleared, downscaled to 200 px tall. Replaces the earlier hooded riders (node_3q7rpe0rv7)."
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-blue.png
+  origin: ai
+  tool: "same sheet and cutout as rider-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-green.png
+  origin: ai
+  tool: "same sheet and cutout as rider-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-yellow.png
+  origin: ai
+  tool: "same sheet and cutout as rider-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-purple.png
+  origin: ai
+  tool: "same sheet and cutout as rider-red.png"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/deck.jpg
+  origin: ai
+  tool: "Dreamina (Seedream 5.0 Lite), 9:16, scaled to 1080x1920 JPEG; Dreamina's AI marks kept"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/title.jpg
+  origin: ai
+  tool: "Dreamina (Seedream 5.0 Lite), 9:16 key art, scaled to 1080x1920 JPEG; Dreamina's AI marks kept"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: vendor/almarai.css
+  origin: licensed
+  tool: "subset-font 2.3.0 (Arabic + Latin ranges, woff2) embedded as data URIs"
+  source: {vendor: "The Almarai Project Authors", product: "Almarai Regular/Bold/ExtraBold", url: "https://github.com/google/fonts/tree/main/ofl/almarai"}
+  licence: {id: OFL-1.1}
+  date: 2026-11-23
+  ships: true
