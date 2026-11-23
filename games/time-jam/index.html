@@ -21,6 +21,7 @@
 <canvas id="game"></canvas>
 <script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', 'ابجد abc').catch(() => {}));</script>
 <script src="config.js"></script>
+<script src="assets/sfx-data.js"></script>
 <script>
 'use strict';
 // Time Jam (زحمة الزمن): Sky Taxi's proven jam-and-board rules run through five eras, oldest to
@@ -119,8 +120,36 @@ function startAudio() {
     const ac = window.GAME_AUDIO || new AC(); // a check may inject one
     const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
     out.connect(ac.destination); audio = { ac, out };
+    loadSamples();
   }
   if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+// Recorded sounds (assets/sfx-data.js, CC0): decoded once when audio starts; until then, or if decoding
+// fails, the synthesized stand-ins below play instead.
+const SAMPLES = {};
+function loadSamples() {
+  const data = window.SFX_DATA; if (!data || !audio.ac.decodeAudioData) return;
+  for (const k in data) {
+    SAMPLES[k] = [];
+    data[k].forEach((b64, n) => {
+      try {
+        const bin = atob(b64), buf = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        const done = ab => { SAMPLES[k][n] = ab; }, p = audio.ac.decodeAudioData(buf.buffer, done, () => {});
+        if (p && p.catch) p.catch(() => {});
+      } catch (err) { /* this sound stays synthesized */ }
+    });
+  }
+}
+const hasSample = k => SAMPLES[k] && SAMPLES[k].some(Boolean);
+/** Play one take of a recorded sound: n picks the take, rate the pitch and speed, pan left (-1) to right (1). */
+function play(k, n, { rate = 1, vol = 1, pan = 0, delay = 0 } = {}) {
+  if (!audio || muted) return;
+  const takes = SAMPLES[k] && SAMPLES[k].filter(Boolean); if (!takes || !takes.length) return;
+  try {
+    const t = audio.ac.currentTime + delay, src = audio.ac.createBufferSource(), g = audio.ac.createGain();
+    src.buffer = takes[Math.abs(n | 0) % takes.length]; src.playbackRate.value = rate; g.gain.value = vol;
+    src.connect(g).connect(outAt(t, pan)); src.start(t);
+  } catch (err) { /* a stand-in audio context */ }
 }
 function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
 addEventListener('tune', () => setMuted(muted));
@@ -192,6 +221,19 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
       if (now - stepLast < tune.step_gap) return; // many animals at once: keep it a rhythm, not a roar
       stepLast = now; const n = stepN++, v = tune.step_vol, pan = (x / W * 2 - 1) * 0.7;
       const r = k => hash(n, k), lr = n % 2 ? 1 : 0.9; // every foot a little different; left and right not the same
+      if (e === 0 && hasSample('sand')) { // a camel's foot in sand: a soft crunch, a touch deeper for the big ones
+        play('sand', n * 3 + (r(1) * 5 | 0), { rate: (big ? 0.72 : 0.84) * (0.94 + r(2) * 0.12), vol: 0.75 * v, pan });
+        if (big && n % 4 === 0) body(now + 0.02, 2093 * (1 + r(6) * 0.02), 2080, 0.35, 0.03 * v, pan, 'triangle'); // the howdah's little bell
+        return;
+      }
+      if (e === 1 && hasSample('stone') && hasSample('wood')) { // a hoof on stone: fore and hind feet a beat apart make the clip-clop
+        for (const [d, k] of [[0, 1], [0.085 + r(7) * 0.025, 0.88]]) {
+          play('wood', n * 2 + (r(8 + d) * 5 | 0), { rate: 1.45 * k * lr * (0.95 + r(9) * 0.1), vol: 0.38 * v, pan, delay: d });
+          play('stone', n + (r(10 + d) * 5 | 0), { rate: 1.15 * (0.95 + r(11) * 0.1), vol: 0.4 * v, pan, delay: d });
+        }
+        if (big && n % 3 === 0) play('creak', n, { rate: 0.9 + r(12) * 0.25, vol: 0.28 * v, pan, delay: 0.05 }); // the cart's wheels and shafts
+        return;
+      }
       if (e === 0) { // a camel's soft padded foot sinking into sand, then the sand settling
         body(now, 110 * lr * (0.92 + r(1) * 0.16), 48, 0.13, 0.32 * v, pan);
         grain(now, 0.16, 'bandpass', 900 + r(2) * 500, 0.8, 0.16 * v, pan, r(3));
@@ -224,6 +266,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
     if (!audio || muted) return;
     try {
       const t = audio.ac.currentTime, p = Math.pow(1.06, Math.min(k, 10)), v = tune.coin_vol;
+      if (hasSample('clink')) { play('clink', k, { rate: 1.9 * p, vol: 0.5 * v }); play('clink', k + 2, { rate: 2.3 * p, vol: 0.25 * v, delay: 0.06 }); return; }
       grain(t, 0.02, 'highpass', 5000, 0.7, 0.1 * v, 0, k * 0.13); // the strike
       body(t, 2637 * p, 2620 * p, 0.16, 0.11 * v, 0); body(t, 3951 * p, 3940 * p, 0.12, 0.06 * v, 0); // the coin itself
       body(t + 0.055, 3136 * p, 3120 * p, 0.28, 0.09 * v, 0); body(t + 0.055, 4699 * p, 4690 * p, 0.2, 0.04 * v, 0); // it lands on the pile
@@ -234,6 +277,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
     if (!audio || muted) return;
     try {
       const t = audio.ac.currentTime, v = tune.coin_vol;
+      if (hasSample('coins') && hasSample('bell')) { play('coins', 0, { vol: 0.55 * v }); play('bell', 0, { rate: 1.7, vol: 0.3 * v, delay: 0.1 }); return; }
       grain(t, 0.09, 'bandpass', 1400, 1.2, 0.16 * v, 0, 0.3); // ka- : the drawer's latch
       body(t + 0.08, 2093, 2090, 0.6, 0.12 * v, 0, 'triangle'); body(t + 0.08, 2794, 2790, 0.5, 0.08 * v, 0); body(t + 0.08, 4186, 4180, 0.35, 0.04 * v, 0); // -ching: the bell
       for (let j = 0; j < 4; j++) body(t + 0.16 + j * 0.045, 3500 + hash(j, 31) * 1500, 3400, 0.09, 0.05 * v, 0); // coins tumble in

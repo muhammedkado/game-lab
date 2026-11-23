@@ -423,6 +423,13 @@
   model: "seedream_4.0"
   date: 2026-11-23
   ships: true
+- path: assets/sfx-data.js
+  origin: licensed
+  tool: "ffmpeg: trimmed, mono MP3 64k, base64 in a JS file so it plays from file://"
+  source: {vendor: "Kenney (kenney.nl)", product: "Impact Sounds (footstep_snow, footstep_concrete, impactWood_light, impactMetal_light, impactBell_heavy) + RPG Audio (creak, handleCoins)", url: "https://kenney.nl/assets/impact-sounds"}
+  licence: {id: CC0-1.0}
+  date: 2026-11-23
+  ships: true
 - path: vendor/almarai.css
   origin: licensed
   tool: "subset-font 2.3.0 (Arabic + Latin ranges, woff2) embedded as data URIs"
