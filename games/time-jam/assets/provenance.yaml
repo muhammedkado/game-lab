@@ -425,8 +425,12 @@
   ships: true
 - path: assets/sfx-data.js
   origin: licensed
-  tool: "ffmpeg: trimmed, mono MP3 64k, base64 in a JS file so it plays from file://"
-  source: {vendor: "Kenney (kenney.nl)", product: "Impact Sounds (footstep_snow, footstep_concrete, impactWood_light, impactMetal_light, impactBell_heavy) + RPG Audio (creak, handleCoins)", url: "https://kenney.nl/assets/impact-sounds"}
+  tool: "ffmpeg: cut, faded, peak-normalized to -2 dB, mono MP3, base64 in a JS file so it plays from file://"
+  source:
+    - {vendor: "Kenney (kenney.nl)", product: "Impact Sounds + RPG Audio (sand/stone/wood steps, creak, metal clink, coins, bell)", url: "https://kenney.nl/assets/impact-sounds"}
+    - {vendor: "SSE Library (archive.org)", product: "ANIMALS: donkey braying, camels grunt and call, horse trots on hard dirt; VEHICLES: small motorcycle start, 2-stroke dirt bike", url: "https://archive.org/details/SSE_Library_ANIMALS"}
+    - {vendor: "The Designer's Choice UCS Collection (archive.org)", product: "Animals: donkey braying; Vehicles: Toyota start/idle, horn honks, car door close, drive away", url: "https://archive.org/details/Designers-Choice-Collection-Vehicles"}
+    - {vendor: "OpenGameArt", product: "Camel Groan (craigsmith recording), Helicopter Sounds, Sci-Fi Vehicle Sound", url: "https://opengameart.org/content/camel-groan"}
   licence: {id: CC0-1.0}
   date: 2026-11-23
   ships: true

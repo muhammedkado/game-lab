@@ -136,6 +136,8 @@ window.CONFIG = {
   step_vol: { value: 1, min: 0, max: 2, step: 0.05 },           // loudness of the animals' footfalls
   step_gap: { value: 0.07, min: 0, max: 0.3, step: 0.01 },       // shortest gap between two footfall sounds (s), so a crowd stays a rhythm
   coin_vol: { value: 1, min: 0, max: 2, step: 0.05 },           // loudness of the coin as each rider pays, and the till when a vehicle is full
+  voice_vol: { value: 0.45, min: 0, max: 1.5, step: 0.05 },      // loudness of the camels' groans and the donkeys' brays
+  voice_gap: { value: 2.5, min: 0.5, max: 10, step: 0.5 },       // shortest gap between two animal calls (s), so they stay a treat
   print_life: { value: 2.6, min: 0, max: 6, step: 0.1 },        // seconds a hoofprint stays in the ground
   hover_alt: { value: 0.14, min: 0, max: 0.4, step: 0.02 },    // how high a gliding air taxi hovers (scale and shadow)
   roll_time: { value: 0.45, min: 0.1, max: 1.2, step: 0.05 },  // a garage vehicle rolling out onto its strip

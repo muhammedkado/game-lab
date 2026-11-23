@@ -142,14 +142,24 @@ function loadSamples() {
 }
 const hasSample = k => SAMPLES[k] && SAMPLES[k].some(Boolean);
 /** Play one take of a recorded sound: n picks the take, rate the pitch and speed, pan left (-1) to right (1). */
-function play(k, n, { rate = 1, vol = 1, pan = 0, delay = 0 } = {}) {
-  if (!audio || muted) return;
-  const takes = SAMPLES[k] && SAMPLES[k].filter(Boolean); if (!takes || !takes.length) return;
+function play(k, n, { rate = 1, vol = 1, pan = 0, delay = 0, dur = 0 } = {}) {
+  if (!audio || muted) return false;
+  const takes = SAMPLES[k] && SAMPLES[k].filter(Boolean); if (!takes || !takes.length) return false;
   try {
     const t = audio.ac.currentTime + delay, src = audio.ac.createBufferSource(), g = audio.ac.createGain();
-    src.buffer = takes[Math.abs(n | 0) % takes.length]; src.playbackRate.value = rate; g.gain.value = vol;
-    src.connect(g).connect(outAt(t, pan)); src.start(t);
-  } catch (err) { /* a stand-in audio context */ }
+    src.buffer = takes[Math.abs(n | 0) % takes.length]; src.playbackRate.value = rate; g.gain.setValueAtTime(vol, t);
+    if (dur > 0) { g.gain.setValueAtTime(vol, t + dur * 0.7); g.gain.linearRampToValueAtTime(0.0001, t + dur); } // cut short with a soft fade
+    src.connect(g).connect(outAt(t, pan)); src.start(t); if (dur > 0) src.stop(t + dur + 0.02);
+    return true;
+  } catch (err) { return false; /* a stand-in audio context */ }
+}
+let voiceLast = -9, voiceN = 0;
+/** The animal speaks (a camel's groan, a donkey's bray), not more often than every voice_gap seconds. */
+function voice(e, big, pan, vol = 1) {
+  if (!audio || muted || audio.ac.currentTime - voiceLast < tune.voice_gap) return false;
+  const n = voiceN++, k = e === 0 ? 'camel' : 'donkey', rate = (big ? 0.9 : 1.04) * (0.95 + hash(n, 41) * 0.1);
+  if (!play(k, n, { rate, vol: tune.voice_vol * vol, pan, dur: e === 0 ? 1.4 : 1.6 })) return false;
+  voiceLast = audio.ac.currentTime; return true;
 }
 function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
 addEventListener('tune', () => setMuted(muted));
@@ -226,11 +236,8 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
         if (big && n % 4 === 0) body(now + 0.02, 2093 * (1 + r(6) * 0.02), 2080, 0.35, 0.03 * v, pan, 'triangle'); // the howdah's little bell
         return;
       }
-      if (e === 1 && hasSample('stone') && hasSample('wood')) { // a hoof on stone: fore and hind feet a beat apart make the clip-clop
-        for (const [d, k] of [[0, 1], [0.085 + r(7) * 0.025, 0.88]]) {
-          play('wood', n * 2 + (r(8 + d) * 5 | 0), { rate: 1.45 * k * lr * (0.95 + r(9) * 0.1), vol: 0.38 * v, pan, delay: d });
-          play('stone', n + (r(10 + d) * 5 | 0), { rate: 1.15 * (0.95 + r(11) * 0.1), vol: 0.4 * v, pan, delay: d });
-        }
+      if (e === 1 && hasSample('hoof')) { // real hooves on hard ground: fore and hind feet a beat apart make the clip-clop
+        for (const [d, k] of [[0, 1], [0.085 + r(7) * 0.025, 0.9]]) play('hoof', n * 2 + (r(8 + d) * 6 | 0), { rate: 1.12 * k * lr * (0.95 + r(9) * 0.1), vol: 0.5 * v, pan, delay: d });
         if (big && n % 3 === 0) play('creak', n, { rate: 0.9 + r(12) * 0.25, vol: 0.28 * v, pan, delay: 0.05 }); // the cart's wheels and shafts
         return;
       }
@@ -248,17 +255,23 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
       }
     } catch (err) { /* a stand-in audio context may not have filters */ }
   },
-  tap(e) {
-    const m = ERAS[e].move;
-    if (m === 'walk') { sfx.step(e, false, W / 2); tone(e ? 880 : 1175, 0.12, 'sine', 0.06, 0.04); }
-    else if (m === 'drive') { sweep(70, 200, 0.28, 'sawtooth', 0.07); tone(520, 0.06, 'sine', 0.12, 0.06); }
-    else { sweep(160, 520, 0.22, 'sawtooth', 0.06); tone(660, 0.07, 'sine', 0.16, 0.05); }
+  /** A vehicle is sent: the animal grunts or brays, the engine starts, the rotors spin up. */
+  tap(e, big = false, x = W / 2) {
+    const m = ERAS[e].move, pan = (x / W * 2 - 1) * 0.6, n = voiceN;
+    if (m === 'walk') { sfx.step(e, big, x); if (!voice(e, big, pan)) tone(e ? 880 : 1175, 0.12, 'sine', 0.05, 0.04); return; }
+    if (m === 'drive') {
+      if (e === 2 && play('moto', n, { rate: big ? 0.85 : 1.15, vol: 0.5, pan, dur: 1.3 })) return;  // a two-stroke motorbike, the tuk-tuk a bit deeper
+      if (e === 3 && play('start', n, { rate: big ? 0.88 : 1, vol: 0.55, pan, dur: 1.5 })) return;    // a car starter and the engine catching
+      sweep(70, 200, 0.28, 'sawtooth', 0.07); tone(520, 0.06, 'sine', 0.12, 0.06); return;
+    }
+    if (play('rotor', n, { rate: big ? 1.3 : 1.6, vol: 0.45, pan, dur: 1.1 })) return; // rotors whirring up
+    sweep(160, 520, 0.22, 'sawtooth', 0.06); tone(660, 0.07, 'sine', 0.16, 0.05);
   },
   blocked() { tone(140, 0.12, 'square', 0.1); tone(104, 0.2, 'square', 0.09, 0.09); },
   dock(e) { // arriving at a stop: a soft clop and bell, a brake hiss and chime, a landing chime
     const m = ERAS[e].move;
     if (m === 'walk') { tone(1046, 0.25, 'sine', 0.09, 0.05); tone(1568, 0.3, 'sine', 0.04, 0.09); }
-    else if (m === 'drive') { rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.12, 0.08); }
+    else if (m === 'drive') { if (!(e === 3 && play('door', 0, { rate: 0.95, vol: 0.5, delay: 0.15 }))) rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.08, 0.08); }
     else { tone(784, 0.09, 'sine', 0.18); tone(1175, 0.16, 'sine', 0.14, 0.07); }
   },
   /** A rider pays the fare: a bright coin clink (two metal partials and a tiny ring), rising seat by seat. */
@@ -287,12 +300,19 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   roll() { rush(0.35, 300, 900, 0.12); tone(196, 0.12, 'triangle', 0.12, 0.05); }, // a garage door rattles open
   grumble(k) { tone(150 - k * 20, 0.18, 'sawtooth', 0.06); tone(130 - k * 20, 0.24, 'sawtooth', 0.06, 0.14); },
   warn() { [110, 110, 98].forEach((f, i) => tone(f, 0.22, 'square', 0.12, i * 0.2)); tone(880, 0.5, 'sawtooth', 0.05, 0.6); },
-  go(e) { // a full ground vehicle leaves through its stop
-    if (ERAS[e].move === 'walk') { tone(1320, 0.4, 'sine', 0.07); rush(0.5, 400, 1200, 0.08); }
-    else { sweep(80, 380, 0.6, 'sawtooth', 0.07); if (e === 3) { tone(440, 0.14, 'square', 0.06, 0.05); tone(554, 0.2, 'square', 0.06, 0.2); } else tone(660, 0.12, 'square', 0.05, 0.08); }
+  go(e, big = false, x = W / 2) { // a full ground vehicle leaves through its stop: a happy call, or a horn and the engine pulling away
+    const pan = (x / W * 2 - 1) * 0.6, n = voiceN++;
+    if (ERAS[e].move === 'walk') { tone(1320, 0.4, 'sine', 0.05); voice(e, big, pan, 0.8); return; }
+    const horn = e === 2 ? { rate: big ? 1.15 : 1.35, vol: 0.3 } : { rate: big ? 0.9 : 1, vol: 0.3 };
+    if (play('horn', n, { ...horn, pan, dur: 0.5 })) { // a toot, then the engine pulls away
+      if (e === 2) play('moto', n + 1, { rate: big ? 0.9 : 1.2, vol: 0.45, pan, dur: 1.2, delay: 0.3 });
+      else play('away', 0, { rate: big ? 0.92 : 1.05, vol: 0.45, pan, dur: 1.6, delay: 0.25 });
+      return;
+    }
+    sweep(80, 380, 0.6, 'sawtooth', 0.07); if (e === 3) { tone(440, 0.14, 'square', 0.06, 0.05); tone(554, 0.2, 'square', 0.06, 0.2); } else tone(660, 0.12, 'square', 0.05, 0.08);
   },
-  spin() { sweep(90, 340, 0.4, 'sawtooth', 0.05); },
-  whoosh() { rush(0.9, 300, 2600, 0.5); sweep(200, 900, 0.7, 'triangle', 0.08); },
+  spin() { if (!play('rotor', voiceN++, { rate: 1.45, vol: 0.5, dur: 1.4 })) sweep(90, 340, 0.4, 'sawtooth', 0.05); },
+  whoosh() { if (!play('liftoff', 0, { rate: 1.1, vol: 0.5 })) rush(0.9, 300, 2600, 0.5); sweep(200, 900, 0.7, 'triangle', 0.04); },
   stuck() { tone(392, 0.2, 'sawtooth', 0.1); tone(330, 0.2, 'sawtooth', 0.1, 0.17); tone(247, 0.45, 'sawtooth', 0.1, 0.34); },
   win() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.28, 'triangle', 0.18, i * 0.09)); },
   era() { [392, 523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.34, 'triangle', 0.14, i * 0.08)); rush(1.2, 200, 3000, 0.25, 0.2); },
@@ -1672,7 +1692,7 @@ function doTap(i) {
   schedule(evs);
   rollOut(S.mask);
   state.lastTapT = state.t;
-  sfx.tap(eraOf(state.level)); events.push({ type: 'tap', id: i });
+  { const tp = taxiPose(i); sfx.tap(eraOf(state.level), big3(lv.taxis[i].len), tp ? tp.x : W / 2); } events.push({ type: 'tap', id: i });
   const S2 = state.S;
   if (S2.qi >= lv.queue.length) state.pending = 'win';
   else if (S2.gates.length >= nGates() || !lv.taxis.some(c => canExit(lv, S2, c.id))) state.pending = 'stuck';
@@ -2614,7 +2634,7 @@ function updatePlayWorld(dt) {
     else if (f.k === 'depart-lot') events.push({ type: 'trip', id: f.id });
     else if (f.k === 'roll') sfx.roll();
     else if (f.k === 'spin') sfx.spin();
-    else if (f.k === 'go') { sfx.go(e); const p = parkPose(f.id); for (let j = 0; j < 4; j++) puff(p.x - v.dir * (lv.taxis[f.id].len * p.cell * 0.4 + j * 14), p.y + (j - 1.5) * 12, 1.4, E.lot.puff, v.dir > 0 ? 0 : Math.PI); }
+    else if (f.k === 'go') { const p = parkPose(f.id); sfx.go(e, big3(lv.taxis[f.id].len), p.x); for (let j = 0; j < 4; j++) puff(p.x - v.dir * (lv.taxis[f.id].len * p.cell * 0.4 + j * 14), p.y + (j - 1.5) * 12, 1.4, E.lot.puff, v.dir > 0 ? 0 : Math.PI); }
     else if (f.k === 'lift') {
       sfx.whoosh(); const p = parkPose(f.id);
       fxs(FX.wash, pick(FX.wash.ring), p.x, p.y, 0, 0, p.cell * 0.6, p.cell * 2.2, 0.8, 0.85, rng() * 6.3, 0, true, true);
