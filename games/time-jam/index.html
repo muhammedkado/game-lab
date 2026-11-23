@@ -154,11 +154,13 @@ function play(k, n, { rate = 1, vol = 1, pan = 0, delay = 0, dur = 0 } = {}) {
   } catch (err) { return false; /* a stand-in audio context */ }
 }
 let voiceLast = -9, voiceN = 0;
-/** The animal speaks (a camel's groan, a donkey's bray), not more often than every voice_gap seconds. */
+/** The animal speaks, not more often than every voice_gap seconds: camels groan; in the donkey era the small
+ *  donkeys bray the full "hee-haw, hee-haw" and the cart's animal whinnies like a horse. */
 function voice(e, big, pan, vol = 1) {
   if (!audio || muted || audio.ac.currentTime - voiceLast < tune.voice_gap) return false;
-  const n = voiceN++, k = e === 0 ? 'camel' : 'donkey', rate = (big ? 0.9 : 1.04) * (0.95 + hash(n, 41) * 0.1);
-  if (!play(k, n, { rate, vol: tune.voice_vol * vol, pan, dur: e === 0 ? 1.4 : 1.6 })) return false;
+  const n = voiceN++, k = e === 0 ? 'camel' : big ? 'horse' : 'donkey';
+  const rate = k === 'donkey' ? 0.97 + hash(n, 41) * 0.08 : (big ? 0.9 : 1.04) * (0.95 + hash(n, 41) * 0.1);
+  if (!play(k, n, { rate, vol: tune.voice_vol * vol, pan, dur: k === 'camel' ? 1.5 : k === 'horse' ? 1.8 : 2.4 })) return false;
   voiceLast = audio.ac.currentTime; return true;
 }
 function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
@@ -260,7 +262,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
     const m = ERAS[e].move, pan = (x / W * 2 - 1) * 0.6, n = voiceN;
     if (m === 'walk') { sfx.step(e, big, x); if (!voice(e, big, pan)) tone(e ? 880 : 1175, 0.12, 'sine', 0.05, 0.04); return; }
     if (m === 'drive') {
-      if (e === 2 && play('moto', n, { rate: big ? 0.85 : 1.15, vol: 0.5, pan, dur: 1.3 })) return;  // a two-stroke motorbike, the tuk-tuk a bit deeper
+      if (e === 2 && play('moto', n, { rate: big ? 0.9 : 1, vol: 0.5, pan, dur: 1.8 })) return;  // a motorbike engine starting and running, the tuk-tuk a bit deeper
       if (e === 3 && play('start', n, { rate: big ? 0.88 : 1, vol: 0.55, pan, dur: 1.5 })) return;    // a car starter and the engine catching
       sweep(70, 200, 0.28, 'sawtooth', 0.07); tone(520, 0.06, 'sine', 0.12, 0.06); return;
     }
@@ -305,7 +307,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
     if (ERAS[e].move === 'walk') { tone(1320, 0.4, 'sine', 0.05); voice(e, big, pan, 0.8); return; }
     const horn = e === 2 ? { rate: big ? 1.15 : 1.35, vol: 0.3 } : { rate: big ? 0.9 : 1, vol: 0.3 };
     if (play('horn', n, { ...horn, pan, dur: 0.5 })) { // a toot, then the engine pulls away
-      if (e === 2) play('moto', n + 1, { rate: big ? 0.9 : 1.2, vol: 0.45, pan, dur: 1.2, delay: 0.3 });
+      if (e === 2) play('motogo', n, { rate: big ? 0.92 : 1, vol: 0.45, pan, dur: 2, delay: 0.3 }); // the motorbike roars off
       else play('away', 0, { rate: big ? 0.92 : 1.05, vol: 0.45, pan, dur: 1.6, delay: 0.25 });
       return;
     }
