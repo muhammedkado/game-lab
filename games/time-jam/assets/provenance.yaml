@@ -1,0 +1,408 @@
+# Where each file in assets/ came from. Every image was generated with Dreamina on the owner's account
+# (canvas "Sky Taxi · Game Lab", 2026-11-23). Sprite sheets were cut out with Dreamina's image cutout, sliced
+# locally into one sprite per colour, resized and saved as WebP. Full-size originals: design/sky-taxi-art/.
+# Backgrounds keep Dreamina's AI marks. Riders: the modern set was made at the owner's request (bare heads),
+# the traditional set is an image-to-image variant of it (robes, bare heads).
+- path: assets/bg-1.jpg
+  origin: ai
+  tool: "Dreamina; background"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/bg-2.jpg
+  origin: ai
+  tool: "Dreamina; background"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/bg-3.jpg
+  origin: ai
+  tool: "Dreamina; background"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/bg-4.jpg
+  origin: ai
+  tool: "Dreamina; background"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/bg-5.jpg
+  origin: ai
+  tool: "Dreamina; background"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-howdah-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-howdah-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-howdah-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-howdah-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-howdah-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/camel-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/car-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/car-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/car-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/car-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/car-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-cart-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-cart-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-cart-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-cart-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-cart-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/donkey-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/motorbike-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/motorbike-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/motorbike-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/motorbike-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/motorbike-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "see prototypes/sky-taxi/assets/provenance.yaml"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "see prototypes/sky-taxi/assets/provenance.yaml"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-old-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-old-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-old-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-old-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-old-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "see prototypes/sky-taxi/assets/provenance.yaml"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "see prototypes/sky-taxi/assets/provenance.yaml"
+  date: 2026-11-23
+  ships: true
+- path: assets/rider-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "see prototypes/sky-taxi/assets/provenance.yaml"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-big-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/taxi-small-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/title.jpg
+  origin: ai
+  tool: "Dreamina; background"
+  model: "seedream_5.0_lite"
+  date: 2026-11-23
+  ships: true
+- path: assets/tuktuk-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/tuktuk-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/tuktuk-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/tuktuk-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/tuktuk-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/van-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/van-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/van-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/van-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/van-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: vendor/almarai.css
+  origin: licensed
+  tool: "subset-font 2.3.0 (Arabic + Latin ranges, woff2) embedded as data URIs"
+  source: {vendor: "The Almarai Project Authors", product: "Almarai", url: "https://github.com/google/fonts/tree/main/ofl/almarai"}
+  licence: {id: OFL-1.1}
+  date: 2026-11-23
+  ships: true
