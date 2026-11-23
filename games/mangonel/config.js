@@ -19,6 +19,8 @@ window.CONFIG = {
   stoneDensity: { value: 6, min: 1, max: 15, step: 0.5 },      // stone radius 0.28 m -> about 1.5 kg
   boulderDensity: { value: 11, min: 2, max: 25, step: 0.5 },   // boulder radius 0.42 m -> about 6 kg
   fireDensity: { value: 3.5, min: 1, max: 10, step: 0.5 },     // fire pot radius 0.3 m -> about 1 kg
+  splitDensity: { value: 6, min: 1, max: 15, step: 0.5 },      // each split-shot pebble, radius 0.2 m -> about 0.75 kg
+  wakeSpeed: { value: 0.15, min: 0.02, max: 1, step: 0.01 },   // m/s: a body moving faster than this wakes a sleeping one it touches
 
   // ---- Throwing ----
   minSpeed: { value: 4, min: 1, max: 10, step: 0.5 },          // m/s at 0% power
@@ -27,6 +29,8 @@ window.CONFIG = {
   dragMax: { value: 330, min: 150, max: 600, step: 10 },       // logical px of pull for 100% power
   dragMin: { value: 40, min: 10, max: 120, step: 5 },          // a shorter pull cancels the throw
   previewTime: { value: 0.85, min: 0.2, max: 3, step: 0.05 },  // seconds of flight the dotted arc shows
+  splitSpread: { value: 10, min: 2, max: 16, step: 0.5 },       // degrees between the three pebbles of the split shot
+  introTime: { value: 1.2, min: 0, max: 3, step: 0.1 },        // seconds of the level card (jars and ammo) before control; a tap skips it
   aimKeySpeed: { value: 30, min: 5, max: 90, step: 5 },        // degrees per second while Up/Down is held
   powerKeySpeed: { value: 0.5, min: 0.1, max: 2, step: 0.05 }, // power per second while Left/Right is held
   swingTime: { value: 0.13, min: 0.05, max: 0.5, step: 0.01 }, // arm swing before release, seconds
@@ -61,4 +65,6 @@ window.CONFIG = {
   l5Stone: { value: 3, min: 1, max: 9, step: 1 },
   l5Boulder: { value: 1, min: 1, max: 9, step: 1 },
   l5Fire: { value: 1, min: 1, max: 9, step: 1 },
+  l6Split: { value: 2, min: 1, max: 9, step: 1 },
+  l6Stone: { value: 1, min: 0, max: 9, step: 1 },
 };

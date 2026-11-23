@@ -18,6 +18,7 @@ window.CONFIG = {
   shakeTime: { value: 0.35, min: 0.1, max: 1, step: 0.05 },// seconds a wrong tap shakes
   msgTime: { value: 2.4, min: 0.8, max: 6, step: 0.1 },    // seconds a kind word stays
   nextDelay: { value: 0.7, min: 0, max: 3, step: 0.1 },    // seconds after the tick before Next opens
+  resetDelay: { value: 0.5, min: 0, max: 3, step: 0.1 },   // seconds a dead-end paint mix shows before the pots come back (riddle 6); a touch brings them back at once
   boil: { value: 0.13, min: 0.05, max: 0.5, step: 0.01 },  // seconds per boiling-line frame
   jitter: { value: 1.5, min: 0, max: 4, step: 0.1 },       // logical px each ink point wobbles
 

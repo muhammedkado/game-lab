@@ -36,7 +36,7 @@ const W = 720, H = 1280;        // logical size: portrait phone canvas
 const PIXEL = false;
 const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
 const TITLE = 'أسطرلاب · Astrolabe';
-const CONTROLS = ['اسحب حلقة لتديرها · انقرها لتدور خطوة', 'المفاتيح: الأسهم · U تراجع · H تلميح · R إعادة · M'];
+const CONTROLS = ['اسحب حلقة لتديرها · انقرها لتدور خطوة', 'المفاتيح: الأسهم · U تراجع · H تلميح · R إعادة · M · S'];
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
 let seed;
@@ -131,6 +131,9 @@ function sFail() { tone(110, 0.3, 'triangle', 0.3); tone(82, 0.4, 'sine', 0.25, 
 function sUndo() { tone(520, 0.06, 'triangle', 0.12); tone(390, 0.06, 'triangle', 0.1, 0.05); }
 function sHint() { tone(880, 0.3, 'sine', 0.12); tone(1174.66, 0.4, 'sine', 0.1, 0.12); }
 function sClick() { tone(660, 0.05, 'triangle', 0.1); }
+function sBlocked() { tone(92, 0.14, 'square', 0.1); tone(150, 0.09, 'triangle', 0.16, 0.02); tone(1900, 0.02, 'square', 0.03, 0.04); }
+function sUnlock() { tone(2400, 0.03, 'square', 0.05); tone(1700, 0.04, 'square', 0.05, 0.06); tone(880, 0.3, 'sine', 0.1, 0.1); tone(1318.5, 0.35, 'sine', 0.06, 0.14); }
+function sRelock() { tone(1300, 0.03, 'square', 0.04); tone(330, 0.09, 'triangle', 0.1, 0.03); }
 
 // ---- Save: personal bests -----------------------------------------------------------------
 const SAVE_KEY = 'astrolabe-v1';
@@ -140,6 +143,21 @@ function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save));
 const NLEV = () => tune.levels.length;
 function firstUnplayed() { for (let i = 0; i < NLEV(); i++) if (!save.best[i]) return i; return 0; }
 function totalStars() { let s = 0; for (const k in save.best) s += save.best[k].stars || 0; return s; }
+
+// ---- S1: the local play log: per level attempts, wins, best time and hints, on this device only ----
+const LOG_KEY = 'gamelab:astrolabe:log';
+let playLog = { v: 1, levels: {} };
+try { const s = JSON.parse(localStorage.getItem(LOG_KEY) || 'null'); if (s && s.levels) playLog = s; } catch (e) { /* plays without storage */ }
+function logRow(li) { const k = String(li + 1); return playLog.levels[k] || (playLog.levels[k] = { attempts: 0, wins: 0, best: null, hints: 0 }); }
+/** Counts one attempt, win (val: seconds) or hint for level li and saves the log. */
+function logEvent(li, what, val) {
+  const r = logRow(li);
+  if (what === 'attempt') r.attempts++;
+  else if (what === 'hint') r.hints++;
+  else if (what === 'win') { r.wins++; if (r.best === null || val < r.best) r.best = val; }
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(playLog)); } catch (e) { /* ignore */ }
+}
+const isHard = li => !!(tune.levels[li] && tune.levels[li].hard); // S2: the level says so before it starts
 
 // ---- Helpers ------------------------------------------------------------------------------
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -186,33 +204,113 @@ function makeLayout(L) {
   }
   return { R, sockets, links, masks, solved, eff };
 }
-function winDigits(lv, dig) {
-  for (const p of lv.sockets) for (let i = 0; i < lv.R; i++) if (!(lv.masks[i] >> mod12(p - dig[i]) & 1)) return false;
-  return true;
+/** A1 star locks: lock k keeps ring locks[k].ring from turning until socket locks[k].sock is lit; then it
+ *  stays open. A move of ring i is blocked while any ring it turns (the gear train included) wears a
+ *  closed lock. Ring moves commute, so a lock on a ring that turns no other ring can always be waited out
+ *  at no cost: locks go on gear drivers first. The solver then decides whether the layout is any good. */
+function addStarLocks(lv, n) {
+  lv.locks = [];
+  const rings = [...Array(lv.R).keys()], socks = [...Array(lv.sockets.length).keys()];
+  for (const a of [rings, socks]) for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  const drives = i => lv.eff[i].some((v, j) => v && j !== i);
+  const order = rings.filter(drives).concat(rings.filter(i => !drives(i)));
+  for (let k = 0; k < n && k < order.length; k++) lv.locks.push({ ring: order[k], sock: socks[k % socks.length] });
 }
-/** Breadth-first search from every lit state outward: dist[state] = fewest single steps to light every socket. */
-function bfs(lv) {
-  const R = lv.R, N = P12[R], dist = new Int8Array(N).fill(-1), q = new Int32Array(N), dig = new Int32Array(R);
-  let qt = 0, qh = 0;
-  for (let s = 0; s < N; s++) {
+const popc = m => { let c = 0; for (; m; m &= m - 1) c++; return c; };
+/** The solver. A state is (ring positions, which locks are open): code = rotCode + 12^R * openMask.
+ *  dist[code] = fewest single steps to light every socket at once (-1: never), for every state, so the
+ *  par, the hint and the move budget all read the same exact numbers. Locks only ever open, so masks are
+ *  solved from the most open to the least; inside one mask every move can be undone, so a bucketed
+ *  breadth-first search runs outward from the lit states and from the moves that open a lock.
+ *  With no locks this is the plain breadth-first search over every ring position. */
+function solve(lv) {
+  const R = lv.R, NR = P12[R], locks = lv.locks || [], L = locks.length, NM = 1 << L;
+  const dist = new Int8Array(NR * NM).fill(-1), lit = new Uint8Array(NR), openBy = new Uint8Array(NR), dig = new Int32Array(R);
+  const allS = (1 << lv.sockets.length) - 1;
+  for (let s = 0; s < NR; s++) {
     let x = s; for (let j = 0; j < R; j++) { dig[j] = x % 12; x = (x / 12) | 0; }
-    if (winDigits(lv, dig)) { dist[s] = 0; q[qt++] = s; }
+    let m = 0;
+    lv.sockets.forEach((p, k) => { for (let i = 0; i < R; i++) if (!(lv.masks[i] >> mod12(p - dig[i]) & 1)) return; m |= 1 << k; });
+    lit[s] = m;
+    let o = 0; locks.forEach((l, k) => { if (m >> l.sock & 1) o |= 1 << k; }); openBy[s] = o;
   }
-  while (qh < qt) {
-    const s = q[qh++], d = dist[s] + 1;
-    let x = s; for (let j = 0; j < R; j++) { dig[j] = x % 12; x = (x / 12) | 0; }
-    for (let i = 0; i < R; i++) {
-      const e = lv.eff[i];
-      for (let dir = -1; dir <= 1; dir += 2) {
-        let t = 0; for (let j = R - 1; j >= 0; j--) t = t * 12 + (dig[j] + dir * e[j] + 12) % 12;
-        if (dist[t] < 0) { dist[t] = d; q[qt++] = t; }
+  const needs = lv.eff.map(e => { let b = 0; locks.forEach((l, k) => { if (e[l.ring]) b |= 1 << k; }); return b; });
+  const next = (s, i, dir) => { // the ring code after one step of ring i
+    let x = s, t = 0; const e = lv.eff[i];
+    for (let j = 0; j < R; j++) { t += ((x % 12 + dir * e[j] + 12) % 12) * P12[j]; x = (x / 12) | 0; }
+    return t;
+  };
+  const order = [...Array(NM).keys()].sort((a, b) => popc(b) - popc(a));
+  for (const m of order) {
+    const base = m * NR, bk = [];
+    for (let s = 0; s < NR; s++) {
+      if (openBy[s] & ~m) continue; // a closed lock whose socket is lit: never a real state
+      let d = lit[s] === allS ? 0 : -1;
+      if (d < 0 && L) for (let i = 0; i < R; i++) {
+        if (needs[i] & ~m) continue;
+        for (let dir = -1; dir <= 1; dir += 2) {
+          const t = next(s, i, dir), m2 = m | openBy[t];
+          if (m2 === m) continue;
+          const dd = dist[m2 * NR + t];
+          if (dd >= 0 && (d < 0 || dd + 1 < d)) d = dd + 1;
+        }
+      }
+      if (d >= 0) { dist[base + s] = d; (bk[d] || (bk[d] = [])).push(s); }
+    }
+    for (let d = 0; d < bk.length; d++) {
+      const list = bk[d]; if (!list) continue;
+      for (let qi = 0; qi < list.length; qi++) {
+        const s = list[qi]; if (dist[base + s] !== d) continue;
+        for (let i = 0; i < R; i++) {
+          if (needs[i] & ~m) continue;
+          for (let dir = -1; dir <= 1; dir += 2) {
+            const t = next(s, i, dir); if (openBy[t] & ~m) continue;
+            const k2 = base + t;
+            if (dist[k2] < 0 || dist[k2] > d + 1) { dist[k2] = d + 1; (bk[d + 1] || (bk[d + 1] = [])).push(t); }
+          }
+        }
       }
     }
   }
-  return dist;
+  return { dist, lit, openBy, needs, NR, allS };
 }
 function encode(rot) { let s = 0; for (let j = rot.length - 1; j >= 0; j--) s = s * 12 + mod12(rot[j]); return s; }
 function stepCode(lv, rot, i, dir) { const r = rot.map((v, j) => v + dir * lv.eff[i][j]); return encode(r); }
+const stateCode = (lv, rot, open) => encode(rot) + lv.NR * open;
+const blockedBy = (lv, i, open) => lv.needs[i] & ~open; // the closed locks that stop ring i's move
+/** The move, its new open-lock mask, and the state it leads to. */
+function moveResult(lv, rot, open, i, dir) {
+  const rc = stepCode(lv, rot, i, dir), open2 = open | lv.openBy[rc];
+  return { rc, open: open2, code: rc + lv.NR * open2 };
+}
+/** The next move on a shortest path from (rot, open): what the hint shows. Null when none (solved or lost). */
+function bestMove(lv, rot, open) {
+  const d = lv.dist[stateCode(lv, rot, open)];
+  if (d <= 0) return null;
+  for (let i = lv.R - 1; i >= 0; i--) {
+    if (blockedBy(lv, i, open)) continue;
+    for (const dir of [1, -1]) if (lv.dist[moveResult(lv, rot, open, i, dir).code] === d - 1) return { ring: i, dir };
+  }
+  return null;
+}
+/** A1 start for a locked level: locks closed and their sockets dark, a par as close to the wanted one as the
+ *  layout allows, and the locks must matter: the same rings with no locks would be solved in fewer moves. */
+function pickStart(lv, freeDist, L) {
+  const want = L.par[0] + Math.floor(rng() * (L.par[1] - L.par[0] + 1));
+  let bestOff = 1e9; const cands = [];
+  for (let s = 0; s < lv.NR; s++) {
+    if (lv.openBy[s]) continue;
+    const d = lv.dist[s];
+    if (d <= 0 || freeDist[s] >= d) continue;
+    const off = Math.abs(d - want);
+    if (off < bestOff) { bestOff = off; cands.length = 0; }
+    if (off === bestOff) cands.push(s);
+  }
+  if (!cands.length) return null;
+  let x = cands[Math.floor(rng() * cands.length)]; const rot = [];
+  for (let j = 0; j < lv.R; j++) { rot.push(x % 12); x = (x / 12) | 0; }
+  return rot;
+}
 function scramble(lv, dist, L) {
   const R = lv.R, rot = lv.solved.slice();
   const rings = L.only === 'outer' ? [R - 1] : [...Array(R).keys()];
@@ -236,14 +334,25 @@ function genLevel(li) {
   if (genCache[li]) return genCache[li];
   const L = tune.levels[li];
   let best = null, bestOff = 1e9;
-  for (let a = 0; a < tune.gen_attempts; a++) {
+  for (let a = 0; a < tune.gen_attempts * (L.locks ? 3 : 1); a++) {
     seed = (baseSeed * 7919 + li * 104729 + a * 15485863) | 0;
     const lv = makeLayout(L);
-    const dist = bfs(lv);
-    const start = scramble(lv, dist, L);
-    const par = dist[encode(start)];
+    let start;
+    if (L.locks) { // A1: star locks; the solver counts them, and they must change the answer
+      addStarLocks(lv, L.locks);
+      const free = solve(Object.assign({}, lv, { locks: [] })).dist;
+      Object.assign(lv, solve(lv));
+      start = pickStart(lv, free, L);
+      if (!start) continue;
+    } else {
+      lv.locks = [];
+      Object.assign(lv, solve(lv));
+      start = scramble(lv, lv.dist, L);
+    }
+    const par = lv.dist[encode(start)];
+    if (par <= 0) continue;
     const off = par < L.par[0] ? L.par[0] - par : par > L.par[1] ? par - L.par[1] : 0;
-    if (off < bestOff) { best = Object.assign(lv, { dist, start, par }); bestOff = off; }
+    if (off < bestOff) { best = Object.assign(lv, { start, par }); bestOff = off; }
     if (off === 0) break;
   }
   const used = []; // each cog rides on its driver ring away from cut-outs and from the other cogs
@@ -258,7 +367,7 @@ function genLevel(li) {
     }
     l.slot = bq; used.push(bq + 0.5 + best.start[l.d]);
   }
-  events.push({ type: 'level', level: li + 1, rings: best.R, sockets: best.sockets.length, links: best.links.length, par: best.par, off: bestOff });
+  events.push({ type: 'level', level: li + 1, rings: best.R, sockets: best.sockets.length, links: best.links.length, locks: best.locks.length, par: best.par, off: bestOff, hard: !!L.hard });
   return (genCache[li] = best);
 }
 
@@ -281,50 +390,90 @@ function loadLevel(li) {
   const lv = genLevel(li), g = geoFor(lv.R);
   seed = baseSeed + li;
   Object.assign(state, {
-    level: li, lv, g, rot: lv.start.slice(), vis: lv.start.slice(), moves: [], par: lv.par,
+    level: li, lv, g, rot: lv.start.slice(), moves: [], par: lv.par,
+    vis: lv.start.map((v, j) => v + (j % 2 ? 0.7 : -0.7)), vel: lv.start.map(() => 0), introT: 0, // A2: the rings swing in
+    open: 0, lockFx: lv.locks.map(() => ({ openT: -1, closeT: -1, shakeT: -1 })), shake: lv.start.map(() => -1),
+    pulses: [], dirShow: null,
     budget: Math.round(lv.par * tune.budget_mult + tune.budget_add), phase: 'play', ptr: null, drag: null,
     sel: lv.R - 1, hint: null, beams: lv.sockets.map(() => ({ r: g.core, bloomT: -1 })), again: -1,
     msg: '', msgT: 0, winT: -1, parts: [], time: 0, win: null, resT: 0, flash: -1,
   });
 }
 function say(m, t = 1.8) { state.msg = m; state.msgT = t; }
-const curCode = () => encode(state.rot);
+const curCode = () => stateCode(state.lv, state.rot, state.open);
+/** One step of ring i (and its gear train). A move a closed star lock forbids does not happen and costs
+ *  nothing: the rings shake instead (A2). Returns whether the move happened. */
 function applyMove(i, dir, record = true) {
-  const e = state.lv.eff[i];
+  const lv = state.lv, e = lv.eff[i], blk = blockedBy(lv, i, state.open);
+  if (blk) { blockedTurn(i, blk); return false; }
+  const res = moveResult(lv, state.rot, state.open, i, dir), opened = res.open & ~state.open;
   for (let j = 0; j < e.length; j++) if (e[j]) state.rot[j] += dir * e[j];
-  if (record) state.moves.push([i, dir]);
+  state.open = res.open;
+  if (record) state.moves.push([i, dir, opened]);
+  if (opened) { // A1: the named socket is lit, the lock clicks open and stays open
+    lv.locks.forEach((l, k) => {
+      if (!(opened >> k & 1)) return;
+      state.lockFx[k] = { openT: 0, closeT: -1, shakeT: -1 };
+      const G = lockGeom(state.g, k, state.vis);
+      for (let n = 0; n < 12; n++) { const an = fxr() * TAU, sp = 80 + fxr() * 200; state.parts.push({ x: G.x, y: G.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, life: 0.4 + fxr() * 0.5, s: 1.5 + fxr() * 2 }); }
+    });
+    sUnlock(); events.push({ type: 'unlock', locks: opened });
+  }
   state.hint = null; sStep();
-  if (e.some((v, j) => v && j !== i)) sGear();
+  if (e.some((v, j) => v && j !== i)) { sGear(); gearPulse(i); state.dirShow = { ring: i, dir, t: 0 }; }
   events.push({ type: 'move', ring: i, dir });
-  if (state.lv.dist[curCode()] === 0) beginWin();
+  if (lv.dist[curCode()] === 0) beginWin();
   else if (state.moves.length >= state.budget) {
     state.again = tune.again_s; state.ptr = null; state.drag = null; sFail();
     say('نفدت الحركات، نعيد المرحلة مجاناً', 2.4);
   }
+  return true;
+}
+/** A2: a turn a star lock forbids: the ring tried and every locked ring in its train shake, the lock rattles. */
+function blockedTurn(i, blk) {
+  const lv = state.lv;
+  state.shake[i] = 0;
+  lv.locks.forEach((l, k) => { if (blk >> k & 1) { state.shake[l.ring] = 0; state.lockFx[k].shakeT = 0; } });
+  state.ptr = null; state.drag = null; sBlocked();
+  const viaGear = lv.locks.some((l, k) => (blk >> k & 1) && l.ring !== i);
+  say(viaGear ? 'الترس يدير حلقة مقفلة: أضئ مقبس القفل أولاً' : 'الحلقة مقفلة: أضئ المقبس الملوّن أولاً', 2);
+  events.push({ type: 'blocked', ring: i, locks: blk });
+}
+/** A2: a light pulse runs down the gear train from ring i, one link after another. */
+function gearPulse(i) {
+  const links = state.lv.links, depth = { [i]: 0 }, q = [i];
+  while (q.length) {
+    const x = q.shift();
+    links.forEach((l, n) => { if (l.d === x && depth[l.t] === undefined) { depth[l.t] = depth[x] + 1; state.pulses.push({ link: n, t: -depth[x] * tune.pulse_hop_s }); q.push(l.t); } });
+  }
+}
+function relock(mask) { // undo and restart take a lock back to closed: a rewind, not a new rule
+  if (!mask) return;
+  state.lv.locks.forEach((l, k) => { if (mask >> k & 1) state.lockFx[k] = { openT: -1, closeT: 0, shakeT: -1 }; });
+  state.open &= ~mask; sRelock();
 }
 function undo() {
   if (state.phase !== 'play' || state.again >= 0 || !state.moves.length) return;
-  const [i, dir] = state.moves.pop(), e = state.lv.eff[i];
+  const [i, dir, opened] = state.moves.pop(), e = state.lv.eff[i];
   for (let j = 0; j < e.length; j++) if (e[j]) state.rot[j] -= dir * e[j];
+  relock(opened);
   state.hint = null; sUndo(); events.push({ type: 'undo' });
 }
 function restartLevel() {
   const st = state.lv.start;
   state.rot = st.map((v, j) => v + 12 * Math.round((state.vis[j] - v) / 12)); // spin back the short way
-  Object.assign(state, { moves: [], hint: null, phase: 'play', again: -1, ptr: null, drag: null, winT: -1, time: 0 });
-  sClick();
+  relock(state.open);
+  Object.assign(state, { moves: [], hint: null, phase: 'play', again: -1, ptr: null, drag: null, winT: -1, time: 0, dirShow: null });
+  sClick(); logEvent(state.level, 'attempt');
 }
 function doHint() {
   if (state.phase !== 'play' || state.again >= 0) return;
-  const d = state.lv.dist[curCode()];
-  for (let i = state.lv.R - 1; i >= 0; i--) for (const dir of [1, -1]) {
-    if (state.lv.dist[stepCode(state.lv, state.rot, i, dir)] === d - 1) {
-      state.hint = { ring: i, dir, t0: state.t }; state.helped = true; state.sel = i; sHint();
-      say('التلميح مجاني، لكنه يحرمك النجمة الثالثة', 2.2);
-      events.push({ type: 'hint', ring: i, dir });
-      return;
-    }
-  }
+  const m = bestMove(state.lv, state.rot, state.open); // a shortest path that respects the locks
+  if (!m) return;
+  state.hint = { ring: m.ring, dir: m.dir, t0: state.t }; state.helped = true; state.sel = m.ring; sHint();
+  say('التلميح مجاني، لكنه يحرمك النجمة الثالثة', 2.2);
+  logEvent(state.level, 'hint');
+  events.push({ type: 'hint', ring: m.ring, dir: m.dir });
 }
 function starsFor(m) {
   let s = m <= state.par + tune.star3_over ? 3 : m <= state.par + tune.star2_over ? 2 : 1;
@@ -338,6 +487,7 @@ function beginWin() {
   save.best[li] = { stars: Math.max(stars, prev ? prev.stars : 0), moves: prev ? Math.min(m, prev.moves) : m };
   persist();
   state.win = { stars, moves: m, best: save.best[li], newBest };
+  logEvent(li, 'win', Math.round(state.time * 10) / 10);
   state.score += stars; state.gained = `${stars}`;
   events.push({ type: 'win', level: li + 1, stars, moves: m, par: state.par });
 }
@@ -371,21 +521,35 @@ const BTN = {
   hint: { x: 360 - 64, y: 1084, w: 128, h: 118 },
   restart: { x: 360 - 200 - 64, y: 1084, w: 128, h: 118 },
   next: { x: 380, y: 1150, w: 270, h: 92 }, replay: { x: 70, y: 1150, w: 270, h: 92 },
-  play: { x: 200, y: 608, w: 320, h: 108 }, home: { x: 18, y: 18, w: 92, h: 92 },
+  play: { x: 200, y: 608, w: 320, h: 108 }, home: { x: 18, y: 18, w: 92, h: 92 }, stats: { x: 610, y: 128, w: 92, h: 92 }, // stats: under mute, clear of the title word
 };
-function levelTile(i) { const col = i % 4, row = i / 4 | 0; return { x: 530 - col * 160, y: 772 + row * 128, w: 140, h: 116 }; }
+function levelTile(i) { const col = i % 4, row = i / 4 | 0; return { x: 530 - col * 160, y: 780 + row * 136, w: 140, h: 116 }; }
 const TIPS = ['اسحب الحلقة الخارجية حتى يصل الضوء إلى المقبس', 'كل الحلقات يجب أن تفتح طريق الضوء معاً',
   'ترسان على الحلقة الوسطى يديران جارتها بعكس الاتجاه', 'ترس واحد: نفس الاتجاه · ترسان: عكسه', 'أدر الحلقة الحاملة للترس أولاً', '',
-  'مقبسان: يجب أن يضيئا في وقت واحد', '', '', '', 'ثلاثة مقابس في وقت واحد'];
+  'مقبسان: يجب أن يضيئا في وقت واحد', 'الحلقة المقفلة لا تدور حتى يضيء مقبسها الملوّن', '',
+  'القفل يوقف ترسه أيضاً: أضئ مقبسه أولاً', 'ثلاثة مقابس في وقت واحد', 'قفلان: لكل قفل مقبس بلونه'];
 
 function animate(dt) {
-  const lv = state.lv, R = lv.R, dr = state.drag;
+  const lv = state.lv, R = lv.R, dr = state.drag, w = tune.snap_rate, z = tune.snap_damping;
   for (let j = 0; j < R; j++) {
     const target = state.rot[j] + (dr ? dr.res * lv.eff[dr.ring][j] : 0);
-    if (dr && lv.eff[dr.ring][j]) state.vis[j] = target;
-    else state.vis[j] += (target - state.vis[j]) * Math.min(1, dt * tune.snap_rate);
+    if (dr && lv.eff[dr.ring][j]) { state.vel[j] = clamp((target - state.vis[j]) / dt, -30, 30); state.vis[j] = target; }
+    else { // A2: a damped spring, so a ring snaps past its step and settles back (elastic overshoot)
+      state.vel[j] += (w * w * (target - state.vis[j]) - 2 * z * w * state.vel[j]) * dt;
+      state.vis[j] += state.vel[j] * dt;
+    }
+    if (state.shake[j] >= 0) { state.shake[j] += dt; if (state.shake[j] > tune.shake_s) state.shake[j] = -1; }
   }
-  const g = state.g;
+  state.introT += dt;
+  for (const p of state.pulses) p.t += dt;
+  state.pulses = state.pulses.filter(p => p.t < tune.pulse_s);
+  for (const f of state.lockFx) {
+    if (f.openT >= 0 && f.openT < 9) f.openT += dt;
+    if (f.closeT >= 0) { f.closeT += dt; if (f.closeT > 0.3) f.closeT = -1; }
+    if (f.shakeT >= 0) { f.shakeT += dt; if (f.shakeT > tune.shake_s) f.shakeT = -1; }
+  }
+  if (state.dirShow) { state.dirShow.t += dt; if (state.dirShow.t > tune.dir_arrow_s) state.dirShow = null; }
+  const g = state.g, litNow = lv.lit[encode(state.rot)];
   lv.sockets.forEach((p, k) => {
     const b = state.beams[k], reach = beamReach(p);
     const target = reach === R ? g.sockR : ringR(g, reach)[0];
@@ -393,7 +557,7 @@ function animate(dt) {
     b.r = b.r < target ? Math.min(target, b.r + sp) : Math.max(target, b.r - sp);
     const full = b.r >= g.sockR - 0.5;
     if (full && b.bloomT < 0) { b.bloomT = 0; sBloom(k); burst(k); }
-    else if (!full) b.bloomT = -1;
+    else if (!full && (!(litNow >> k & 1) || dr)) b.bloomT = -1; // a spring's overshoot never re-blooms a lit star
     if (b.bloomT >= 0) b.bloomT += dt;
   });
   for (const p of state.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt; }
@@ -420,12 +584,17 @@ function handlePlayPointer() {
       const i = ringAt(e.x, e.y);
       if (i < 0) continue;
       const a = Math.atan2(e.y - g.cy, e.x - g.cx);
-      state.ptr = { ring: i, last: a, total: 0, sx: e.x, sy: e.y, dragging: false, committed: 0 };
+      state.ptr = { ring: i, last: a, total: 0, sx: e.x, sy: e.y, dragging: false, committed: 0, lastDir: 0 };
       state.sel = i; state.kb = false;
     } else if (e.t === 'move' && state.ptr) {
       const p = state.ptr, a = Math.atan2(e.y - g.cy, e.x - g.cx);
       let d = a - p.last; d -= TAU * Math.round(d / TAU); p.last = a; p.total += d;
-      if (!p.dragging && (Math.abs(p.total) > tune.drag_dead_deg * Math.PI / 180 || Math.hypot(e.x - p.sx, e.y - p.sy) > tune.tap_max_px)) p.dragging = true;
+      if (Math.abs(d) > 0.002) p.lastDir = d > 0 ? 1 : -1; // A3: which way the finger turns the driver
+      if (!p.dragging && (Math.abs(p.total) > tune.drag_dead_deg * Math.PI / 180 || Math.hypot(e.x - p.sx, e.y - p.sy) > tune.tap_max_px)) {
+        p.dragging = true;
+        const blk = blockedBy(state.lv, p.ring, state.open);
+        if (blk) { blockedTurn(p.ring, blk); continue; }
+      }
       if (p.dragging) {
         const o = p.total / STEPA;
         while (state.ptr && o - p.committed > 0.5) { p.committed++; applyMove(p.ring, 1); }
@@ -451,6 +620,7 @@ const scenes = {
         if (e.t !== 'down') continue;
         if (location.protocol.startsWith('http') && inRect(e, BTN.home)) { location.href = '../../'; return; }
         if (inRect(e, BTN.mute)) { setMuted(!muted); continue; }
+        if (inRect(e, BTN.stats)) { sClick(); scene = 'stats'; return; }
         if (inRect(e, BTN.play)) { startLevel(titleSel); return; }
         for (let i = 0; i < NLEV(); i++) if (inRect(e, levelTile(i))) { titleSel = i; startLevel(i); return; }
       }
@@ -460,8 +630,21 @@ const scenes = {
       if (pressed('ArrowDown')) titleSel = Math.min(n - 1, titleSel + 4);
       if (pressed('ArrowUp')) titleSel = Math.max(0, titleSel - 4);
       if (pressed('Enter') || pressed('Space')) startLevel(titleSel);
+      else if (pressed('KeyS')) { sClick(); scene = 'stats'; }
     },
     draw() { drawTitle(); },
+  },
+  stats: { // S1: إحصائياتي, reached from the title
+    update(dt) {
+      state.t += dt;
+      for (const e of pq) {
+        if (e.t !== 'down') continue;
+        if (inRect(e, BTN.mute)) { setMuted(!muted); continue; }
+        if (inRect(e, BTN.back)) { sClick(); scene = 'title'; return; }
+      }
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyS')) { sClick(); scene = 'title'; }
+    },
+    draw() { drawStats(); },
   },
   play: {
     update(dt) {
@@ -511,7 +694,10 @@ const scenes = {
     draw() { drawPlay(); drawResults(); },
   },
 };
-function startLevel(li) { sClick(); pendingLevel = li; reset(); scene = 'play'; }
+function startLevel(li) {
+  sClick(); pendingLevel = li; reset(); scene = 'play'; logEvent(li, 'attempt');
+  if (isHard(li)) say('مرحلة صعبة: خذ وقتك', 2.4);
+}
 function nextLevel() {
   if (state.level + 1 < NLEV()) startLevel(state.level + 1);
   else { titleSel = 0; scene = 'title'; sClick(); }
@@ -612,7 +798,7 @@ function drawRingShape(cx, cy, r0, r1, mask, rot, k, opts = {}) {
     ctx.setLineDash([]); ctx.lineDashOffset = 0;
   }
   if (opts.glow) {
-    ctx.strokeStyle = opts.glow; ctx.lineWidth = 4;
+    ctx.strokeStyle = opts.glow; ctx.lineWidth = opts.glowW || 4;
     for (const [a0, a1] of arcs) { annulus(cx, cy, r0, r1, a0, a1); ctx.stroke(); }
   }
   return arcs;
@@ -632,25 +818,135 @@ function drawCog(x, y, r, teeth, ang) {
   ctx.beginPath(); ctx.arc(x, y, r * 0.24, 0, TAU); ctx.fillStyle = '#3d2604'; ctx.fill();
   ctx.beginPath(); ctx.arc(x - r * 0.05, y - r * 0.05, r * 0.1, 0, TAU); ctx.fillStyle = '#fff1c0'; ctx.fill();
 }
-/** A gear link: one cog (same way) or two meshed cogs (opposite way), carried on the driver ring by a brass arm. */
-function drawLink(g, l, vis, cx = g.cx, cy = g.cy) {
+/** Where a gear link sits: the arm's foot on the driver ring and its cog(s) [x, y, r]. */
+function linkGeom(g, l, vis, cx = g.cx, cy = g.cy) {
   const [d0, d1] = ringR(g, l.d), out = l.t > l.d, rb = out ? d1 + 2.5 : d0 - 2.5;
   const a = posAngle(l.slot + 0.5 + vis[l.d]), rc = clamp(g.band * 0.32, 13, 28), toward = out ? 1 : -1;
-  const spin = (vis[l.t] - vis[l.d]) * STEPA * rb / rc;
-  const arm = (x, y) => {
-    const ax = cx + Math.cos(a) * (d0 + d1) / 2, ay = cy + Math.sin(a) * (d0 + d1) / 2;
-    ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(x, y); ctx.stroke();
-    ctx.strokeStyle = '#c99a3e'; ctx.lineWidth = 4; ctx.stroke();
-    ctx.beginPath(); ctx.arc(ax, ay, 4, 0, TAU); ctx.fillStyle = '#fff1c0'; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1; ctx.stroke();
-  };
-  if (l.s > 0) {
-    const x = cx + Math.cos(a) * rb, y = cy + Math.sin(a) * rb;
-    arm(x, y); drawCog(x, y, rc, 10, spin);
-  } else {
+  const ax = cx + Math.cos(a) * (d0 + d1) / 2, ay = cy + Math.sin(a) * (d0 + d1) / 2;
+  let cogs;
+  if (l.s > 0) cogs = [[cx + Math.cos(a) * rb, cy + Math.sin(a) * rb, rc]];
+  else {
     const da = rc * 0.95 / rb, ra = rb - toward * rc * 0.55, rb2 = rb + toward * rc * 0.4;
-    const x1 = cx + Math.cos(a - da) * ra, y1 = cy + Math.sin(a - da) * ra, x2 = cx + Math.cos(a + da) * rb2, y2 = cy + Math.sin(a + da) * rb2;
-    arm(x1, y1); arm(x2, y2); drawCog(x1, y1, rc * 0.92, 9, spin); drawCog(x2, y2, rc * 0.92, 9, -spin + 0.3);
+    cogs = [[cx + Math.cos(a - da) * ra, cy + Math.sin(a - da) * ra, rc * 0.92], [cx + Math.cos(a + da) * rb2, cy + Math.sin(a + da) * rb2, rc * 0.92]];
   }
+  return { a, rb, rc, ax, ay, cogs };
+}
+/** A gear link: one cog (same way) or two meshed cogs (opposite way), carried on the driver ring by a brass arm. */
+function drawLink(g, l, vis, cx = g.cx, cy = g.cy) {
+  const G = linkGeom(g, l, vis, cx, cy), spin = (vis[l.t] - vis[l.d]) * STEPA * G.rb / G.rc;
+  const arm = (x, y) => {
+    ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(G.ax, G.ay); ctx.lineTo(x, y); ctx.stroke();
+    ctx.strokeStyle = '#c99a3e'; ctx.lineWidth = 4; ctx.stroke();
+    ctx.beginPath(); ctx.arc(G.ax, G.ay, 4, 0, TAU); ctx.fillStyle = '#fff1c0'; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1; ctx.stroke();
+  };
+  if (l.s > 0) { const [x, y, r] = G.cogs[0]; arm(x, y); drawCog(x, y, r, 10, spin); }
+  else {
+    const [x1, y1, r1] = G.cogs[0], [x2, y2, r2] = G.cogs[1];
+    arm(x1, y1); arm(x2, y2); drawCog(x1, y1, r1, 9, spin); drawCog(x2, y2, r2, 9, -spin + 0.3);
+  }
+}
+/** A2: a light pulse runs down the arm, the cog flashes and the driven ring's teeth light where they mesh. u: 0..1. */
+function drawLinkPulse(g, l, vis, u) {
+  const G = linkGeom(g, l, vis), { cx, cy } = g;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const k = clamp(u / 0.45, 0, 1), fade = 1 - clamp((u - 0.4) / 0.25, 0, 1);
+  for (const [x, y] of G.cogs) {
+    const px = G.ax + (x - G.ax) * k, py = G.ay + (y - G.ay) * k;
+    const hg = ctx.createRadialGradient(px, py, 0, px, py, 18); hg.addColorStop(0, `rgba(255,252,225,${0.95 * fade})`); hg.addColorStop(1, 'rgba(255,210,120,0)');
+    ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(px, py, 18, 0, TAU); ctx.fill();
+  }
+  if (u > 0.35) {
+    const v = clamp((u - 0.35) / 0.65, 0, 1), a2 = Math.sin(v * Math.PI);
+    for (const [x, y, r] of G.cogs) {
+      const hg = ctx.createRadialGradient(x, y, r * 0.3, x, y, r * 1.9); hg.addColorStop(0, `rgba(255,240,190,${0.7 * a2})`); hg.addColorStop(1, 'rgba(255,200,100,0)');
+      ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(x, y, r * 1.9, 0, TAU); ctx.fill();
+    }
+    const [t0, t1] = ringR(g, l.t), rt = l.d > l.t ? t1 - 3 : t0 + 3, sp = 0.2 + v * 0.25;
+    ctx.strokeStyle = `rgba(255,236,170,${0.85 * a2})`; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx, cy, rt, G.a - sp, G.a + sp); ctx.stroke();
+  }
+  ctx.restore();
+}
+// ---- A1: star locks, drawn ----
+const LOCKC = ['#8fdcff', '#ffb08a']; // each lock and its socket share a colour
+/** Where lock k sits: on its ring's band, just past the cut-out the starlight to its socket passes through. */
+function lockGeom(g, k, vis) {
+  const lv = state.lv, l = lv.locks[k], p = lv.sockets[l.sock], [r0, r1] = ringR(g, l.ring), rm = (r0 + r1) / 2;
+  const a = posAngle(p + (vis[l.ring] - state.rot[l.ring])) + (tune.gap_deg / 2 + 15) * Math.PI / 180;
+  return { x: g.cx + Math.cos(a) * rm, y: g.cy + Math.sin(a) * rm, s: clamp(g.band * 0.8, 30, 52), a, rm };
+}
+/** A brass padlock with a star inlaid in its socket's colour. openU 0..1 lifts the shackle; jig shakes it. */
+function drawStarLock(x, y, s, col, openU = 0, jig = 0) {
+  ctx.save(); ctx.translate(x + jig, y);
+  const k = clamp(openU / 0.35, 0, 1), lift = backOut(k) * s * 0.26;
+  ctx.save(); ctx.translate(s * 0.26, -s * 0.06 - lift); ctx.rotate(0.55 * k); ctx.translate(-s * 0.26, s * 0.06);
+  ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-s * 0.26, -s * 0.06); ctx.lineTo(-s * 0.26, -s * 0.28); ctx.arc(0, -s * 0.28, s * 0.26, Math.PI, 0); ctx.lineTo(s * 0.26, -s * 0.06);
+  ctx.strokeStyle = '#3d2604'; ctx.lineWidth = s * 0.18; ctx.stroke(); ctx.strokeStyle = '#e4bd62'; ctx.lineWidth = s * 0.09; ctx.stroke();
+  ctx.restore();
+  const bw = s * 0.9, bh = s * 0.68, by = -s * 0.12;
+  const gr = ctx.createLinearGradient(0, by, 0, by + bh); gr.addColorStop(0, '#fbe3a0'); gr.addColorStop(0.5, '#c99a3e'); gr.addColorStop(1, '#6e4a10');
+  rr(-bw / 2, by, bw, bh, s * 0.13); ctx.fillStyle = gr; ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1.8; ctx.stroke();
+  starPath(0, by + bh / 2, s * 0.25, 0.45, 0); ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(10,16,40,0.8)'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.restore();
+}
+function drawLocks(g, vis) {
+  const lv = state.lv;
+  lv.locks.forEach((l, k) => {
+    const f = state.lockFx[k], isOpen = state.open >> k & 1;
+    if (isOpen && f.openT >= tune.lock_open_s) return; // open, and it stays open
+    const G = lockGeom(g, k, vis), p = lv.sockets[l.sock], sa = posAngle(p);
+    const sx = g.cx + Math.cos(sa) * g.sockR, sy = g.cy + Math.sin(sa) * g.sockR;
+    const ou = isOpen ? clamp(f.openT / tune.lock_open_s, 0, 1) : 0, alpha = (1 - clamp((ou - 0.45) / 0.55, 0, 1)) * ringIntro(l.ring);
+    const pop = f.closeT >= 0 ? 0.4 + 0.6 * backOut(clamp(f.closeT / 0.3, 0, 1)) : 1;
+    const jig = f.shakeT >= 0 ? Math.sin(f.shakeT * 70) * 5 * (1 - f.shakeT / tune.shake_s) : 0;
+    ctx.save(); ctx.globalAlpha *= alpha;
+    if (!isOpen) { // the named socket: a ring in the lock's colour, and a thread of light to it
+      ctx.strokeStyle = LOCKC[k]; ctx.lineWidth = 4; ctx.globalAlpha *= 0.75 + 0.25 * Math.sin(state.t * 3 + k);
+      ctx.beginPath(); ctx.arc(sx, sy, 30, 0, TAU); ctx.stroke();
+      ctx.setLineDash([5, 7]); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(G.x + Math.cos(G.a) * G.s * 0.5, G.y + Math.sin(G.a) * G.s * 0.5);
+      ctx.lineTo(sx - Math.cos(sa) * 31, sy - Math.sin(sa) * 31); ctx.stroke(); ctx.setLineDash([]);
+      ctx.globalAlpha = alpha;
+    }
+    ctx.translate(G.x, G.y); ctx.scale(pop * (1 + ou * 0.25), pop * (1 + ou * 0.25)); ctx.translate(-G.x, -G.y);
+    drawStarLock(G.x, G.y, G.s, LOCKC[k], ou, jig);
+    ctx.restore();
+  });
+}
+/** A3: while you turn a driver, an arrow on each ring it drives shows which way that ring goes (same or opposite). */
+function curvedArrow(cx, cy, r, am, span, dir, col, w) {
+  const a0 = am - span / 2, a1 = am + span / 2;
+  ctx.save(); ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(20,12,0,0.85)'; ctx.lineWidth = w + 5; ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+  const ae = dir > 0 ? a1 : a0, tx = -Math.sin(ae) * dir, ty = Math.cos(ae) * dir, x = cx + Math.cos(ae) * r, y = cy + Math.sin(ae) * r, h = w * 2.3;
+  ctx.beginPath(); ctx.moveTo(x + tx * h, y + ty * h); ctx.lineTo(x - ty * h * 0.8, y + tx * h * 0.8); ctx.lineTo(x + ty * h * 0.8, y - tx * h * 0.8); ctx.closePath();
+  ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(20,12,0,0.85)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.restore();
+}
+function drawDirArrows(g, vis) {
+  let src = -1, dir = 0, alpha = 1;
+  if (state.drag && state.ptr && state.ptr.lastDir) { src = state.drag.ring; dir = state.ptr.lastDir; }
+  else if (state.dirShow && state.phase === 'play') {
+    src = state.dirShow.ring; dir = state.dirShow.dir;
+    const T = tune.dir_arrow_s; alpha = 1 - clamp((state.dirShow.t - T * 0.6) / (T * 0.4), 0, 1);
+  }
+  if (src < 0) return;
+  const lv = state.lv, e = lv.eff[src], { cx, cy } = g;
+  ctx.save(); ctx.globalAlpha *= alpha;
+  for (const l of lv.links) {
+    if (!e[l.d] || !e[l.t]) continue; // a link in this move's gear train
+    const a = posAngle(l.slot + 0.5 + vis[l.d]) + 0.38, [t0, t1] = ringR(g, l.t), [d0, d1] = ringR(g, l.d);
+    if (l.d === src) curvedArrow(cx, cy, (d0 + d1) / 2, a, 0.3, dir, 'rgba(255,246,214,0.8)', 6); // the ring you turn
+    curvedArrow(cx, cy, (t0 + t1) / 2, a, 0.42, dir * e[l.t], '#ffd36a', 8); // the ring it drives
+  }
+  ctx.restore();
+}
+const ringIntro = i => clamp((state.introT - 0.1 - i * tune.intro_gap_s) / tune.intro_s, 0, 1);
+function withIntro(u, cx, cy, fn) { // A2: the level-start wave, each ring pops in and settles
+  if (u >= 1) { fn(); return; }
+  if (u <= 0) return;
+  const sc = 0.55 + 0.45 * backOut(u);
+  ctx.save(); ctx.globalAlpha *= Math.min(1, u * 2.5); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy); fn(); ctx.restore();
 }
 function drawPlate(g) {
   const { cx, cy } = g;
@@ -757,29 +1053,37 @@ function drawBeam(cx, cy, a, r0, r1, strength, t) {
 }
 function drawAstrolabe() {
   const g = state.g, lv = state.lv, { cx, cy } = g;
+  const vis = state.vis.map((v, i) => { // A2: a blocked ring shakes in place
+    const sh = state.shake[i]; return v + (sh >= 0 ? Math.sin(sh * 62) * 0.08 * (1 - sh / tune.shake_s) : 0);
+  });
   drawKursi(cx, cy - g.limb1 - 2);
   drawPlate(g);
-  const litCount = state.beams.filter(b => b.bloomT >= 0).length;
+  const litCount = state.beams.filter(b => b.bloomT >= 0).length, beamA = ringIntro(lv.R - 1);
   lv.sockets.forEach((p, k) => { // beams first: they show through the cut-outs
     const b = state.beams[k];
-    drawBeam(cx, cy, posAngle(p), g.core - 4, b.r, b.bloomT >= 0 ? 1 : 0.6, state.t);
+    drawBeam(cx, cy, posAngle(p), g.core - 4, b.r, (b.bloomT >= 0 ? 1 : 0.6) * beamA, state.t);
   });
   const teeth = {}; for (const l of lv.links) teeth[l.t] = l.d > l.t ? 'out' : 'in';
   for (let i = 0; i < lv.R; i++) {
     const [r0, r1] = ringR(g, i);
     let glow = null;
-    if (state.drag && state.drag.ring === i) glow = 'rgba(255,246,210,0.9)';
+    let glowW = 4;
+    if (state.shake[i] >= 0) { glow = `rgba(255,120,90,${0.95 * (1 - state.shake[i] / tune.shake_s)})`; glowW = 8; }
+    else if (state.drag && state.drag.ring === i) glow = 'rgba(255,246,210,0.9)';
     else if (state.kb && state.sel === i && state.phase === 'play') glow = `rgba(255,246,210,${0.55 + 0.35 * Math.sin(state.t * 6)})`;
     else if (state.hint && state.hint.ring === i) glow = `rgba(140,230,255,${0.5 + 0.4 * Math.sin(state.t * 7)})`;
-    drawRingShape(cx, cy, r0, r1, lv.masks[i], state.vis[i], i, { teeth: teeth[i], glow });
+    withIntro(ringIntro(i), cx, cy, () => drawRingShape(cx, cy, r0, r1, lv.masks[i], vis[i], i, { teeth: teeth[i], glow, glowW }));
   }
   lv.sockets.forEach((p, k) => { // the beam again over the cut-out edges so the light reads on top
     const b = state.beams[k];
     if (b.bloomT >= 0) drawBeam(cx, cy, posAngle(p), g.core - 4, b.r, 0.5, state.t);
   });
-  for (const l of lv.links) drawLink(g, l, state.vis);
-  drawCore(cx, cy, g.core - 4, litCount / Math.max(1, lv.sockets.length) + 0.25);
+  for (const l of lv.links) withIntro(Math.min(ringIntro(l.d), ringIntro(l.t)), cx, cy, () => drawLink(g, l, vis));
+  for (const pu of state.pulses) if (pu.t >= 0) drawLinkPulse(g, lv.links[pu.link], vis, pu.t / tune.pulse_s);
+  withIntro(clamp(state.introT / 0.3, 0, 1), cx, cy, () => drawCore(cx, cy, g.core - 4, litCount / Math.max(1, lv.sockets.length) + 0.25));
   drawLimb(g, lv.sockets, state.beams, state.t);
+  drawLocks(g, vis);
+  if (state.phase === 'play' && state.introT > 0.6) drawDirArrows(g, vis);
   if (state.hint && state.phase === 'play') drawHintArrow(g, state.hint.ring, state.hint.dir, state.t);
   for (const p of state.parts) {
     ctx.globalAlpha = clamp(p.life * 2, 0, 1); ctx.fillStyle = '#fff3c4';
@@ -844,6 +1148,38 @@ function iconHome(x, y, s) {
   ctx.fillStyle = GOLD; ctx.beginPath(); ctx.rect(x - s * 0.24, y - s * 0.02, s * 0.48, s * 0.32); ctx.fill(); ctx.stroke();
   ctx.fillStyle = '#1a3f9a'; ctx.beginPath(); ctx.rect(x - s * 0.07, y + s * 0.1, s * 0.14, s * 0.2); ctx.fill();
 }
+function iconStats(x, y, s) { // إحصائياتي: three brass bars on an engraved ground line
+  [[0.34, '#c99a3e'], [0.56, '#f3d27a'], [0.22, '#2c5fd0']].forEach(([h, c], i) => {
+    const bx = x - s * 0.3 + i * s * 0.22, bw = s * 0.16, bh = s * h * 1.1, by = y + s * 0.28 - bh;
+    ctx.fillStyle = c; rr(bx, by, bw, bh, 3); ctx.fill(); ctx.strokeStyle = '#3d2604'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(bx + 2, by + 2, bw * 0.3, bh - 4);
+  });
+  ctx.strokeStyle = GOLD; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.36, y + s * 0.3); ctx.lineTo(x + s * 0.36, y + s * 0.3); ctx.stroke();
+}
+function iconBack(x, y, s) { // back to the title: a drawn arrow pointing right (the way Arabic reads back)
+  ctx.strokeStyle = GOLD; ctx.lineWidth = s * 0.09; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.28, y); ctx.lineTo(x + s * 0.26, y); ctx.moveTo(x + s * 0.06, y - s * 0.2); ctx.lineTo(x + s * 0.28, y); ctx.lineTo(x + s * 0.06, y + s * 0.2); ctx.stroke();
+}
+/** S2: the honest "hard" badge, a copper pill with a gold rim. Returns its width. */
+function hardBadge(cx, cy, size = 24, measureOnly = false) {
+  ctx.font = `bold ${size}px ${FONT}`; ctx.direction = 'rtl'; const tw = ctx.measureText('صعبة').width; ctx.direction = 'ltr';
+  const w = tw + size * 1.2, h = size * 1.5;
+  if (measureOnly) return w;
+  ctx.fillStyle = 'rgba(0,0,10,0.4)'; rr(cx - w / 2 + 2, cy - h / 2 + 3, w, h, h / 2); ctx.fill();
+  const g = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2); g.addColorStop(0, '#c4582c'); g.addColorStop(1, '#7a2a10');
+  ctx.fillStyle = g; rr(cx - w / 2, cy - h / 2, w, h, h / 2); ctx.fill(); ctx.strokeStyle = '#f3d27a'; ctx.lineWidth = 2; ctx.stroke();
+  text('صعبة', cx, cy + 1, size, '#fff3d6', 'center', 'bold');
+  return w;
+}
+/** A line of text with the hard badge on its left (RTL: read after the text), centred as one group. */
+function textWithBadge(str, cx, cy, size, col, weight, hard) {
+  if (!hard) { text(str, cx, cy, size, col, 'center', weight); return; }
+  ctx.font = `${weight} ${size}px ${FONT}`; ctx.direction = 'rtl'; const tw = ctx.measureText(str).width; ctx.direction = 'ltr';
+  const bw = hardBadge(0, 0, 24, true), G = tw + 14 + bw;
+  text(str, cx + G / 2 - tw / 2, cy, size, col, 'center', weight);
+  hardBadge(cx - G / 2 + bw / 2, cy, 24);
+}
 function rateStar(x, y, R, on) {
   starPath(x, y, R, 0.45, 0);
   if (on) { const g = ctx.createRadialGradient(x, y, 1, x, y, R); g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#ffe9a0'); g.addColorStop(1, '#d99a22'); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#6e4a10'; ctx.lineWidth = 1.5; ctx.stroke(); }
@@ -857,7 +1193,7 @@ function drawPlay() {
 function drawHud() {
   tileButton(BTN.back); iconLevels(BTN.back.x + 46, BTN.back.y + 50, 80);
   tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
-  text(`المرحلة ${state.level + 1} من ${NLEV()}`, W / 2, 50, 38, GOLD, 'center', 'bold');
+  textWithBadge(`المرحلة ${state.level + 1} من ${NLEV()}`, W / 2, 50, 38, GOLD, 'bold', isHard(state.level));
   const m = state.moves.length, left = state.budget - m;
   text(`الحركات ${m} من ${state.budget} · الأمثل ${state.par}`, W / 2, 110, 30, left <= 2 ? '#ffb4a0' : GOLD2);
   const s = state.phase === 'play' ? starsFor(m) : state.win ? state.win.stars : starsFor(m);
@@ -890,7 +1226,11 @@ function drawResults() {
   }
   text(`الحركات ${w.moves} · الأمثل ${state.par} · الأفضل ${w.best.moves}${w.newBest ? ' · رقم جديد' : ''}`, W / 2, py + 166, 28, GOLD2);
   BTN.next.y = py + 196; BTN.replay.y = py + 196;
-  tileButton(BTN.next, true); text(last ? 'إلى البداية' : 'التالي', BTN.next.x + BTN.next.w / 2, BTN.next.y + 46, 34, GOLD, 'center', 'bold');
+  tileButton(BTN.next, true);
+  if (!last && isHard(state.level + 1)) { // S2: the next level says it is hard before it starts
+    text('التالي', BTN.next.x + BTN.next.w / 2 + 40, BTN.next.y + 46, 34, GOLD, 'center', 'bold');
+    hardBadge(BTN.next.x + BTN.next.w / 2 - 66, BTN.next.y + 46, 24);
+  } else text(last ? 'إلى البداية' : 'التالي', BTN.next.x + BTN.next.w / 2, BTN.next.y + 46, 34, GOLD, 'center', 'bold');
   tileButton(BTN.replay); text('إعادة', BTN.replay.x + BTN.replay.w / 2, BTN.replay.y + 46, 34, GOLD);
   if (last) text(`مجموع النجوم ${totalStars()} من ${NLEV() * 3}`, W / 2, 236, 30, GOLD, 'center', 'bold');
 }
@@ -912,49 +1252,98 @@ function drawTitle() {
   drawLimb(g, [0], [{ bloomT: reach > 0.98 ? 0.6 : -1 }], state.t);
   tileButton(BTN.play, true);
   text('ابدأ', W / 2, BTN.play.y + 40, 46, GOLD, 'center', 'bold');
-  text(`المرحلة ${titleSel + 1}`, W / 2, BTN.play.y + 84, 26, GOLD2);
+  textWithBadge(`المرحلة ${titleSel + 1}`, W / 2, BTN.play.y + 82, 26, GOLD2, '', isHard(titleSel));
   text(`النجوم ${totalStars()} من ${NLEV() * 3}`, W / 2, 744, 26, GOLD2);
   for (let i = 0; i < NLEV(); i++) {
     const b = levelTile(i), best = save.best[i];
     tileButton(b, i === titleSel);
     text(`${i + 1}`, b.x + b.w / 2, b.y + 40, 40, GOLD, 'center', 'bold');
     for (let k = 0; k < 3; k++) rateStar(b.x + b.w / 2 + (1 - k) * 34, b.y + 88, 13, best && k < best.stars);
+    if (isHard(i)) hardBadge(b.x + b.w / 2, b.y, 24); // S2: on the tile, before it starts
   }
-  CONTROLS.forEach((c, i) => text(c, W / 2, 1184 + i * 46, i ? 24 : 28, i ? GOLD2 : GOLD));
+  CONTROLS.forEach((c, i) => text(c, W / 2, 1200 + i * 42, i ? 24 : 28, i ? GOLD2 : GOLD));
   if (location.protocol.startsWith('http')) { tileButton(BTN.home); iconHome(BTN.home.x + 46, BTN.home.y + 48, 80); }
+  tileButton(BTN.stats); iconStats(BTN.stats.x + 46, BTN.stats.y + 44, 80);
   tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
+}
+
+// ---- Drawing: إحصائياتي (S1), the local play log ------------------------------------------------
+function drawStats() {
+  drawBackground();
+  tileButton(BTN.back); iconBack(BTN.back.x + 46, BTN.back.y + 46, 80);
+  tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
+  text('إحصائياتي', W / 2, 62, 46, GOLD, 'center', 'bold');
+  text('محفوظة على هذا الجهاز فقط، لا يُرسل منها شيء', W / 2, 128, 24, GOLD2);
+  const px = 24, py = 160, pw = 672, ph = 980;
+  ctx.fillStyle = 'rgba(0,0,10,0.4)'; rr(px + 4, py + 8, pw, ph, 26); ctx.fill();
+  const bg = ctx.createLinearGradient(0, py, 0, py + ph); bg.addColorStop(0, '#1f2f62'); bg.addColorStop(1, '#0f1838');
+  ctx.fillStyle = bg; rr(px, py, pw, ph, 26); ctx.fill(); ctx.strokeStyle = '#f3d27a'; ctx.lineWidth = 3; ctx.stroke();
+  const COLS = [[640, 'المرحلة'], [492, 'محاولات'], [386, 'فوز'], [262, 'أفضل وقت'], [108, 'تلميحات']];
+  for (const [x, h] of COLS) text(h, x, 202, 24, GOLD, 'center', 'bold');
+  ctx.fillStyle = 'rgba(243,210,122,0.45)'; ctx.fillRect(px + 20, 228, pw - 40, 2);
+  let A = 0, Wn = 0, Hn = 0;
+  const rh = 66, y0 = 266;
+  for (let i = 0; i < NLEV(); i++) {
+    const r = playLog.levels[String(i + 1)] || { attempts: 0, wins: 0, best: null, hints: 0 }, y = y0 + i * rh;
+    A += r.attempts; Wn += r.wins; Hn += r.hints;
+    if (i % 2 === 0) { ctx.fillStyle = 'rgba(60,85,150,0.25)'; rr(px + 14, y - rh / 2 + 3, pw - 28, rh - 6, 12); ctx.fill(); }
+    if (r.attempts > 0) { // the bar: share of attempts won, a starlight strip under the row
+      const u = clamp(r.wins / r.attempts, 0, 1), bw = (pw - 60) * u;
+      ctx.fillStyle = 'rgba(243,210,122,0.16)'; rr(px + 30, y + 18, pw - 60, 8, 4); ctx.fill();
+      if (bw > 1) { ctx.fillStyle = '#f3d27a'; rr(px + pw - 30 - bw, y + 18, bw, 8, 4); ctx.fill(); }
+    }
+    text(`${i + 1}`, isHard(i) ? 674 : 640, y - 4, 30, GOLD, 'center', 'bold');
+    if (isHard(i)) hardBadge(598, y - 4, 24);
+    text(`${r.attempts}`, 492, y - 4, 28, r.attempts ? '#fff3d6' : GOLD2);
+    text(`${r.wins}`, 386, y - 4, 28, r.wins ? '#ffe9a0' : GOLD2, 'center', r.wins ? 'bold' : '');
+    text(r.best === null ? '-' : `${r.best.toFixed(1)} ث`, 262, y - 4, 28, r.best === null ? GOLD2 : '#fff3d6');
+    text(r.hints ? `${r.hints}` : '-', 108, y - 4, 28, r.hints ? '#aee8ff' : GOLD2);
+  }
+  ctx.fillStyle = 'rgba(243,210,122,0.45)'; ctx.fillRect(px + 20, y0 + NLEV() * rh - rh / 2 + 4, pw - 40, 2);
+  const rate = A ? Math.round(Wn / A * 100) : 0;
+  text(`المجموع: ${A} محاولة · ${Wn} فوز · ${Hn} تلميح`, W / 2, 1066, 28, GOLD, 'center', 'bold');
+  text(A ? `نسبة الفوز ${rate}% · الشريط الذهبي: الفوز من المحاولات` : 'العب مرحلة لتبدأ الأرقام', W / 2, 1108, 24, GOLD2);
+  text('اضغط السهم للعودة', W / 2, 1200, 26, GOLD2);
 }
 
 // ---- Drawing: the figures sheet (every piece, its name under it) -----------------------------
 function drawFigures() {
   drawBackground();
-  text('أشكال اللعبة', W / 2, 46, 40, GOLD, 'center', 'bold');
+  text('أشكال اللعبة', W / 2, 40, 40, GOLD, 'center', 'bold');
   const label = (s, x, y) => text(s, x, y, 24, GOLD);
   const cell = (x, y, w, h) => { ctx.fillStyle = 'rgba(20,32,70,0.75)'; rr(x, y, w, h, 14); ctx.fill(); ctx.strokeStyle = 'rgba(243,210,122,0.35)'; ctx.lineWidth = 1.5; ctx.stroke(); };
   const rings = [[0b1, 'حلقة بفتحة'], [0b1000001, 'حلقة بفتحتين'], [0b100010001, 'حلقة بثلاث فتحات']];
-  rings.forEach(([m, n], i) => { const x = 125 + i * 235; cell(x - 110, 80, 220, 240); drawRingShape(x, 190, 52, 92, m, 0, i, { pattern: [0, 1, 3][i] }); label(n, x, 300); });
-  cell(15, 340, 165, 200); drawCore(97, 425, 56, 0.8); label('جوهرة اللازورد', 97, 515);
-  cell(190, 340, 165, 200); drawSocket(272, 425, -1, 0); label('مقبس مطفأ', 272, 515);
-  cell(365, 340, 165, 200); drawSocket(447, 425, 0.6, 0); label('نجمة متفتحة', 447, 515);
-  cell(540, 340, 165, 200); drawBeam(622, 470, -Math.PI / 2, 0, 110, 1, 0.3); label('شعاع النجم', 622, 515);
-  const gFig = (cy) => ({ cx: 0, cy, R: 2, band: 46, core: 40, outer: 132 });
-  cell(15, 560, 340, 250);
-  { const g = gFig(0); ctx.save(); ctx.translate(185, 800); ctx.scale(1.3, 1.3); ctx.beginPath(); ctx.rect(-130, -180, 260, 160); ctx.clip();
-    drawRingShape(0, 0, 42.5, 83.5, 0, 0, 0, {}); drawRingShape(0, 0, 88.5, 129.5, 0, 0, 1, { teeth: 'in' }); drawLink(g, { d: 0, t: 1, s: 1, slot: 11.5 }, [0, 0], 0, 0); ctx.restore(); }
-  label('ترس واحد: نفس الاتجاه', 185, 790);
-  cell(365, 560, 340, 250);
-  { const g = gFig(0); ctx.save(); ctx.translate(535, 800); ctx.scale(1.3, 1.3); ctx.beginPath(); ctx.rect(-130, -180, 260, 160); ctx.clip();
-    drawRingShape(0, 0, 42.5, 83.5, 0, 0, 0, {}); drawRingShape(0, 0, 88.5, 129.5, 0, 0, 1, { teeth: 'in' }); drawLink(g, { d: 0, t: 1, s: -1, slot: 11.5 }, [0, 0], 0, 0); ctx.restore(); }
-  label('ترسان: عكس الاتجاه', 535, 790);
-  cell(15, 830, 220, 200); drawKursi(125, 960); label('العروة', 125, 1005);
-  cell(250, 830, 220, 200);
-  { const g = { cx: 360, cy: 1060, R: 1, band: 60, core: 80, outer: 140 }; ctx.save(); ctx.beginPath(); ctx.rect(250, 830, 220, 160); ctx.clip();
-    drawRingShape(360, 1060, 82, 138, 0b1000, 0, 1, { glow: 'rgba(140,230,255,0.9)' }); drawHintArrow(g, 0, 1, 0.2); ctx.restore(); }
-  label('سهم التلميح', 360, 1005);
-  cell(485, 830, 220, 200); rateStar(595, 920, 34, true); label('نجمة التقييم', 595, 1005);
-  const icons = [['تراجع', (x, y) => iconUndo(x, y, 80)], ['تلميح', (x, y) => iconHint(x, y, 80)], ['إعادة', (x, y) => iconRestart(x, y, 80)],
-    ['الصوت', (x, y) => iconMute(x, y, 70, false)], ['المراحل', (x, y) => iconLevels(x, y, 70)], ['البيت', (x, y) => iconHome(x, y, 70)]];
-  icons.forEach(([n, f], i) => { const x = 68 + i * 117; cell(x - 54, 1050, 108, 200); f(x, 1130); label(n, x, 1215); });
+  rings.forEach(([m, n], i) => { const x = 125 + i * 235; cell(x - 110, 70, 220, 216); drawRingShape(x, 168, 48, 86, m, 0, i, { pattern: [0, 1, 3][i] }); label(n, x, 268); });
+  cell(15, 296, 165, 180); drawCore(97, 368, 50, 0.8); label('جوهرة اللازورد', 97, 456);
+  cell(190, 296, 165, 180); drawSocket(272, 368, -1, 0); label('مقبس مطفأ', 272, 456);
+  cell(365, 296, 165, 180); drawSocket(447, 368, 0.6, 0); label('نجمة متفتحة', 447, 456);
+  cell(540, 296, 165, 180); drawBeam(622, 420, -Math.PI / 2, 0, 100, 1, 0.3); label('شعاع النجم', 622, 456);
+  // gear links, with the A3 direction arrows on both rings
+  const gFig = { cx: 0, cy: 0, R: 2, band: 46, core: 40, outer: 132 };
+  [[1, 185, 'ترس واحد: نفس الاتجاه'], [-1, 535, 'ترسان: عكس الاتجاه']].forEach(([sg, x, n]) => {
+    cell(x - 170, 486, 340, 236);
+    ctx.save(); ctx.translate(x, 690); ctx.scale(1.25, 1.25); ctx.beginPath(); ctx.rect(-130, -160, 260, 150); ctx.clip();
+    drawRingShape(0, 0, 42.5, 83.5, 0, 0, 0, {}); drawRingShape(0, 0, 88.5, 129.5, 0, 0, 1, { teeth: 'in' });
+    const l = { d: 0, t: 1, s: sg, slot: 11.5 }; drawLink(gFig, l, [0, 0], 0, 0);
+    const a = posAngle(12) + 0.42; curvedArrow(0, 0, 63, a, 0.34, 1, 'rgba(255,246,214,0.85)', 5); curvedArrow(0, 0, 109, a, 0.4, sg, '#ffd36a', 6);
+    ctx.restore(); label(n, x, 706);
+  });
+  // row 4: the throne ring, the hint arrow, the rating star, the hard badge
+  cell(15, 732, 165, 176); drawKursi(97, 840); label('العروة', 97, 888);
+  cell(190, 732, 165, 176);
+  { const g = { cx: 272, cy: 920, R: 1, band: 50, core: 60, outer: 110 }; ctx.save(); ctx.beginPath(); ctx.rect(190, 732, 165, 130); ctx.clip();
+    drawRingShape(272, 920, 62, 108, 0b1000, 0, 1, { glow: 'rgba(140,230,255,0.9)' }); drawHintArrow(g, 0, 1, 0.2); ctx.restore(); }
+  label('سهم التلميح', 272, 888);
+  cell(365, 732, 165, 176); rateStar(447, 812, 32, true); label('نجمة التقييم', 447, 888);
+  cell(540, 732, 165, 176); hardBadge(622, 812, 24); label('شارة صعبة', 622, 888);
+  // row 5: the star lock (A1): closed, opening, and its socket; the stats icon
+  cell(15, 918, 165, 162); drawStarLock(97, 990, 44, LOCKC[0], 0); label('قفل النجمة', 97, 1058);
+  cell(190, 918, 165, 162); drawStarLock(272, 990, 44, LOCKC[1], 0.3); label('قفل يُفتح', 272, 1058);
+  cell(365, 918, 165, 162); drawSocket(447, 990, -1, 0); ctx.strokeStyle = LOCKC[0]; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(447, 990, 30, 0, TAU); ctx.stroke(); label('مقبس القفل', 447, 1058);
+  cell(540, 918, 165, 162); iconStats(622, 990, 80); label('إحصائياتي', 622, 1058);
+  const icons = [['تراجع', (x, y) => iconUndo(x, y, 76)], ['تلميح', (x, y) => iconHint(x, y, 76)], ['إعادة', (x, y) => iconRestart(x, y, 76)],
+    ['الصوت', (x, y) => iconMute(x, y, 68, false)], ['المراحل', (x, y) => iconLevels(x, y, 68)], ['البيت', (x, y) => iconHome(x, y, 68)]];
+  icons.forEach(([n, f], i) => { const x = 68 + i * 117; cell(x - 54, 1090, 108, 176); f(x, 1160); label(n, x, 1240); });
 }
 
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------

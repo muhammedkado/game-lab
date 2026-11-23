@@ -8,7 +8,7 @@ window.CONFIG = {
   volume: { value: 0.5, min: 0, max: 1, step: 0.05 },
 
   // The rules
-  table_spots: { value: 5, min: 3, max: 5, step: 1 },   // spots on the side table (layout holds 5)
+  table_spots: { value: 6, min: 3, max: 6, step: 1 },   // spots on the side table (layout holds 6) (M1: was 5)
   undos: { value: 3, min: 0, max: 9, step: 1 },         // free undos per room
   shuffles: { value: 1, min: 0, max: 3, step: 1 },      // free pile shuffles per room
   preview: { value: 2, min: 0, max: 2, step: 1 },       // next box labels shown
@@ -27,6 +27,15 @@ window.CONFIG = {
   table_plan: { value: 3, min: 0, max: 5, step: 1 },   // most table spots the dealer's own way through uses
   solver_nodes: { value: 40000, min: 2000, max: 300000, step: 2000 }, // search budget per dealt room
   shuffle_tries: { value: 40, min: 5, max: 200, step: 5 },          // shuffles tried until a winnable one is found
+
+  // Round 2 (design/re-improvements.md): idle hint, honest labels
+  hint_idle: { value: 15, min: 5, max: 60, step: 1 },     // seconds with no pick before one item that fits an open box pulses (M2)
+  hints_per_room: { value: 3, min: 0, max: 9, step: 1 },  // most idle hints in one room
+  hint_nodes: { value: 4000, min: 500, max: 40000, step: 500 }, // search budget to check a hinted pick keeps the room winnable
+  hard_from: { value: 3, min: 2, max: 8, step: 1 },       // first room marked "صعبة" (S2)
+  hard_every: { value: 2, min: 1, max: 7, step: 1 },      // then every Nth room after it (3, 5, 7)
+  hard_table_plan: { value: 4, min: 0, max: 6, step: 1 }, // on a hard room, most table spots the dealer's own way through uses
+  hard_park_chance: { value: 0.45, min: 0, max: 0.8, step: 0.02 }, // on a hard room, how often that way parks an item
 
   // Feel (seconds, logical px)
   fly_time: { value: 0.32, min: 0.1, max: 0.8, step: 0.02 },   // item from pile to box or table

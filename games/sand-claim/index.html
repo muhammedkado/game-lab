@@ -483,6 +483,7 @@ function enterCell(r, cx, cy) {
   if (t && t !== r.id) { const v = riders[t - 1]; if (v.alive) kill(v, r, 'cut'); }
   if (own[i] === r.id) { if (r.trail.length) capture(r); return; }
   if (t === r.id) { kill(r, r, 'self'); return; }
+  if (!r.trail.length) r.trip++; // a new trip out of the land: bots roll to notice it once (R1)
   trail[i] = r.id; trailIx[i] = r.trail.length; r.trail.push(i); r.tdir.push((Math.round(r.a / (TAU / 8)) % 8 + 8) % 8);
 }
 function capture(r) { // trail becomes land, then flood from outside: what the flood cannot reach is enclosed
@@ -607,13 +608,44 @@ const loopMax = k => k === 'greedy' ? tune.greedy_loop : k === 'hunter' ? tune.h
 const fleeR = k => k === 'greedy' ? tune.greedy_flee : k === 'hunter' ? tune.hunter_flee : tune.cautious_flee;
 const maxTrail = k => k === 'greedy' ? tune.greedy_trail : k === 'hunter' ? tune.hunter_trail : tune.cautious_trail;
 function setMode(b, m) { b.mode = m; b.modeT = 0; b.think = 0; }
-function enemyNear(b) {
-  let d = 1e9;
-  const s = b.trail[0], sx = s % N + 0.5, sy = ((s / N) | 0) + 0.5;
-  for (const r of riders) if (r !== b && r.alive && !r.wait) {
-    d = Math.min(d, Math.hypot(r.x - b.x, r.y - b.y), Math.hypot(r.x - sx, r.y - sy));
+// R1: a temperament is a set of chances, not a speed. Index 0 notice an enemy, 1 notice a long trail, 2 attack.
+const PERCEPTION = {
+  greedy: ['greedy_see_enemy', 'greedy_see_trail', 'greedy_attack'],
+  hunter: ['hunter_see_enemy', 'hunter_see_trail', 'hunter_attack'],
+  cautious: ['cautious_see_enemy', 'cautious_see_trail', 'cautious_attack'],
+};
+function chance(b, k) { return clamp(tune[PERCEPTION[b.kind][k]] * (1 + (state.skill - 3) * tune.skill_step), 0, 0.98); } // R2 scales it
+function botLook(b) { // one look around: defend if it notices danger, attack if it notices a trail it can race to
+  const T = state.t, K = b.kind, tl = b.trail.length;
+  if (tl && b.mode === 'out') { // defend: an enemy near me or my trail, noticed by chance (rolled again when it comes close)
+    const s = b.trail[0], sx = s % N + 0.5, sy = ((s / N) | 0) + 0.5, R = fleeR(K);
+    for (const r of riders) if (r !== b && r.alive && !r.wait) {
+      const d = Math.min(Math.hypot(r.x - b.x, r.y - b.y), Math.hypot(r.x - sx, r.y - sy));
+      const band = d < R * 0.5 ? 2 : d < R ? 1 : 0;
+      if (band > b.rollE[r.id]) { b.rollE[r.id] = band; if (rng() < chance(b, 0)) b.sawE[r.id] = 1; }
+      if (band && b.sawE[r.id]) { setMode(b, 'return'); events.push({ type: 'defend', who: b.id, from: r.id }); return; }
+    }
   }
-  return d;
+  const wake = K === 'hunter' ? b.huntAt : Math.max(tune.safe_time, tune.attack_after);
+  if (T < wake || T < b.huntCool || b.mode === 'hunt' || tl > maxTrail(K) * 0.5) return;
+  const range = K === 'hunter' ? tune.hunt_range : tune.attack_range, myV = tune.bot_speed;
+  let prey = null, pd = 1e9;
+  for (const r of riders) if (r !== b && r.alive && r.trail.length > tune.hunt_trail) {
+    if (Math.hypot(r.x - b.x, r.y - b.y) > range) continue;
+    if (b.tripSeen[r.id] !== r.trip) { b.tripSeen[r.id] = r.trip; b.tripSaw[r.id] = rng() < chance(b, 1) ? 1 : 0; }
+    if (b.tripSaw[r.id] !== 1) continue; // 0 missed this trip, 2 already decided
+    const tr = r.trail; let md = 1e9;
+    for (let j = 0; j < tr.length; j += 2) { const i = tr[j], d = Math.hypot(i % N + 0.5 - b.x, ((i / N) | 0) + 0.5 - b.y); if (d < md) md = d; }
+    const h = tr[0], home = Math.hypot(h % N + 0.5 - r.x, ((h / N) | 0) + 0.5 - r.y); // it left its land at trail[0]
+    if (md / myV > (home / (r.isPlayer ? 1 : tune.bot_speed)) * tune.race_margin + 2) continue; // cannot win the race yet: keep watching
+    b.tripSaw[r.id] = 2;
+    if (rng() < chance(b, 2) && md < pd) { pd = md; prey = r; }
+  }
+  if (prey) {
+    setMode(b, 'hunt'); b.prey = prey.id; b.huntEnd = T + tune.hunt_time;
+    events.push({ type: 'hunt', who: b.id, prey: prey.id });
+    if (prey.isPlayer) { sfx.warn(); say(`${FACTIONS[b.id].name} يطارد أثرك! عُد إلى أرضك`, '#ffb4a8', 2.6); }
+  }
 }
 function ownTrailAt(b, x, y, skip) {
   if (x < 1 || y < 1 || x > N - 1 || y > N - 1) return true;
@@ -689,22 +721,13 @@ function steer(b) {
 }
 function botThink(b, dt) {
   const T = state.t, K = b.kind, tl = b.trail.length, inLand = own[b.cy * N + b.cx] === b.id;
-  b.think -= dt; b.modeT += dt;
-  if (tl > 0 && (b.mode === 'out' || b.mode === 'home') && (enemyNear(b) < fleeR(K) || tl > maxTrail(K))) setMode(b, 'return');
-  if (K === 'hunter' && T >= b.huntAt && b.mode !== 'hunt' && T >= b.huntCool) {
-    let prey = null, pd = tune.hunt_range;
-    for (const r of riders) if (r !== b && r.alive && r.trail.length > tune.hunt_trail) {
-      const d = Math.hypot(r.x - b.x, r.y - b.y); if (d < pd) { pd = d; prey = r; }
-    }
-    if (prey) {
-      setMode(b, 'hunt'); b.prey = prey.id; b.huntEnd = T + tune.hunt_time;
-      events.push({ type: 'hunt', who: b.id, prey: prey.id });
-      if (prey.isPlayer) { sfx.warn(); say('الصيّاد يطارد أثرك! عُد إلى أرضك', '#ffb4a8', 2.6); }
-    }
-  }
+  b.think -= dt; b.modeT += dt; b.look -= dt;
+  // the three verbs: expand (home/out), defend (return), attack (hunt)
+  if (tl > maxTrail(K) && (b.mode === 'out' || b.mode === 'home')) setMode(b, 'return'); // a long trail always sends it home
+  if (b.look <= 0) { b.look = tune.look_time; botLook(b); } // perception runs a few times a second, not every step
   switch (b.mode) {
     case 'home':
-      planLoop(b); setMode(b, 'out');
+      planLoop(b); b.rollE.fill(0); b.sawE.fill(0); setMode(b, 'out'); // a new outing: it has to notice enemies afresh
       // falls through: head for the first waypoint at once
     case 'out': {
       const w = b.wps[0];
@@ -720,7 +743,7 @@ function botThink(b, dt) {
       break;
     case 'hunt': {
       const p = riders[b.prey - 1];
-      if (!p.alive || p.trail.length < 3 || T > b.huntEnd) { b.huntCool = T + 3; setMode(b, tl ? 'return' : 'home'); break; }
+      if (!p.alive || p.trail.length < 3 || T > b.huntEnd || tl > maxTrail(K) * 1.5) { b.huntCool = T + 3; setMode(b, tl ? 'return' : 'home'); break; }
       if (b.think <= 0) {
         b.think = 0.15; let bd = 1e9;
         for (let j = 0; j < p.trail.length; j += 2) {
@@ -748,6 +771,7 @@ function findSpot() {
 function placeRider(r, x, y) {
   r.x = r.px = x + 0.5; r.y = r.py = y + 0.5; r.cx = x; r.cy = y; r.homeX = r.x; r.homeY = r.y;
   r.trail = []; r.tdir = []; r.alive = true; r.wps = []; r.mode = 'home'; r.modeT = 0; r.think = 0;
+  r.rollE.fill(0); r.sawE.fill(0); r.tripSeen.fill(-1); r.tripSaw.fill(0); r.look = (r.id % 3) * 0.1; // looks staggered across bots
 }
 function respawn(b) {
   const s = findSpot();
@@ -771,11 +795,48 @@ function say(s, col, dur) { state.msg = { s, col, until: state.t + dur }; }
 // ---- The game: round -----------------------------------------------------------------
 function loadBest() { try { return Number(localStorage.getItem('gamelab.sand-claim.best')) || 0; } catch (_) { return 0; } }
 function saveBest(v) { try { localStorage.setItem('gamelab.sand-claim.best', String(v)); } catch (_) { /* private mode */ } }
+// S1: the local play log, on this device only (never sent anywhere): per round length, rounds started,
+// finished, wins, best land, fastest win; the last 30 results; and the bots' skill for R2.
+const LOG_KEY = 'gamelab:sand-claim:log', LEN_KEY = 'gamelab:sand-claim:len';
+const LENS = ['round_short', 'round_time', 'round_long']; // R3: the title's three chips, right to left
+const SKILL_TOP = 5;
+function blankLog() { return { v: 1, rounds: 0, finished: 0, skill: 0, since: 0, moved: 0, cuts: 0, byLen: {}, recent: [] }; }
+function loadLog() {
+  try { const o = JSON.parse(localStorage.getItem(LOG_KEY)); if (o && o.v === 1 && Array.isArray(o.recent)) return o; } catch (_) { /* no storage */ }
+  return blankLog();
+}
+function saveLog() { try { localStorage.setItem(LOG_KEY, JSON.stringify(playLog)); } catch (_) { /* private mode */ } }
+let playLog = loadLog();
+let lenPick = (() => { try { const v = Number(localStorage.getItem(LEN_KEY)); return v >= 0 && v <= 2 && localStorage.getItem(LEN_KEY) !== null ? v : 1; } catch (_) { return 1; } })();
+function pickLen(c) { if (c === lenPick) return; lenPick = c; sfx.tick(); try { localStorage.setItem(LEN_KEY, String(c)); } catch (_) { /* private mode */ } }
+function botSkill() { return clamp(Math.round(playLog.skill || tune.skill_start), tune.skill_min, tune.skill_max); }
+function lenStats(sec) { const k = String(sec); return playLog.byLen[k] || (playLog.byLen[k] = { n: 0, done: 0, wins: 0, best: 0, fast: 0 }); }
+function grade(q) { return q.w ? 1 : (q.e === 'out' || q.e === 'botwin' || q.r >= 4) ? -1 : 0; } // a win, a loss, or in between
+function logResult(R) {
+  const L = lenStats(state.roundLen), win = R.reason === 'win' || (R.reason === 'time' && R.rank === 1);
+  L.done++; if (win) L.wins++;
+  if (R.reason === 'win' && (!L.fast || state.t < L.fast)) L.fast = +state.t.toFixed(1);
+  if (R.fin > L.best) L.best = +R.fin.toFixed(1);
+  playLog.finished++; playLog.cuts += state.kills; playLog.since++;
+  playLog.recent.push({ L: state.roundLen, s: state.skill, r: R.rank, p: +R.fin.toFixed(1), w: win ? 1 : 0, e: R.reason, t: Math.round(state.t) });
+  if (playLog.recent.length > 30) playLog.recent.shift();
+  // R2: after the grace rounds, the last results nudge the bots one step, between the floor and the ceiling
+  R.moved = 0;
+  if (playLog.finished >= tune.grace_rounds && playLog.since >= tune.skill_lookback) {
+    const sc = playLog.recent.slice(-tune.skill_lookback).reduce((a, q) => a + grade(q), 0);
+    const need = Math.max(1, Math.ceil(tune.skill_lookback * 2 / 3)), cur = botSkill();
+    if (sc >= need && cur < tune.skill_max) R.moved = 1; else if (sc <= -need && cur > tune.skill_min) R.moved = -1;
+    if (R.moved) { playLog.skill = cur + R.moved; playLog.since = 0; }
+  }
+  playLog.moved = R.moved; R.next = botSkill();
+  saveLog();
+}
 function makeRider(id) {
   const F = FACTIONS[id];
   return { id, isPlayer: id === 1, kind: F.kind, x: 0, y: 0, px: 0, py: 0, cx: 0, cy: 0, a: 0, ta: 0, gait: 0, alive: true,
     trail: [], tdir: [], bb: [0, 0, 0, 0], wait: id === 1, respawnT: 0, deadT: 0,
-    mode: 'home', modeT: 0, think: 0, wps: [], tx: 0, ty: 0, homeX: 0, homeY: 0, prey: 0, huntAt: 0, huntEnd: 0, huntCool: 0 };
+    mode: 'home', modeT: 0, think: 0, wps: [], tx: 0, ty: 0, homeX: 0, homeY: 0, prey: 0, huntAt: 0, huntEnd: 0, huntCool: 0,
+    trip: 0, look: 0, rollE: new Uint8Array(8), sawE: new Uint8Array(8), tripSeen: new Int32Array(8).fill(-1), tripSaw: new Uint8Array(8) };
 }
 function paintAll() {
   wctx.fillStyle = wctx.createPattern(sandTile, 'repeat'); wctx.fillRect(0, 0, N * CS, N * CS);
@@ -788,7 +849,8 @@ function reset() {
   own.fill(0); shown.fill(0); trail.fill(0); counts.fill(0);
   batches = []; parts = []; pops = [];
   state = { t: 0, score: 0, pct: 0, gained: '', kills: 0, best: loadBest(), alive: true, final: 0, firstCap: false,
-    endT: 0, why: '', killer: 0, result: null, msg: null, lookX: 0, lookY: 0, shake: 0, lastTick: -1, safeSaid: false };
+    endT: 0, why: '', killer: 0, result: null, msg: null, lookX: 0, lookY: 0, shake: 0, lastTick: -1, safeSaid: false,
+    roundLen: tune[LENS[lenPick]], skill: botSkill(), card: false, roundNo: playLog.rounds + 1, moved: 0 };
   riders = [];
   for (let f = 1; f < FACTIONS.length; f++) riders.push(makeRider(f));
   for (const r of riders) {
@@ -800,7 +862,12 @@ function reset() {
   oases = OASES.map(([x, y], k) => ({ x, y, i: (y | 0) * N + (x | 0), owner: 0, img: oasisImgs[k] }));
   paintAll();
 }
-function startRound() { reset(); scene = 'play'; ptr.stick = false; sfx.start(); events.push({ type: 'start' }); }
+function startRound() {
+  reset(); scene = 'play'; ptr.stick = false; sfx.start();
+  state.card = true; state.moved = playLog.moved; // R4: the round card is open, so nothing moves until you do
+  playLog.rounds++; playLog.moved = 0; lenStats(state.roundLen).n++; saveLog();
+  events.push({ type: 'start', len: state.roundLen, skill: state.skill, hard: state.skill >= tune.hard_skill });
+}
 function endRound(reason, who = 0) {
   const fin = state.alive ? pct(1) : state.final;
   const stand = riders.map(r => ({ f: r.id, p: r.isPlayer ? fin : (r.alive ? pct(r.id) : 0) })).sort((a, b) => b.p - a.p);
@@ -808,6 +875,7 @@ function endRound(reason, who = 0) {
   const newBest = fin > state.best + 1e-9;
   if (newBest) { state.best = fin; saveBest(fin); }
   state.result = { reason, who, fin, stand, rank, newBest };
+  logResult(state.result);
   state.score = +fin.toFixed(1);
   state.gained = `أرضك ${fin.toFixed(1)}%`;
   scene = 'results';
@@ -926,12 +994,55 @@ function drawButton(b, kind) {
   } else if (kind === 'home') {
     ctx.beginPath(); ctx.moveTo(cx, cy - 22); ctx.lineTo(cx + 24, cy); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx + 17, cy + 20); ctx.lineTo(cx - 17, cy + 20); ctx.lineTo(cx - 17, cy); ctx.lineTo(cx - 24, cy); ctx.closePath(); ctx.fill();
     ctx.fillStyle = 'rgba(52,30,12,0.9)'; ctx.fillRect(cx - 6, cy + 6, 12, 14);
+  } else if (kind === 'stats') { // S1: a drawn bar chart
+    rr(ctx, cx - 21, cy + 2, 10, 16, 2); ctx.fill(); rr(ctx, cx - 5, cy - 10, 10, 28, 2); ctx.fill(); rr(ctx, cx + 11, cy - 20, 10, 38, 2); ctx.fill();
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; line(ctx, cx - 25, cy + 21, cx + 25, cy + 21);
   }
 }
 function fmtTime(s) { s = Math.max(0, Math.ceil(s)); return `${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`; }
+function minutesAr(sec) {
+  const m = sec / 60;
+  if (m === 1) return 'دقيقة'; if (m === 2) return 'دقيقتان';
+  if (Number.isInteger(m)) return m <= 10 ? `${m} دقائق` : `${m} دقيقة`;
+  return fmtTime(sec);
+}
+function hardBadge(x, y, size = 26) { // S2: an honest "hard" label, said before the round starts
+  ctx.font = `bold ${size}px ${FONT}`;
+  const w = ctx.measureText('صعبة').width + size * 1.9, h = size * 1.45;
+  ctx.fillStyle = '#9c2a18'; rr(ctx, x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = '#ffd0a8'; ctx.lineWidth = 2; rr(ctx, x - w / 2 + 3, y - h / 2 + 3, w - 6, h - 6, h / 2 - 3); ctx.stroke();
+  const fx = x + w / 2 - size * 0.75; // a small drawn flame
+  ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.moveTo(fx, y - size * 0.42); ctx.quadraticCurveTo(fx + size * 0.32, y, fx + size * 0.2, y + size * 0.3);
+  ctx.quadraticCurveTo(fx, y + size * 0.42, fx - size * 0.2, y + size * 0.3); ctx.quadraticCurveTo(fx - size * 0.3, y, fx, y - size * 0.42); ctx.fill();
+  text('صعبة', x - size * 0.3, y + 1, size, '#fff3e0', 'center', 'bold');
+  return w;
+}
+function skillPips(cx, y, n, r = 13) { // n of 5 rug diamonds, right to left
+  for (let k = 0; k < SKILL_TOP; k++) {
+    const x = cx + (SKILL_TOP / 2 - 0.5 - k) * (r * 2.6);
+    ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
+    ctx.fillStyle = k < n ? '#f2c14e' : 'rgba(245,232,200,0.18)'; ctx.fill();
+    ctx.strokeStyle = k < n ? '#7a4a20' : 'rgba(245,232,200,0.5)'; ctx.lineWidth = 2; ctx.stroke();
+  }
+}
+function drawRoundCard() { // R2 + R4 + S2: the round card; bots and clock wait while it is open
+  const x = 60, y = 740, w = 600, h = 300, hard = state.skill >= tune.hard_skill;
+  ctx.fillStyle = 'rgba(52,30,12,0.88)'; rr(ctx, x, y, w, h, 26); ctx.fill();
+  ctx.strokeStyle = hard ? '#e0603a' : CREAM; ctx.lineWidth = 3; rr(ctx, x + 7, y + 7, w - 14, h - 14, 20); ctx.stroke();
+  text(`الجولة ${state.roundNo} · ${minutesAr(state.roundLen)}`, W / 2, y + 48, 34, '#fff', 'center', 'bold');
+  text(`مهارة البوتات: ${state.skill} من ${SKILL_TOP}`, W / 2, y + 100, 30, '#ffe9a8', 'center', 'bold');
+  if (hard) { skillPips(W / 2 + 70, y + 148, state.skill); hardBadge(W / 2 - 150, y + 148); } else skillPips(W / 2, y + 148, state.skill);
+  const g = tune.grace_rounds - playLog.finished;
+  const why = state.moved > 0 ? 'ارتفعت درجة بعد نتائجك الأخيرة' : state.moved < 0 ? 'انخفضت درجة لتناسب نتائجك الأخيرة'
+    : g > 0 ? `مهارة ثابتة في أول ${tune.grace_rounds} جولات` : 'تتغير درجة واحدة حسب آخر نتائجك';
+  text(why, W / 2, y + 198, 24, '#e9d6b0', 'center');
+  ctx.globalAlpha = 0.7 + 0.3 * Math.sin(clock.now() * 4);
+  text('اسحب في أي اتجاه لتبدأ', W / 2, y + 252, 30, '#fff', 'center', 'bold');
+  ctx.globalAlpha = 1;
+}
 function drawHUD(view) {
   drawButton(BTN_PAUSE, 'pause'); drawButton(BTN_MUTE, 'mute');
-  const left = tune.round_time - state.t, hurry = left < 10;
+  const left = state.roundLen - state.t, hurry = left < 10;
   ctx.fillStyle = 'rgba(52,30,12,0.66)'; rr(ctx, 188, 16, 192, 120, 20); ctx.fill();
   text(fmtTime(left), 284, 56, 50, hurry ? '#ffb0a0' : '#fff', 'center', 'bold');
   const mp = state.alive ? pct(1) : state.final;
@@ -971,7 +1082,7 @@ function drawHUD(view) {
     ctx.globalAlpha = 1;
   }
   const pl = riders[0];
-  if (pl.wait && state.alive) pill('اسحب في أي اتجاه لتنطلق', W / 2, 960, 30, '#fff', 'rgba(40,20,8,0.8)');
+  if (state.card && scene === 'play') drawRoundCard();
   // the touch stick
   if (ptr.id !== null && ptr.stick && scene === 'play') {
     const R = tune.stick_radius, vx = ptr.x - ptr.ox, vy = ptr.y - ptr.oy, L = Math.hypot(vx, vy), k = L > R ? R / L : 1;
@@ -995,13 +1106,26 @@ function drawRug(x, y, w, h, f) {
 // ---- Scenes ---------------------------------------------------------------------------
 const BTN_AGAIN = [150, 930, 420, 100], BTN_MENU = [210, 1052, 300, 84];
 const BTN_RESUME = [150, 540, 420, 100], BTN_RESTART = [150, 664, 420, 100], BTN_QUIT = [150, 788, 420, 100];
-function bigButton(b, s, main) {
+const BTN_STATS = [620, 16, 84, 84], STATS_HIT = [496, 10, 214, 96], BTN_BACK = [150, 1040, 420, 100], BTN_CLEAR = [190, 1158, 340, 80];
+const LEN_CHIPS = [[465, 975, 170, 84], [275, 975, 170, 84], [85, 975, 170, 84]], CHIP_BAND = [60, 935, 600, 135]; // 2, 3, 5 min, right to left
+function lenChip(b, k) { // R3: one round-length choice
+  const on = k === lenPick, cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+  ctx.fillStyle = 'rgba(30,15,5,0.3)'; rr(ctx, b[0] + 3, b[1] + 5, b[2], b[3], 20); ctx.fill();
+  ctx.save(); rr(ctx, b[0], b[1], b[2], b[3], 20); ctx.clip();
+  if (on) { ctx.fillStyle = ctx.createPattern(rugTiles[1], 'repeat'); ctx.fillRect(b[0], b[1], b[2], b[3]); ctx.fillStyle = 'rgba(22,58,134,0.55)'; }
+  else ctx.fillStyle = '#f3dfb4';
+  ctx.fillRect(b[0], b[1], b[2], b[3]); ctx.restore();
+  ctx.strokeStyle = on ? CREAM : '#a07040'; ctx.lineWidth = 3; rr(ctx, b[0] + 5, b[1] + 5, b[2] - 10, b[3] - 10, 16); ctx.stroke();
+  text(minutesAr(tune[LENS[k]]), cx, cy + 2, 30, on ? '#fff' : '#3b2412', 'center', 'bold');
+}
+function openStats() { scene = 'stats'; state.clearAsk = 0; }
+function bigButton(b, s, main, size) {
   ctx.fillStyle = 'rgba(30,15,5,0.35)'; rr(ctx, b[0] + 4, b[1] + 6, b[2], b[3], 24); ctx.fill();
   ctx.save(); rr(ctx, b[0], b[1], b[2], b[3], 24); ctx.clip();
   ctx.fillStyle = main ? ctx.createPattern(rugTiles[1], 'repeat') : '#6b4423'; ctx.fillRect(b[0], b[1], b[2], b[3]);
   ctx.fillStyle = main ? 'rgba(22,58,134,0.55)' : 'rgba(0,0,0,0)'; ctx.fillRect(b[0], b[1], b[2], b[3]); ctx.restore();
   ctx.strokeStyle = CREAM; ctx.lineWidth = 3; rr(ctx, b[0] + 5, b[1] + 5, b[2] - 10, b[3] - 10, 20); ctx.stroke();
-  text(s, b[0] + b[2] / 2, b[1] + b[3] / 2 + 2, main ? 38 : 32, '#fff', 'center', 'bold');
+  text(s, b[0] + b[2] / 2, b[1] + b[3] / 2 + 2, size || (main ? 38 : 32), '#fff', 'center', 'bold');
 }
 const scenes = {
   figures: {
@@ -1050,26 +1174,102 @@ const scenes = {
     update() {
       for (const p of tapList) {
         if (location.protocol.startsWith('http') && inRect(p, BTN_HOME)) { location.href = '../../'; return; }
+        if (inRect(p, STATS_HIT)) { openStats(); return; }
+        const c = LEN_CHIPS.findIndex(b => inRect(p, b));
+        if (c >= 0) { pickLen(c); continue; }
+        if (inRect(p, CHIP_BAND)) continue; // a near miss on the chips never starts a round
         startRound(); return;
       }
+      if (pressed('KeyI')) { openStats(); return; }
+      if (pressed('Digit2')) pickLen(0); if (pressed('Digit3')) pickLen(1); if (pressed('Digit5')) pickLen(2);
+      if (pressed('ArrowLeft')) pickLen(Math.min(2, lenPick + 1)); if (pressed('ArrowRight')) pickLen(Math.max(0, lenPick - 1));
       if (pressed('Enter') || pressed('Space')) startRound();
       state.t += STEP;
     },
     draw() {
       drawSandBg();
       if (location.protocol.startsWith('http')) drawButton(BTN_HOME, 'home');
+      drawButton(BTN_STATS, 'stats');
+      text('إحصائياتي', BTN_STATS[0] - 12, BTN_STATS[1] + BTN_STATS[3] / 2, 24, '#3b2412', 'right', 'bold'); // beside the button, clear of the title
       const t = clock.now();
-      text(TITLE, W / 2, 190, 140, '#3b2412', 'center', 'bold');
-      text(TITLE_EN, W / 2, 300, 40, '#6b4423', 'center', 'bold');
-      drawRug(110, 360, 500, 270, 1);
-      for (let j = 0; j < 22; j++) { const a = j / 22 * TAU; drawPrint(ctx, 360 + Math.cos(a) * 300, 495 + Math.sin(a) * 172, a + Math.PI / 2, 1.8, j & 1, FACTIONS[1].dark); }
-      drawRider(ctx, 360, 495, -0.25, 1, 'player', t * 4, 3.0, t);
-      CONTROLS.forEach((c, i) => text(c, W / 2, 712 + i * 52, 28, '#3b2412', 'center', i === 1 ? 'bold' : ''));
-      text('المنافسون الخمسة بوتات وليسوا لاعبين حقيقيين', W / 2, 990, 26, '#6b4423', 'center');
-      if (state.best > 0) text(`أفضل نتيجة لك: ${state.best.toFixed(1)}%`, W / 2, 1050, 30, '#163a86', 'center', 'bold');
+      text(TITLE, W / 2, 180, 140, '#3b2412', 'center', 'bold');
+      text(TITLE_EN, W / 2, 285, 40, '#6b4423', 'center', 'bold');
+      drawRug(110, 345, 500, 250, 1);
+      for (let j = 0; j < 22; j++) { const a = j / 22 * TAU; drawPrint(ctx, 360 + Math.cos(a) * 300, 470 + Math.sin(a) * 160, a + Math.PI / 2, 1.8, j & 1, FACTIONS[1].dark); }
+      drawRider(ctx, 360, 470, -0.25, 1, 'player', t * 4, 3.0, t);
+      CONTROLS.forEach((c, i) => text(c, W / 2, 668 + i * 46, 28, '#3b2412', 'center', i === 1 ? 'bold' : ''));
+      text('المنافسون الخمسة بوتات وليسوا لاعبين حقيقيين', W / 2, 902, 26, '#6b4423', 'center');
+      text('طول الجولة', W / 2, 950, 26, '#3b2412', 'center', 'bold');
+      LEN_CHIPS.forEach((b, k) => lenChip(b, k));
+      if (state.best > 0) text(`أفضل نتيجة لك: ${state.best.toFixed(1)}%`, W / 2, 1098, 28, '#163a86', 'center', 'bold');
+      const sk = botSkill();
+      if (sk >= tune.hard_skill) { text(`مهارة البوتات: ${sk} من ${SKILL_TOP}`, W / 2 + 60, 1142, 26, '#3b2412', 'center', 'bold'); hardBadge(W / 2 - 150, 1142, 24); }
+      else text(`مهارة البوتات: ${sk} من ${SKILL_TOP}`, W / 2, 1142, 26, '#3b2412', 'center', 'bold');
       ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
-      pill('المس الشاشة للبدء', W / 2, 1160, 44, '#fff', hexA(FACTIONS[1].dark, 0.92));
+      pill('المس الشاشة للبدء', W / 2, 1212, 44, '#fff', hexA(FACTIONS[1].dark, 0.92));
       ctx.globalAlpha = 1;
+    },
+  },
+  stats: { // S1: what this device remembers, honestly, for the owner's playtest notes
+    update(dt) {
+      state.t += dt;
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyI') || pressed('Backspace')) { scene = 'title'; return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_BACK)) { scene = 'title'; return; }
+        if (inRect(p, BTN_CLEAR)) {
+          if (state.clearAsk && state.t < state.clearAsk) { playLog = blankLog(); saveLog(); state.clearAsk = 0; sfx.far(); }
+          else { state.clearAsk = state.t + 3; sfx.tick(); }
+        }
+      }
+    },
+    draw() {
+      drawSandBg();
+      ctx.fillStyle = 'rgba(70,40,15,0.95)'; rr(ctx, 30, 24, 660, 1232, 30); ctx.fill();
+      ctx.strokeStyle = FACTIONS[1].col; ctx.lineWidth = 6; rr(ctx, 40, 34, 640, 1212, 24); ctx.stroke();
+      text('إحصائياتي', W / 2, 100, 56, '#fff', 'center', 'bold');
+      text('سجل محلي على هذا الجهاز فقط ولا يُرسل إلى أي مكان', W / 2, 156, 24, '#e9d6b0', 'center');
+      // the table: one row per round length
+      const cols = [596, 500, 422, 348, 250, 132], heads = ['الطول', 'بدأت', 'أنهيت', 'فوز', 'أفضل أرض', 'أسرع فوز'];
+      ctx.fillStyle = 'rgba(255,255,255,0.08)'; rr(ctx, 60, 192, 600, 330, 18); ctx.fill();
+      heads.forEach((h, k) => text(h, cols[k], 226, 24, '#ffe9a8', 'center', 'bold'));
+      const tot = { n: 0, done: 0, wins: 0, best: 0, fast: 0 };
+      LENS.forEach((key, k) => {
+        const sec = tune[key], L = playLog.byLen[String(sec)] || { n: 0, done: 0, wins: 0, best: 0, fast: 0 }, y = 290 + k * 62;
+        ctx.strokeStyle = 'rgba(245,232,200,0.2)'; ctx.lineWidth = 1.5; line(ctx, 76, y - 31, 644, y - 31);
+        tot.n += L.n; tot.done += L.done; tot.wins += L.wins; tot.best = Math.max(tot.best, L.best);
+        if (L.fast && (!tot.fast || L.fast < tot.fast)) tot.fast = L.fast;
+        [minutesAr(sec), `${L.n}`, `${L.done}`, `${L.wins}`, L.done ? `${L.best.toFixed(1)}%` : '-', L.fast ? fmtTime(L.fast) : '-']
+          .forEach((v, c) => text(v, cols[c], y, 26, c ? '#fff' : '#f3d9a6', 'center', c ? '' : 'bold'));
+      });
+      ctx.strokeStyle = 'rgba(245,232,200,0.45)'; ctx.lineWidth = 2; line(ctx, 76, 445, 644, 445);
+      ['الكل', `${tot.n}`, `${tot.done}`, `${tot.wins}`, tot.done ? `${tot.best.toFixed(1)}%` : '-', tot.fast ? fmtTime(tot.fast) : '-']
+        .forEach((v, c) => text(v, cols[c], 482, 26, '#ffe9a8', 'center', 'bold'));
+      text(`أثر قطعته في كل الجولات: ${playLog.cuts}`, W / 2, 556, 26, '#e9d6b0', 'center');
+      // the last finished rounds, oldest on the right
+      ctx.fillStyle = 'rgba(255,255,255,0.08)'; rr(ctx, 60, 590, 600, 330, 18); ctx.fill();
+      text('آخر 12 جولة: نسبة أرضك في النهاية', W / 2, 622, 26, '#fff', 'center', 'bold');
+      const last = playLog.recent.slice(-12), base = 836, top = 664, maxP = Math.max(tune.win_percent, ...last.map(q => q.p), 1);
+      if (!last.length) text('لم تُنهِ أي جولة بعد', W / 2, 750, 28, '#e9d6b0', 'center');
+      else {
+        const yWin = base - (base - top) * tune.win_percent / maxP;
+        ctx.strokeStyle = 'rgba(255,233,168,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); line(ctx, 80, yWin, 640, yWin); ctx.setLineDash([]);
+        text(`${tune.win_percent}%`, 96, yWin - 14, 24, '#ffe9a8', 'center', 'bold');
+        last.forEach((q, k) => {
+          const x = 612 - k * 46, hgt = Math.max(4, (base - top) * q.p / maxP);
+          ctx.fillStyle = q.w ? FACTIONS[1].col : '#c79a5c'; rr(ctx, x - 17, base - hgt, 34, hgt, 6); ctx.fill();
+          ctx.strokeStyle = q.w ? FACTIONS[1].light : '#7a4a20'; ctx.lineWidth = 2; rr(ctx, x - 17, base - hgt, 34, hgt, 6); ctx.stroke();
+          text(`${q.r}`, x, base + 24, 24, '#f3d9a6', 'center', 'bold');
+        });
+      }
+      ctx.fillStyle = FACTIONS[1].col; ctx.fillRect(610, 884, 22, 22); ctx.fillStyle = '#c79a5c'; ctx.fillRect(520, 884, 22, 22);
+      text('فوز', 598, 895, 24, '#fff', 'right'); text('بلا فوز', 508, 895, 24, '#fff', 'right');
+      text('الرقم تحت العمود: مركزك', 240, 895, 24, '#e9d6b0', 'center');
+      // R2: where the bots stand now
+      const sk = botSkill();
+      text(`مهارة البوتات الآن: ${sk} من ${SKILL_TOP}`, W / 2, 962, 28, '#ffe9a8', 'center', 'bold');
+      skillPips(W / 2, 1004, sk, 12);
+      bigButton(BTN_BACK, 'رجوع', true);
+      bigButton(BTN_CLEAR, state.clearAsk && state.t < state.clearAsk ? 'اضغط مرة أخرى للمسح' : 'مسح السجل', false, 26);
     },
   },
   play: {
@@ -1079,8 +1279,14 @@ const scenes = {
         if (inRect(p, BTN_PAUSE)) { scene = 'pause'; return; }
         if (inRect(p, BTN_MUTE)) setMuted(!muted);
       }
-      state.t += dt;
       const pl = riders[0];
+      if (state.card) { // R4: the round card is a panel: the bots and the clock stay frozen until you move
+        playerInput(pl);
+        if (pressed('Enter') || pressed('Space')) pl.wait = false;
+        if (pl.wait) return;
+        state.card = false; events.push({ type: 'go' });
+      }
+      state.t += dt;
       if (pl.alive) playerInput(pl);
       for (const r of riders) {
         if (!r.alive) { if (!r.isPlayer && state.t >= r.respawnT) respawn(r); continue; }
@@ -1096,12 +1302,12 @@ const scenes = {
       state.shake *= 0.9;
       state.pct = state.alive ? pct(1) : state.final; state.score = +state.pct.toFixed(1);
       if (!state.safeSaid && state.t >= tune.safe_time) { state.safeSaid = true; say('انتهى وقت الأمان: البوتات تتوسع الآن', '#ffe9a8', 2.6); }
-      const left = tune.round_time - state.t;
+      const left = state.roundLen - state.t;
       if (left < 10 && Math.ceil(left) !== state.lastTick) { state.lastTick = Math.ceil(left); sfx.tick(); }
       if (!state.alive) { if (state.t >= state.endT) endRound('out'); return; }
       if (pct(1) >= tune.win_percent) { endRound('win'); return; }
       for (const r of riders) if (!r.isPlayer && r.alive && pct(r.id) >= tune.win_percent) { endRound('botwin', r.id); return; }
-      if (state.t >= tune.round_time) endRound('time');
+      if (state.t >= state.roundLen) endRound('time');
     },
     draw() { const v = drawWorld(); drawHUD(v); },
   },
@@ -1151,14 +1357,16 @@ const scenes = {
       text(`أرضك ${R.fin.toFixed(1)}%`, W / 2, 390, 48, FACTIONS[1].light, 'center', 'bold');
       text(R.newBest ? 'رقم شخصي جديد' : `أفضل نتيجة: ${state.best.toFixed(1)}%`, W / 2, 450, 28, R.newBest ? '#ffe08a' : '#e9d6b0', 'center', 'bold');
       R.stand.forEach((s, k) => {
-        const y = 530 + k * 58, F = FACTIONS[s.f];
+        const y = 520 + k * 56, F = FACTIONS[s.f];
         if (s.f === 1) { ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(ctx, 110, y - 26, 500, 52, 12); ctx.fill(); }
         text(`${k + 1}`, 590, y, 30, '#e9d6b0', 'center', 'bold');
         ctx.drawImage(rugTiles[s.f], 18, 18, 36, 36, 530, y - 17, 34, 34);
         text(s.f === 1 ? 'أنت' : `${F.name} · ${KIND_AR[F.kind]}`, 515, y, 28, '#fff', 'right', s.f === 1 ? 'bold' : '');
         text(`${s.p.toFixed(1)}%`, 130, y, 28, '#ffe9a8', 'left', 'bold');
       });
-      text(`أثر قطعته: ${state.kills}`, W / 2, 890, 28, '#e9d6b0', 'center');
+      text(`أثر قطعته: ${state.kills} · مهارة البوتات: ${state.skill} من ${SKILL_TOP}`, W / 2, 846, 28, '#e9d6b0', 'center');
+      if (R.moved) text(`الجولة القادمة: مهارة ${R.next} من ${SKILL_TOP} (${R.moved > 0 ? 'ارتفعت' : 'انخفضت'} درجة)`, W / 2, 888, 26, R.moved > 0 ? '#ffc8a0' : '#bfe6c8', 'center', 'bold');
+      else if (R.next >= tune.hard_skill) text('الجولة القادمة تبقى صعبة', W / 2, 888, 26, '#ffc8a0', 'center', 'bold');
       bigButton(BTN_AGAIN, 'العب مجددًا', true); bigButton(BTN_MENU, 'القائمة');
     },
   },

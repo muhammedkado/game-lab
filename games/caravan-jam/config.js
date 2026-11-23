@@ -29,6 +29,18 @@ window.CONFIG = {
   plan_posts: { value: 3, min: 1, max: 4, step: 1 },     // posts the dealer's own winning order holds at once (higher = tighter)
   solver_nodes: { value: 60000, min: 5000, max: 400000, step: 5000 }, // search budget per dealt level
 
+  // Round 2 (design/re-improvements.md): free help, honest labels, covered saddles
+  extra_posts: { value: 1, min: 0, max: 1, step: 1 },      // free extra post offered once per level when the caravan is stuck (C1)
+  hard_from: { value: 4, min: 2, max: 10, step: 1 },       // first level marked "صعبة" (S2)
+  hard_every: { value: 3, min: 1, max: 9, step: 1 },       // then every Nth level after it (4, 7, 10)
+  hard_candidates: { value: 4, min: 1, max: 8, step: 1 },  // solvable deals compared on a hard level; the one with the most traps is kept
+  trap_nodes: { value: 30000, min: 5000, max: 200000, step: 5000 }, // search budget for counting one deal's traps (free taps that lose the level)
+  hidden_from: { value: 6, min: 2, max: 11, step: 1 },     // level where covered saddles arrive (11 = never) (C2)
+  hidden_intro: { value: 2, min: 1, max: 6, step: 1 },     // covered camels on that first level
+  hidden_share: { value: 0.25, min: 0, max: 0.5, step: 0.05 }, // share of camels covered on the levels after it
+  reveal_time: { value: 0.4, min: 0.1, max: 1, step: 0.05 },   // seconds for the cloth to slide off
+  walk_gap: { value: 10, min: 0, max: 40, step: 2 },       // logical px kept between camels queueing on the walkway (C3)
+
   // Feel (seconds, logical px per second)
   walk_speed: { value: 1350, min: 400, max: 3000, step: 50 },  // camel from courtyard to post
   leave_speed: { value: 560, min: 200, max: 1500, step: 20 },  // full camel out through the arch

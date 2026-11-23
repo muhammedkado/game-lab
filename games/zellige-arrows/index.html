@@ -37,7 +37,7 @@ const PIXEL = false;
 const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
 const TITLE = 'سهام الزليج · Zellige Arrows';
 const CONTROLS = ['انقر الشريط ليخرج · اضغط مطوّلاً لترى طريقه',
-  'المفاتيح: الأسهم · مسافة · G · H · R · M'];
+  'المفاتيح: الأسهم · مسافة · G · H · U · R · M · S'];
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
 let seed;
@@ -135,6 +135,7 @@ function sUntie() { tone(392, 0.12, 'triangle', 0.14); tone(587.33, 0.2, 'triang
 function sHint() { tone(880, 0.3, 'sine', 0.12); tone(1174.66, 0.4, 'sine', 0.1, 0.12); }
 function sWin() { [0, 2, 4, 5, 7, 9].forEach((k, i) => tone(PENTA[k], 0.6, 'sine', 0.13, i * 0.09)); }
 function sClick() { tone(660, 0.06, 'triangle', 0.1); }
+function sUndo() { tone(1046.5, 0.12, 'sine', 0.1); tone(659.25, 0.2, 'sine', 0.1, 0.07); }
 
 // ---- Save: personal bests -----------------------------------------------------------------
 const SAVE_KEY = 'zellige-arrows-v1';
@@ -144,6 +145,21 @@ function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save));
 const NLEV = () => tune.levels.length;
 function firstUnplayed() { for (let i = 0; i < NLEV(); i++) if (!save.best[i]) return i; return 0; }
 function totalStars() { let s = 0; for (const k in save.best) s += save.best[k].stars || 0; return s; }
+
+// ---- S1: the local play log: per level attempts, wins, best time and hints, on this device only ----
+const LOG_KEY = 'gamelab:zellige-arrows:log';
+let playLog = { v: 1, levels: {} };
+try { const s = JSON.parse(localStorage.getItem(LOG_KEY) || 'null'); if (s && s.levels) playLog = s; } catch (e) { /* plays without storage */ }
+function logRow(li) { const k = String(li + 1); return playLog.levels[k] || (playLog.levels[k] = { attempts: 0, wins: 0, best: null, hints: 0 }); }
+/** Counts one attempt, win (val: seconds) or hint for level li and saves the log. */
+function logEvent(li, what, val) {
+  const r = logRow(li);
+  if (what === 'attempt') r.attempts++;
+  else if (what === 'hint') r.hints++;
+  else if (what === 'win') { r.wins++; if (r.best === null || val < r.best) r.best = val; }
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(playLog)); } catch (e) { /* ignore */ }
+}
+const isHard = li => !!(tune.levels[li] && tune.levels[li].hard); // S2: the level says so before it starts
 
 // ---- The game: palette ----------------------------------------------------------------------
 const GL = [ // glazes: base, dark edge, light band
@@ -310,23 +326,28 @@ function solveInfo(b) {
   return { rounds, free: free0 };
 }
 const genCache = {};
+// Z1: the opening is never a dead read. A board with fewer than free_min ribbons free at the start
+// is rejected (level 1 is exempt); the builder keeps trying past gen_attempts until one passes.
 function genLevel(li) {
   if (genCache[li]) return genCache[li];
-  const L = tune.levels[li];
+  const L = tune.levels[li], freeMin = li === 0 ? 1 : tune.free_min;
   const off = (v, r) => v < r[0] ? r[0] - v : v > r[1] ? v - r[1] : 0;
-  let best = null, bestSc = 1e9;
-  for (let a = 0; a < tune.gen_attempts; a++) {
+  let best = null, bestSc = 1e9, fallback = null;
+  for (let a = 0; a < tune.gen_attempts * 4 && !(best && a >= tune.gen_attempts); a++) {
     seed = (baseSeed * 7919 + li * 104729 + a * 15485863) | 0;
     const b = buildBoard(L);
     if (L.locks) addLocks(b, L.locks);
     paint(b);
     const info = solveInfo(b);
     if (!info) continue;
+    b.info = info;
+    if (info.free < freeMin) { if (!fallback || info.free > fallback.info.free) fallback = b; continue; }
     const sc = Math.max(0, L.r - b.ribs.length) * 4 + off(info.rounds, L.d) * 3 + off(info.free, L.f) * 2;
-    if (sc < bestSc) { best = b; best.info = info; bestSc = sc; }
+    if (sc < bestSc) { best = b; bestSc = sc; }
     if (sc === 0) break;
   }
-  events.push({ type: 'level', level: li + 1, ribbons: best.ribs.length, depth: best.info.rounds, free: best.info.free, off: bestSc });
+  if (!best) { best = fallback; bestSc = 999; } // never seen with the shipped ramp; the event says so
+  events.push({ type: 'level', level: li + 1, ribbons: best.ribs.length, depth: best.info.rounds, free: best.info.free, off: bestSc, hard: !!L.hard, rest: !!L.rest });
   return (genCache[li] = best);
 }
 
@@ -374,7 +395,8 @@ function loadLevel(li, again) {
     level: li, n, cs, bx: (W - BS) / 2, by: 600 - BS / 2, BS,
     ribs: makeRibs(b), grid: Int16Array.from(b.grid), left: b.ribs.length,
     hearts: tune.hearts, guides: tune.guides, heartFx: [-1, -1, -1, -1, -1, -1], phase: 'play',
-    flip: new Float32Array(n * n).fill(-1), time: 0, cursor: -1, guide: null, guideArmed: false,
+    flip: new Float32Array(n * n).fill(-1), unflip: new Float32Array(n * n).fill(-1), launched: [],
+    time: 0, cursor: -1, guide: null, guideArmed: false,
     hint: null, msg: '', msgT: 0, again: -1, parts: [], ticks: 0, ptr: null, revealEnd: 0, shineT: -1,
     win: null, resT: 0, startT: state.t,
   });
@@ -407,7 +429,7 @@ function isFree(r) { return !r.gone && !isLocked(r) && !blockerOf(r); }
 
 function launch(id) {
   const r = state.ribs[id];
-  if (!r || r.gone || state.phase !== 'play' || state.again >= 0) return;
+  if (!r || r.gone || r.back || state.phase !== 'play' || state.again >= 0) return;
   if (isLocked(r)) {
     r.bumpT = 0; r.bumpPeak = 0.1; r.bumpDur = tune.bump_s; r.lockShake = true;
     const k = state.ribs[r.lock]; k.flashT = 0;
@@ -425,6 +447,7 @@ function launch(id) {
     return;
   }
   r.gone = true; r.out = true; r.s = 0; r.v = tune.slide_speed;
+  state.launched.push(id);
   for (const c of r.cells) state.grid[c] = -1;
   state.left--; sChime();
   for (const o of state.ribs) if (o.lock === id && !o.gone) { o.untieT = 0; sUntie(); }
@@ -436,6 +459,26 @@ function launch(id) {
 function loseHeart() {
   state.hearts--; state.heartFx[state.hearts] = state.t; sBump(); sCrack();
   if (state.hearts <= 0) { state.again = tune.again_s; say('نفدت القلوب، نعيد المرحلة مجاناً', 2); }
+}
+/** Z3: free undo of the last launch. The ribbon slides back in, its tiles turn back to plaster and
+ *  any knot it had untied is tied again. Costs nothing, refunds nothing (hearts only count blocked taps). */
+function undoLaunch() {
+  if (state.phase !== 'play' || state.again >= 0) return;
+  const id = state.launched.pop();
+  if (id === undefined) { say('لا شريط أطلقته بعد لتعيده', 1.4); sClick(); return; }
+  const r = state.ribs[id];
+  const from = r.done ? r.edge + 1.3 : r.s;
+  Object.assign(r, { gone: false, out: false, done: false, exitFx: false, s: 0, v: 0, vac: 0,
+    back: true, backT: 0, back0: from, bumpT: -1, flashT: -1 });
+  for (const c of r.cells) {
+    if (state.flip[c] >= 0 && state.t >= state.flip[c]) state.unflip[c] = state.t;
+    state.flip[c] = -1; state.grid[c] = id;
+  }
+  state.left++;
+  for (const o of state.ribs) if (o.lock === id && !o.gone) o.untieT = -1;
+  if (state.hint && !isFree(state.ribs[state.hint.rib])) state.hint = null;
+  sUndo();
+  events.push({ type: 'undo', rib: id });
 }
 function showGuide(id) {
   const r = state.ribs[id]; if (!r || r.gone) return;
@@ -457,12 +500,12 @@ function doHint() {
     if (sc > bestScore) { bestScore = sc; best = r.id; }
   }
   if (best < 0) return;
-  state.hint = { rib: best, t0: state.t }; state.helped = true; sHint();
+  state.hint = { rib: best, t0: state.t }; state.helped = true; sHint(); logEvent(state.level, 'hint');
   if (state.kb) state.cursor = best;
   say('التلميح مجاني، لكنه يحرمك النجمة الثالثة', 2);
   events.push({ type: 'hint', rib: best });
 }
-function restartLevel() { sClick(); loadLevel(state.level, true); }
+function restartLevel() { sClick(); logEvent(state.level, 'attempt'); loadLevel(state.level, true); }
 function nearestRib(fromCell, dir) {
   const n = state.n, hx = fromCell % n, hy = fromCell / n | 0;
   let best = -1, bs = 1e9;
@@ -485,19 +528,20 @@ function nearestRib(fromCell, dir) {
 // Layout
 const BTN = {
   back: { x: 18, y: 18, w: 92, h: 92 }, mute: { x: 610, y: 18, w: 92, h: 92 },
-  guide: { x: 360 + 200 - 64, y: 1064, w: 128, h: 120 },
-  hint: { x: 360 - 64, y: 1064, w: 128, h: 120 },
-  restart: { x: 360 - 200 - 64, y: 1064, w: 128, h: 120 },
+  guide: { x: 548, y: 1064, w: 128, h: 120 }, hint: { x: 380, y: 1064, w: 128, h: 120 },
+  undo: { x: 212, y: 1064, w: 128, h: 120 }, restart: { x: 44, y: 1064, w: 128, h: 120 },
+  stats: { x: 502, y: 18, w: 92, h: 92 },
   next: { x: 380, y: 1150, w: 270, h: 96 }, replay: { x: 70, y: 1150, w: 270, h: 96 },
   play: { x: 200, y: 548, w: 320, h: 112 }, home: { x: 18, y: 18, w: 92, h: 92 },
 };
-function levelTile(i) { const col = i % 4, row = i / 4 | 0; return { x: 530 - col * 160, y: 726 + row * 138, w: 140, h: 122 }; }
+function levelTile(i) { const col = i % 4, row = i / 4 | 0; return { x: 530 - col * 160, y: 736 + row * 144, w: 140, h: 122 }; }
 const TIPS = ['انقر شريطاً طريقه مفتوح فيخرج من رأسه', 'الشريط المسدود يرتدّ ويكسر قلباً', 'اضغط مطوّلاً على شريط لترى طريقه',
-  'افتح السلاسل من الخارج إلى الداخل', '', '', 'العقدة تنفكّ حين يخرج شريط الشرّابة بلونها'];
+  'افتح السلاسل من الخارج إلى الداخل', 'التراجع مجاني: يعيد آخر شريط أطلقته', '', 'العقدة تنفكّ حين يخرج شريط الشرّابة بلونها'];
 
 function animate(dt) {
   for (const r of state.ribs) {
     if (r.popT > 0) { r.popT += dt; if (r.popT > 0.45) r.popT = 0; }
+    if (r.back) { r.backT += dt; if (r.backT >= tune.undo_s) r.back = false; }
     if (r.out && !r.done) {
       r.v = Math.min(tune.slide_max, r.v + tune.slide_accel * dt); r.s += r.v * dt;
       while (r.vac < r.len && r.s > r.vac + 0.5) {
@@ -537,6 +581,7 @@ function handleBoardPointer(dt) {
       if (state.phase !== 'play') continue;
       if (inRect(e, BTN.guide)) { state.guideArmed = !state.guideArmed && state.guides > 0; if (state.guides <= 0) say('انتهى الدليل في هذه المرحلة', 1.6); else if (state.guideArmed) say('انقر شريطاً لترى طريقه', 1.6); sClick(); continue; }
       if (inRect(e, BTN.hint)) { doHint(); continue; }
+      if (inRect(e, BTN.undo)) { undoLaunch(); continue; }
       if (inRect(e, BTN.restart)) { restartLevel(); continue; }
       state.kb = false;
       state.ptr = { x: e.x, y: e.y, sx: e.x, sy: e.y, hold: 0, moved: false, guided: false, rib: ribAt(e.x, e.y) };
@@ -568,6 +613,7 @@ const scenes = {
         if (e.t !== 'down') continue;
         if (location.protocol.startsWith('http') && inRect(e, BTN.home)) { location.href = '../../'; return; }
         if (inRect(e, BTN.mute)) { setMuted(!muted); continue; }
+        if (inRect(e, BTN.stats)) { sClick(); scene = 'stats'; return; }
         if (inRect(e, BTN.play)) { startLevel(titleSel); return; }
         for (let i = 0; i < NLEV(); i++) if (inRect(e, levelTile(i))) { titleSel = i; startLevel(i); return; }
       }
@@ -577,8 +623,21 @@ const scenes = {
       if (pressed('ArrowDown')) titleSel = Math.min(n - 1, titleSel + 4);
       if (pressed('ArrowUp')) titleSel = Math.max(0, titleSel - 4);
       if (pressed('Enter') || pressed('Space')) startLevel(titleSel);
+      else if (pressed('KeyS')) { sClick(); scene = 'stats'; }
     },
     draw() { drawTitle(); },
+  },
+  stats: { // S1: إحصائياتي, reached from the title
+    update(dt) {
+      state.t += dt;
+      for (const e of pq) {
+        if (e.t !== 'down') continue;
+        if (inRect(e, BTN.mute)) { setMuted(!muted); continue; }
+        if (inRect(e, BTN.back)) { sClick(); scene = 'title'; return; }
+      }
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyS')) { sClick(); scene = 'title'; }
+    },
+    draw() { drawStats(); },
   },
   play: {
     update(dt) {
@@ -600,6 +659,7 @@ const scenes = {
         }
         if (pressed('KeyG')) { if (state.cursor < 0) { state.kb = true; state.cursor = nearestRib(Math.floor(state.n / 2) * (state.n + 1)); } if (state.cursor >= 0) showGuide(state.cursor); }
         if (pressed('KeyH')) doHint();
+        if (pressed('KeyU')) undoLaunch();
         if (pressed('KeyR')) restartLevel();
       }
       animate(dt);
@@ -627,7 +687,11 @@ const scenes = {
     draw() { drawPlay(); drawResults(); },
   },
 };
-function startLevel(li) { sClick(); pendingLevel = li; reset(); scene = 'play'; }
+function startLevel(li) {
+  sClick(); pendingLevel = li; reset(); scene = 'play'; logEvent(li, 'attempt');
+  if (isHard(li)) say('مرحلة صعبة: خذ وقتك', 2.4);
+  else if (tune.levels[li].rest) say('مرحلة أهدأ بعد مرحلتين صعبتين', 2.2);
+}
 function nextLevel() {
   if (state.level + 1 < NLEV()) startLevel(state.level + 1);
   else { titleSel = 0; scene = 'title'; sClick(); }
@@ -651,6 +715,7 @@ function beginReveal() {
   else if (t < prev.time) save.best[li].time = t;
   persist();
   state.win = { stars, time: t, best: save.best[li], newBest };
+  logEvent(li, 'win', t);
   state.score += stars; state.gained = `${stars}`;
   sWin(); events.push({ type: 'win', level: li + 1, stars, time: t });
 }
@@ -723,8 +788,9 @@ function plasterTile(x, y, s, c) {
 }
 function ringOf(i, j, n) { const c0 = (n - 1) / 2; return Math.floor(Math.max(Math.abs(i - c0), Math.abs(j - c0)) + 0.01); }
 function drawTile(c, x, y, s, n) {
-  const fs = state.flip[c];
-  const f = fs < 0 || state.t < fs ? 0 : clamp((state.t - fs) / tune.flip_s, 0, 1);
+  const fs = state.flip[c], uf = state.unflip[c];
+  let f = fs < 0 || state.t < fs ? 0 : clamp((state.t - fs) / tune.flip_s, 0, 1);
+  if (uf >= 0) { f = 1 - (state.t - uf) / tune.flip_s; if (f <= 0) { state.unflip[c] = -1; f = 0; } } // an undo turns it back
   if (f <= 0) { plasterTile(x, y, s, c); return; }
   const glazed = () => ctx.drawImage(glazedTileCanvas(s, ringOf(c % n, c / n | 0, n)), x, y, s, s);
   if (f >= 1) { glazed(); return; }
@@ -783,7 +849,7 @@ function bumpS(r) {
   const u = r.bumpT / r.bumpDur;
   return u < 0.4 ? r.bumpPeak * ease(u / 0.4) : r.bumpPeak * (1 - ease((u - 0.4) / 0.6));
 }
-function ribS(r) { return r.out ? r.s : bumpS(r); }
+function ribS(r) { return r.out ? r.s : r.back ? r.back0 * (1 - ease(clamp(r.backT / tune.undo_s, 0, 1))) : bumpS(r); }
 function ribShake(r) {
   if (r.bumpT < 0) return [0, 0];
   const u = r.bumpT / r.bumpDur; if (u < 0.4) return [0, 0];
@@ -1064,10 +1130,52 @@ function iconHome(x, y, s) {
   ctx.fillStyle = '#f8f1e2'; ctx.beginPath(); ctx.rect(x - s * 0.24, y - s * 0.02, s * 0.48, s * 0.32); ctx.fill(); ctx.stroke();
   ctx.fillStyle = '#1f4fa8'; ctx.beginPath(); ctx.rect(x - s * 0.07, y + s * 0.1, s * 0.14, s * 0.2); ctx.fill();
 }
+function iconUndo(x, y, s) { // a hooked arrow turning back: the last ribbon comes home
+  ctx.strokeStyle = INK; ctx.lineWidth = s * 0.09; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x + s * 0.04, y + s * 0.06, s * 0.26, Math.PI * 1.05, Math.PI * 2.15); ctx.stroke();
+  const a = Math.PI * 1.05, ex = x + s * 0.04 + Math.cos(a) * s * 0.26, ey = y + s * 0.06 + Math.sin(a) * s * 0.26;
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(ex - s * 0.16, ey - s * 0.02); ctx.lineTo(ex + s * 0.08, ey - s * 0.14); ctx.lineTo(ex + s * 0.06, ey + s * 0.12); ctx.closePath(); ctx.fill();
+  const q = s * 0.07; // a glaze diamond at the arrow's tail
+  ctx.beginPath(); ctx.moveTo(x + s * 0.3, y + s * 0.2 - q); ctx.lineTo(x + s * 0.3 + q, y + s * 0.2); ctx.lineTo(x + s * 0.3, y + s * 0.2 + q); ctx.lineTo(x + s * 0.3 - q, y + s * 0.2); ctx.closePath();
+  ctx.fillStyle = '#1f4fa8'; ctx.fill();
+}
+function iconStats(x, y, s) { // إحصائياتي: three glazed bars on a ground line
+  const bars = [[0.34, 0], [0.56, 1], [0.22, 3]];
+  bars.forEach(([h, gi], i) => {
+    const bx = x - s * 0.3 + i * s * 0.22, bw = s * 0.16, by = y + s * 0.28 - s * h * 1.1;
+    const g = ctx.createLinearGradient(bx, 0, bx + bw, 0); g.addColorStop(0, GL[gi].light); g.addColorStop(0.5, GL[gi].base); g.addColorStop(1, GL[gi].dark);
+    ctx.fillStyle = g; rr(bx, by, bw, s * h * 1.1, 3); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.stroke();
+  });
+  ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.36, y + s * 0.3); ctx.lineTo(x + s * 0.36, y + s * 0.3); ctx.stroke();
+}
+function iconClose(x, y, s) { // back to the title: a drawn arrow pointing right (the way Arabic reads back)
+  ctx.strokeStyle = INK; ctx.lineWidth = s * 0.09; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.28, y); ctx.lineTo(x + s * 0.26, y); ctx.moveTo(x + s * 0.06, y - s * 0.2); ctx.lineTo(x + s * 0.28, y); ctx.lineTo(x + s * 0.06, y + s * 0.2); ctx.stroke();
+}
+/** S2: the honest "hard" badge, a terracotta pill. Returns its width. */
+function hardBadge(cx, cy, size = 24, measureOnly = false) {
+  ctx.font = `bold ${size}px ${FONT}`; ctx.direction = 'rtl'; const tw = ctx.measureText('صعبة').width; ctx.direction = 'ltr';
+  const w = tw + size * 1.2, h = size * 1.5;
+  if (measureOnly) return w;
+  ctx.fillStyle = 'rgba(60,35,10,0.25)'; rr(cx - w / 2 + 2, cy - h / 2 + 3, w, h, h / 2); ctx.fill();
+  const g = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2); g.addColorStop(0, '#d8693d'); g.addColorStop(1, '#9c3c1c');
+  ctx.fillStyle = g; rr(cx - w / 2, cy - h / 2, w, h, h / 2); ctx.fill(); ctx.strokeStyle = '#5e220c'; ctx.lineWidth = 2; ctx.stroke();
+  text('صعبة', cx, cy + 1, size, '#fff6e6', 'center', 'bold');
+  return w;
+}
+/** A line of text with the hard badge on its left (RTL: read after the text), centred as one group. */
+function textWithBadge(str, cx, cy, size, col, weight, hard) {
+  if (!hard) { text(str, cx, cy, size, col, 'center', weight); return; }
+  ctx.font = `${weight} ${size}px ${FONT}`; ctx.direction = 'rtl'; const tw = ctx.measureText(str).width; ctx.direction = 'ltr';
+  const bw = hardBadge(0, 0, 24, true), G = tw + 14 + bw;
+  text(str, cx + G / 2 - tw / 2, cy, size, col, 'center', weight);
+  hardBadge(cx - G / 2 + bw / 2, cy, 24);
+}
 function drawHud() {
   tileButton(BTN.back); iconLevels(BTN.back.x + 46, BTN.back.y + 46, 80);
   tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
-  text(`المرحلة ${state.level + 1} من ${NLEV()}`, W / 2, 52, 38, INK, 'center', 'bold');
+  textWithBadge(`المرحلة ${state.level + 1} من ${NLEV()}`, W / 2, 52, 38, INK, 'bold', isHard(state.level));
   for (let i = 0; i < tune.hearts; i++) {
     const x = W / 2 + ((tune.hearts - 1) / 2 - i) * 80;
     drawHeart(x, 132, 58, i < state.hearts ? 'full' : 'lost', i < state.hearts ? -1 : state.t - state.heartFx[i]);
@@ -1087,6 +1195,9 @@ function drawHud() {
     text('تلميح', BTN.hint.x + 64, BTN.hint.y + 100, 26, INK);
     tileButton(BTN.restart); iconRestart(BTN.restart.x + 64, BTN.restart.y + 50, 92);
     text('إعادة', BTN.restart.x + 64, BTN.restart.y + 100, 26, INK);
+    const canUndo = state.launched.length > 0 && state.phase === 'play';
+    tileButton(BTN.undo); ctx.save(); ctx.globalAlpha = canUndo ? 1 : 0.4;
+    iconUndo(BTN.undo.x + 64, BTN.undo.y + 48, 92); text('تراجع', BTN.undo.x + 64, BTN.undo.y + 100, 26, INK); ctx.restore();
     if (state.helped) text('بمساعدة: أقصى النجوم 2', W / 2, 1226, 24, INK2);
   }
 }
@@ -1103,7 +1214,11 @@ function drawResults() {
   }
   text(`الوقت ${w.time.toFixed(1)} ث · الأفضل ${w.best.time.toFixed(1)} ث${w.newBest ? ' · رقم جديد' : ''}`, W / 2, py + 192, 28, INK2);
   BTN.next.y = py + 220; BTN.replay.y = py + 220;
-  tileButton(BTN.next, true); text(last ? 'إلى البداية' : 'التالي', BTN.next.x + BTN.next.w / 2, BTN.next.y + 48, 34, INK, 'center', 'bold');
+  tileButton(BTN.next, true);
+  if (!last && isHard(state.level + 1)) { // S2: the next level says it is hard before it starts
+    text('التالي', BTN.next.x + BTN.next.w / 2 + 40, BTN.next.y + 48, 34, INK, 'center', 'bold');
+    hardBadge(BTN.next.x + BTN.next.w / 2 - 66, BTN.next.y + 48, 24);
+  } else text(last ? 'إلى البداية' : 'التالي', BTN.next.x + BTN.next.w / 2, BTN.next.y + 48, 34, INK, 'center', 'bold');
   tileButton(BTN.replay); text('إعادة', BTN.replay.x + BTN.replay.w / 2, BTN.replay.y + 48, 34, INK);
   if (last) text(`مجموع النجوم ${totalStars()} من ${NLEV() * 3}`, W / 2, py - 30, 30, INK, 'center', 'bold');
 }
@@ -1131,17 +1246,58 @@ function drawTitle() {
   }
   tileButton(BTN.play, true);
   text('ابدأ', W / 2, BTN.play.y + 42, 46, INK, 'center', 'bold');
-  text(`المرحلة ${titleSel + 1}`, W / 2, BTN.play.y + 88, 26, INK2);
+  textWithBadge(`المرحلة ${titleSel + 1}`, W / 2, BTN.play.y + 86, 26, INK2, '', isHard(titleSel));
   text(`النجوم ${totalStars()} من ${NLEV() * 3}`, W / 2, 698, 26, INK2);
   for (let i = 0; i < NLEV(); i++) {
     const b = levelTile(i), best = save.best[i];
     tileButton(b, i === titleSel);
     text(`${i + 1}`, b.x + b.w / 2, b.y + 42, 40, i >= 6 ? '#62220e' : INK, 'center', 'bold');
     for (let k = 0; k < 3; k++) star8(b.x + b.w / 2 + (1 - k) * 34, b.y + 92, 13, best && k < best.stars);
+    if (isHard(i)) hardBadge(b.x + b.w / 2, b.y, 24); // S2: on the tile, before it starts
   }
-  CONTROLS.forEach((c, i) => text(c, W / 2, 1168 + i * 46, i ? 24 : 28, i ? INK2 : INK));
+  CONTROLS.forEach((c, i) => text(c, W / 2, 1180 + i * 44, i ? 24 : 28, i ? INK2 : INK));
   if (location.protocol.startsWith('http')) { tileButton(BTN.home); iconHome(BTN.home.x + 46, BTN.home.y + 48, 80); }
+  tileButton(BTN.stats); iconStats(BTN.stats.x + 46, BTN.stats.y + 44, 80);
   tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
+}
+
+// ---- Drawing: إحصائياتي (S1), the local play log ------------------------------------------------
+function drawStats() {
+  drawBackground();
+  tileButton(BTN.back); iconClose(BTN.back.x + 46, BTN.back.y + 46, 80);
+  tileButton(BTN.mute); iconMute(BTN.mute.x + 46, BTN.mute.y + 46, 80, muted);
+  text('إحصائياتي', W / 2, 62, 46, '#0c2356', 'center', 'bold');
+  text('محفوظة على هذا الجهاز فقط، لا يُرسل منها شيء', W / 2, 128, 24, INK2);
+  const px = 24, py = 160, pw = 672, ph = 980;
+  ctx.fillStyle = 'rgba(60,35,10,0.18)'; rr(px + 4, py + 8, pw, ph, 26); ctx.fill();
+  ctx.fillStyle = '#fbf6ec'; rr(px, py, pw, ph, 26); ctx.fill(); ctx.strokeStyle = '#c4532c'; ctx.lineWidth = 4; ctx.stroke();
+  const COLS = [[640, 'المرحلة'], [492, 'محاولات'], [386, 'فوز'], [262, 'أفضل وقت'], [108, 'تلميحات']];
+  for (const [x, h] of COLS) text(h, x, 202, 24, INK, 'center', 'bold');
+  ctx.fillStyle = GROUT; ctx.fillRect(px + 20, 228, pw - 40, 3);
+  let A = 0, Wn = 0, Hn = 0;
+  const rh = 66, y0 = 266;
+  for (let i = 0; i < NLEV(); i++) {
+    const r = playLog.levels[String(i + 1)] || { attempts: 0, wins: 0, best: null, hints: 0 }, y = y0 + i * rh;
+    A += r.attempts; Wn += r.wins; Hn += r.hints;
+    if (i % 2 === 0) { ctx.fillStyle = 'rgba(211,197,171,0.28)'; rr(px + 14, y - rh / 2 + 3, pw - 28, rh - 6, 12); ctx.fill(); }
+    if (r.attempts > 0) { // the bar: share of attempts won, a glazed emerald strip under the row
+      const u = clamp(r.wins / r.attempts, 0, 1), bw = (pw - 60) * u;
+      ctx.fillStyle = 'rgba(20,128,90,0.18)'; rr(px + 30, y + 18, pw - 60, 8, 4); ctx.fill();
+      if (bw > 1) { ctx.fillStyle = '#14805a'; rr(px + pw - 30 - bw, y + 18, bw, 8, 4); ctx.fill(); }
+    }
+    text(`${i + 1}`, isHard(i) ? 674 : 640, y - 4, 30, INK, 'center', 'bold');
+    if (isHard(i)) hardBadge(598, y - 4, 24);
+    const dash = (v, f) => v ? f(v) : '-';
+    text(`${r.attempts}`, 492, y - 4, 28, r.attempts ? INK : INK2);
+    text(`${r.wins}`, 386, y - 4, 28, r.wins ? '#14805a' : INK2, 'center', r.wins ? 'bold' : '');
+    text(r.best === null ? '-' : `${r.best.toFixed(1)} ث`, 262, y - 4, 28, r.best === null ? INK2 : INK);
+    text(dash(r.hints, v => `${v}`), 108, y - 4, 28, r.hints ? '#b07c10' : INK2);
+  }
+  ctx.fillStyle = GROUT; ctx.fillRect(px + 20, y0 + NLEV() * rh - rh / 2 + 4, pw - 40, 3);
+  const rate = A ? Math.round(Wn / A * 100) : 0;
+  text(`المجموع: ${A} محاولة · ${Wn} فوز · ${Hn} تلميح`, W / 2, 1066, 28, INK, 'center', 'bold');
+  text(A ? `نسبة الفوز ${rate}% · الشريط الأخضر: الفوز من المحاولات` : 'العب مرحلة لتبدأ الأرقام', W / 2, 1108, 24, INK2);
+  text('اضغط السهم للعودة', W / 2, 1200, 26, INK2);
 }
 
 // ---- Drawing: the figures sheet (every unit, its name under it) ------------------------------
@@ -1182,11 +1338,14 @@ function drawFigures() {
   const icons2 = [['الصوت', (x, y) => iconMute(x, y, 80, false)], ['المراحل', (x, y) => iconLevels(x, y, 80)], ['البيت', (x, y) => iconHome(x, y, 80)],
     ['عقدة القفل', (x, y) => drawKnot(x, y, 1, 0, 44, 0)]];
   icons2.forEach(([n, f], i) => { const x = 95 + i * 175; cell(x - 80, 890, 160, 170); f(x, 960); label(n, x, 1035); });
-  // the cursor glow on a ribbon
-  cell(20, 1080, 680, 170);
-  const g = fig([[0.5, 0.5], [1.5, 0.5], [2.5, 0.5], [3.5, 0.5]], 0, 0); const gg = place(170, 1110, g);
+  // the cursor glow on a ribbon, then the undo, stats and hard-badge pieces
+  cell(20, 1080, 280, 170);
+  const g = fig([[0.5, 0.5], [1.5, 0.5]], 0, 0); const gg = place(55, 1110, g);
   ctx.save(); ctx.globalAlpha = 0.7; ctx.strokeStyle = '#f2b632'; ctx.lineWidth = w + 18; ctx.lineCap = 'round'; trace(gg.pts, cs * 0.42); ctx.stroke(); ctx.restore();
-  drawRibbonBody(g, w, { geom: gg, cs }); label('مؤشر لوحة المفاتيح', 360, 1225);
+  drawRibbonBody(g, w, { geom: gg, cs }); label('مؤشر المفاتيح', 150, 1225);
+  cell(310, 1080, 125, 170); iconUndo(362, 1150, 92); label('تراجع', 362, 1225);
+  cell(445, 1080, 125, 170); iconStats(497, 1150, 80); label('إحصائياتي', 497, 1225);
+  cell(580, 1080, 120, 170); hardBadge(630, 1150, 24); label('شارة صعبة', 630, 1225);
 }
 
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------

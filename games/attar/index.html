@@ -35,6 +35,7 @@ const PIXEL = false;
 const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
 const TITLE = 'عطّار · Attar';
 const CONTROLS = ['اضغط قارورة لترفعها، ثم اضغط أخرى لتسكب', 'الأسهم والمسافة · U تراجع · H تلميح · R إعادة'];
+// keys also: D the daily flask and S the stats on the title, E the free small flask when stuck
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
 let seed;
@@ -135,6 +136,7 @@ const sfx = {
   hint() { tone(880, 0.1, 'triangle', 0.13); tone(1175, 0.16, 'triangle', 0.1, 0.07); },
   win() { [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.35, 'triangle', 0.16, i * 0.1)); },
   ui() { tone(440, 0.05, 'triangle', 0.1); },
+  extra() { tone(740, 0.12, 'sine', 0.12); tone(988, 0.16, 'triangle', 0.1, 0.08); tone(1319, 0.22, 'sine', 0.07, 0.16); },
 };
 
 // ---- Storage: unlocked level and best per level; the game works without it -------------
@@ -166,19 +168,28 @@ function hash01(a, b = 0) { // decoration only (grain, glints): not gameplay
 
 // ---- Rules and solver -------------------------------------------------------------------
 // A state is an array of strings, one per flask, bottom to top, one letter per layer.
+// T1: one flask may be the free small flask (index SMALL): it holds fewer layers, never seals,
+// and must be empty at the end. SMALL is -1 while dealing and whenever there is none.
+let SMALL = -1;
+const smallCap = cap => Math.max(1, Math.min(tune.extra_layers, cap - 1));
+const roomOf = (st, j, cap) => (j === SMALL ? smallCap(cap) : cap) - st[j].length;
 function topRun(f) { const t = f[f.length - 1]; let n = 1; while (n < f.length && f[f.length - 1 - n] === t) n++; return n; }
 function isSealed(f, cap) { return f.length === cap && topRun(f) === cap; }
 /** Pour rule: the top run moves onto the same scent or into an empty flask, as far as space allows. */
 function canPour(st, i, j, cap) {
   if (i === j) return false;
   const a = st[i], b = st[j];
-  if (!a.length || b.length >= cap || isSealed(a, cap)) return false;
+  if (!a.length || roomOf(st, j, cap) <= 0 || isSealed(a, cap)) return false;
   return !b.length || b[b.length - 1] === a[a.length - 1];
 }
-const pourAmount = (st, i, j, cap) => Math.min(topRun(st[i]), cap - st[j].length);
+const pourAmount = (st, i, j, cap) => Math.min(topRun(st[i]), roomOf(st, j, cap));
 function applyPour(st, i, j, n) { const s = st.slice(), a = st[i]; s[i] = a.slice(0, a.length - n); s[j] = st[j] + a.slice(a.length - n); return s; }
 const isSolved = (st, cap) => st.every(f => !f.length || isSealed(f, cap));
-const stateKey = st => st.slice().sort().join(',');
+function stateKey(st) { // flask order ignored (the small flask keeps its own place)
+  if (SMALL < 0 || SMALL >= st.length) return st.slice().sort().join(',');
+  const s = st.slice(), m = s.splice(SMALL, 1)[0];
+  return s.sort().join(',') + '|' + m;
+}
 function hScore(st) { // layer runs minus scents: each pour can lower it by at most one
   let seg = 0; const seen = new Set();
   for (const f of st) for (let k = 0; k < f.length; k++) { if (k === 0 || f[k] !== f[k - 1]) seg++; seen.add(f[k]); }
@@ -189,13 +200,16 @@ function solverMoves(st, cap) { // legal moves minus the pointless ones (sound f
   const out = [];
   for (let i = 0; i < st.length; i++) {
     const a = st[i]; if (!a.length || isSealed(a, cap)) continue;
-    const run = topRun(a), t = a[a.length - 1]; let triedEmpty = false;
+    const run = topRun(a), t = a[a.length - 1], triedEmpty = [false, false];
     for (let j = 0; j < st.length; j++) {
-      if (i === j) continue; const b = st[j];
-      if (b.length >= cap) continue;
-      if (!b.length) { if (run === a.length || triedEmpty) continue; triedEmpty = true; }
-      else if (b[b.length - 1] !== t) continue;
-      out.push([i, j, Math.min(run, cap - b.length)]);
+      if (i === j) continue; const b = st[j], room = roomOf(st, j, cap);
+      if (room <= 0) continue;
+      if (!b.length) {
+        const kind = j === SMALL ? 1 : 0; // empty flasks of one size are alike; the small one is not like the rest
+        if ((run === a.length && (i === SMALL) === (j === SMALL)) || triedEmpty[kind]) continue;
+        triedEmpty[kind] = true;
+      } else if (b[b.length - 1] !== t) continue;
+      out.push([i, j, Math.min(run, room)]);
     }
   }
   return out;
@@ -260,10 +274,15 @@ function hasTrap(st, cap) {
 
 // ---- Levels ------------------------------------------------------------------------------
 const LEVELS = 12;
-const isNarrow = lv => lv >= tune.narrow_from && (lv - tune.narrow_from) % tune.narrow_every === 0;
-const isVeiled = lv => lv >= tune.veil_from;
+// level 0 is the daily flask (T3): its own scent count and veil, normal flasks
+const isNarrow = lv => lv > 0 && lv >= tune.narrow_from && (lv - tune.narrow_from) % tune.narrow_every === 0;
+const isVeiled = lv => lv === 0 ? tune.daily_veil > 0 : lv >= tune.veil_from;
 const capOf = lv => isNarrow(lv) ? tune.narrow_capacity : tune.capacity;
-const scentsOf = lv => tune['scents_' + Math.min(LEVELS, lv)];
+const scentsOf = lv => lv === 0 ? tune.daily_scents : tune['scents_' + Math.min(LEVELS, lv)];
+function dateKey(d = new Date()) { return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
+function dayBefore(k) { const d = new Date(Math.floor(k / 10000), Math.floor(k / 100) % 100 - 1, k % 100); d.setDate(d.getDate() - 1); return dateKey(d); }
+/** T3: the daily streak; it counts while the last daily win was today or yesterday. */
+function streakNow() { const s = store.get('streak', { last: 0, n: 0, best: 0 }), t = dateKey(); return { ...s, n: s.last === t || s.last === dayBefore(t) ? s.n : 0, today: s.last === t }; }
 const emptiesOf = lv => lv === 1 ? tune.first_empties : tune.empties;
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 /** One deal attempt for a level: shuffled layers, kept only when the solver proves it solvable. */
@@ -275,7 +294,7 @@ function dealAttempt(lv, tries) {
   const st = [];
   for (let f = 0; f < k; f++) st.push(pool.slice(f * cap, (f + 1) * cap).join(''));
   for (let e = 0; e < emptiesOf(lv); e++) st.push('');
-  if (st.some(f => f.length && topRun(f) >= cap - (lv > 2 ? 1 : 0))) return null; // nothing (almost) done at the start
+  if (st.some(f => f.length && topRun(f) >= cap - (lv > 2 || lv === 0 ? 1 : 0))) return null; // nothing (almost) done at the start
   const r = solveAny(st, cap, 1, tune.solver_nodes);
   if (!r.found) return null;
   if (lv === 1 && r.path.length !== tune.first_par && tries < 400) return null;
@@ -287,13 +306,15 @@ function dealAttempt(lv, tries) {
 const B = {
   mute: { x: 624, y: 16, w: 80, h: 80 }, menu: { x: 16, y: 16, w: 80, h: 80 }, home: { x: 16, y: 16, w: 80, h: 80 },
   undo: { x: 492, y: 1112, w: 196, h: 128 }, hint: { x: 262, y: 1112, w: 196, h: 128 }, restart: { x: 32, y: 1112, w: 196, h: 128 },
-  start: { x: 150, y: 680, w: 420, h: 104 },
+  start: { x: 296, y: 672, w: 394, h: 112 }, daily: { x: 30, y: 672, w: 250, h: 112 },
   next: { x: 150, y: 820, w: 420, h: 106 }, again: { x: 210, y: 946, w: 300, h: 88 },
   sUndo: { x: 380, y: 640, w: 230, h: 100 }, sRestart: { x: 110, y: 640, w: 230, h: 100 },
+  sExtra: { x: 100, y: 612, w: 520, h: 112 },
+  stats: { x: 528, y: 16, w: 80, h: 80 }, back: { x: 220, y: 1172, w: 280, h: 86 },
 };
 const TILE = k => ({ x: 70 + (k % 4) * 150, y: 812 + Math.floor(k / 4) * 128, w: 130, h: 110 });
-/** Flask geometry and positions for n flasks of a capacity: one shelf up to 6, else two. */
-function makeLayout(n, cap) {
+/** Flask geometry and positions for n flasks of a capacity: one shelf up to 6, else two; flask `small` is the small one (T1). */
+function makeLayout(n, cap, small = -1) {
   const rows = n <= 6 ? 1 : 2;
   const per = rows === 1 ? [n] : [Math.ceil(n / 2), Math.floor(n / 2)];
   const narrow = cap < tune.capacity;
@@ -305,13 +326,23 @@ function makeLayout(n, cap) {
   const shelfY = rows === 1 ? [860] : [612, 982];
   const g = { w, layerH, neckW, neckH, shH, bodyH, totalH, cap };
   g.outer = flaskPath(g, 0); g.inner = flaskPath(g, 5);
+  let gs = null;
+  if (small >= 0) { // the small flask: the same glass, a shorter body
+    const sc = smallCap(cap), bh = sc * layerH + 12;
+    gs = { ...g, cap: sc, bodyH: bh, totalH: neckH + shH + bh };
+    gs.outer = flaskPath(gs, 0); gs.inner = flaskPath(gs, 5);
+  }
   const pos = [];
   for (let r = 0; r < rows; r++) {
     const c = per[r], gap = Math.min(34, (W - 60 - c * w) / Math.max(1, c - 1));
-    for (let k = 0; k < c; k++) pos.push({ x: W / 2 + (k - (c - 1) / 2) * (w + gap), y: shelfY[r] - totalH, row: r, colW: w + gap });
+    for (let k = 0; k < c; k++) {
+      const isSmall = pos.length === small;
+      pos.push({ x: W / 2 + (k - (c - 1) / 2) * (w + gap), y: shelfY[r] - (isSmall ? gs.totalH : totalH), row: r, colW: w + gap, small: isSmall });
+    }
   }
-  return { g, pos, rows, shelfY, per };
+  return { g, gs, pos, rows, shelfY, per };
 }
+const geo = k => state.lay.pos[k].small ? state.lay.gs : state.lay.g; // flask k's geometry
 function flaskPath(g, inset) {
   const p = new Path2D(), nw = g.neckW / 2 - inset * 0.6, w = g.w / 2 - inset, top = inset * 0.4, nh = g.neckH, sh = g.shH, bot = g.totalH - inset, r = Math.min(w * 0.6, 26);
   p.moveTo(-nw, top); p.lineTo(-nw, nh);
@@ -332,12 +363,29 @@ function reset() {
     undo: [], sel: -1, anim: null, sealedAt: [], hint: null, hintUsed: false, stuck: false, dead: false,
     cursor: 0, kbd: false, lay: null, plan: null, msg: null, winAt: 0, stars: 0, best: null, btnDown: null,
     shake: [], score: 0, gained: '', allDone: false,
+    daily: false, time: 0, hard: false, extraUsed: false, extraOk: null, streak: 0,
   };
+  SMALL = -1;
 }
+/** S1: the local play log, per level (L<n>) and daily (D<date>): attempts, wins, best pours and time, hints. No network. */
+const LOG_KEY = 'gamelab:attar:log';
+const playLog = {
+  read() { try { const v = JSON.parse(localStorage.getItem(LOG_KEY)); if (v && v.rows) return v; } catch (_) {} return { v: 1, seq: 0, rows: {} }; },
+  write(L) { try { localStorage.setItem(LOG_KEY, JSON.stringify(L)); } catch (_) {} },
+  /** Changes the current level's row with fn(row) and saves it. */
+  row(fn) {
+    const L = this.read(), key = state.daily ? 'D' + dateKey() : 'L' + state.level;
+    const r = L.rows[key] || (L.rows[key] = { lvl: state.daily ? 0 : state.level, d: state.daily ? dateKey() : 0, a: 0, w: 0, bm: null, bt: null, h: 0, e: 0, s: 0, f: 0 });
+    r.hard = state.hard; r.par = state.par;
+    fn(r); r.q = ++L.seq; this.write(L);
+  },
+};
 const unlocked = () => Math.min(LEVELS, store.get('unlocked', 1));
 function startLevel(lv) {
-  state.level = lv; state.phase = 'deal'; state.anim = null; state.sel = -1; state.hint = null; state.msg = null; state.lay = null;
-  seed = ((Number(params.get('seed')) || CONFIG.seed) * 9973 + lv * 7919) | 0;
+  state.level = lv; state.daily = lv === 0; state.phase = 'deal'; state.anim = null; state.sel = -1; state.hint = null; state.msg = null; state.lay = null;
+  SMALL = -1;
+  seed = lv === 0 ? (Math.imul(dateKey(), 2654435761) | 0) || 1  // T3: the same daily flask for everyone today
+    : ((Number(params.get('seed')) || CONFIG.seed) * 9973 + lv * 7919) | 0;
   state.dealer = { lv, tries: 0 };
   events.push({ type: 'deal', level: lv });
 }
@@ -355,14 +403,22 @@ function loadDeal(r) {
   state.lay = makeLayout(r.st.length, r.cap);
   state.dealer = null; bgCache = null;
   state.cursor = 0;
+  state.hard = r.par >= tune.hard_par; // S2: said before the first pour
   restartLevel(true);
+  playLog.row(q => { q.a++; });
   state.msg = lv === 1 ? 'ارفع قارورة، ثم اسكب فوق العطر نفسه أو في قارورة فارغة'
+    : lv === 0 ? (state.hard ? 'عطر اليوم صعب: الهدف أطول، وله حل مؤكد' : 'عطر اليوم: يتغير كل يوم، وله حل مؤكد')
     : lv === tune.veil_from ? 'ضباب داكن يحجب بعض الطبقات حتى تصل إلى الأعلى'
     : isNarrow(lv) && lv === tune.narrow_from ? 'قوارير ضيقة: كل واحدة تتسع لثلاث طبقات فقط'
+    : state.hard ? 'مستوى صعب: الهدف أطول من المعتاد، خذ وقتك'
     : null;
+  events.push({ type: 'dealt', level: lv, par: r.par, hard: state.hard });
 }
 function restartLevel(fresh) {
   const lv = state.level;
+  SMALL = -1; state.lay = makeLayout(state.start.length, state.cap); // a restart puts the level back as dealt
+  state.extraUsed = false; state.extraOk = null; state.time = 0;
+  if (!fresh) playLog.row(q => { q.a++; });
   state.st = state.start.slice();
   state.hidden = state.st.map(f => [...f].map((_, k) => isVeiled(lv) && k < f.length - 1));
   state.moves = 0; state.undo = []; state.sel = -1; state.anim = null; state.hint = null; state.hintUsed = false;
@@ -417,7 +473,17 @@ function afterChange(poured) {
   });
   state.stuck = false; state.dead = false;
   if (isSolved(state.st, cap)) { state.winAt = state.t + delay + 0.9; state.phase = 'won'; return; }
-  if (!legalMoves(state.st, cap).length) { state.stuck = true; events.push({ type: 'stuck' }); return; }
+  if (!legalMoves(state.st, cap).length) {
+    state.stuck = true; events.push({ type: 'stuck' });
+    playLog.row(q => { q.s++; });
+    if (!state.extraUsed) { // T1: would the free small flask open a way out? The solver says when it can.
+      const old = SMALL; SMALL = state.st.length;
+      const r = solve([...state.st, ''], cap, 3, tune.hint_nodes);
+      SMALL = old;
+      state.extraOk = r.found ? true : r.exhausted ? false : null;
+    }
+    return;
+  }
   const r = solve(state.st, cap, 3, tune.dead_nodes);
   if (!r.found && r.exhausted) { state.dead = true; events.push({ type: 'dead' }); }
   updatePlan();
@@ -428,6 +494,21 @@ function updatePlan() { // level 1: the drawn hand follows the solver's next mov
   const r = solve(state.st, state.cap, 1, 20000);
   if (r.found && r.path.length) state.plan = r.path[0];
 }
+const layersWord = n => n === 1 ? 'طبقة واحدة' : n === 2 ? 'طبقتين' : `${n} طبقات`;
+/** T1: the free small flask, once per attempt, when no pour is left. Never paid, never an ad. */
+function addExtraFlask() {
+  if (!state.stuck || state.extraUsed || state.extraOk === false || state.phase !== 'play') return;
+  state.extraUsed = true; state.stuck = false;
+  state.st = [...state.st, '']; state.hidden = [...state.hidden, []]; state.sealedAt = [...state.sealedAt, -1];
+  for (const u of state.undo) { u.st = [...u.st, '']; u.hidden = [...u.hidden, []]; } // undo keeps the flask, empty
+  SMALL = state.st.length - 1;
+  state.lay = makeLayout(state.st.length, state.cap, SMALL);
+  state.sel = -1; state.hint = null; state.cursor = SMALL;
+  state.msg = `قارورة صغيرة مجانية تتسع ${layersWord(smallCap(state.cap))}: أفرغها قبل النهاية`;
+  sfx.extra(); events.push({ type: 'extra' });
+  playLog.row(q => { q.e++; });
+  afterChange(false);
+}
 function undo() {
   const u = state.undo.pop(); if (!u || state.phase === 'won') return;
   finishAnim(); state.st = u.st; state.hidden = u.hidden; state.moves = u.moves; state.sel = -1; state.hint = null;
@@ -436,7 +517,7 @@ function undo() {
 function useHint() {
   if (state.phase !== 'play') return;
   const r = solveAny(state.st, state.cap, tune.hint_weight, tune.hint_nodes);
-  state.hintUsed = true;
+  state.hintUsed = true; playLog.row(q => { q.h++; });
   if (r.found && r.path.length) {
     state.hint = { i: r.path[0][0], j: r.path[0][1], t: state.t }; sfx.hint();
     state.cursor = state.sel === r.path[0][0] ? r.path[0][1] : r.path[0][0];
@@ -445,15 +526,28 @@ function useHint() {
 }
 function finishLevel() {
   const extra = state.moves - state.par;
-  let stars = extra <= 0 ? 3 : extra <= tune.star2_extra ? 2 : 1;
+  // T2: gentler stars: 3 up to par+star3_extra, 2 up to par+star2_extra
+  let stars = extra <= tune.star3_extra ? 3 : extra <= Math.max(tune.star2_extra, tune.star3_extra) ? 2 : 1;
   if (state.hintUsed) stars = Math.min(stars, 2);
   state.stars = stars;
-  const bests = store.get('best', {}), old = bests[state.level];
-  const better = !old || stars > old.stars || (stars === old.stars && state.moves < old.moves);
-  if (better) bests[state.level] = { stars, moves: state.moves };
-  state.best = bests[state.level]; store.set('best', bests);
-  if (state.level < LEVELS) store.set('unlocked', Math.max(unlocked(), state.level + 1));
-  state.allDone = state.level >= LEVELS;
+  const secs = Math.floor(state.time);
+  if (state.daily) { // T3: the daily's best and the streak
+    const key = 'daily:' + dateKey(), old = store.get(key, null);
+    const better = !old || stars > old.stars || (stars === old.stars && state.moves < old.moves);
+    if (better) store.set(key, { stars, moves: state.moves });
+    state.best = better ? { stars, moves: state.moves } : old;
+    const sk = store.get('streak', { last: 0, n: 0, best: 0 }), t = dateKey();
+    if (sk.last !== t) { sk.n = sk.last === dayBefore(t) ? sk.n + 1 : 1; sk.last = t; sk.best = Math.max(sk.best || 0, sk.n); store.set('streak', sk); }
+    state.streak = sk.n; state.allDone = false;
+  } else {
+    const bests = store.get('best', {}), old = bests[state.level];
+    const better = !old || stars > old.stars || (stars === old.stars && state.moves < old.moves);
+    if (better) bests[state.level] = { stars, moves: state.moves };
+    state.best = bests[state.level]; store.set('best', bests);
+    if (state.level < LEVELS) store.set('unlocked', Math.max(unlocked(), state.level + 1));
+    state.allDone = state.level >= LEVELS;
+  }
+  playLog.row(q => { q.w++; if (!q.f) q.f = q.a || 1; q.bm = q.bm == null ? state.moves : Math.min(q.bm, state.moves); q.bt = q.bt == null ? secs : Math.min(q.bt, secs); });
   state.gained = `${stars}`; state.score = stars;
   sfx.win(); events.push({ type: 'win', level: state.level, stars });
   scene = 'results';
@@ -561,12 +655,13 @@ function drawFlask(g, x, y, angle, layers, o = {}) {
   ctx.strokeStyle = 'rgba(225,238,255,0.65)'; ctx.lineWidth = 2.6; ctx.stroke(g.outer);
   // gold filigree neck: lip, two bands, shoulder curls
   const nw = g.neckW / 2, gold = ctx.createLinearGradient(-nw - 6, 0, nw + 6, 0);
-  gold.addColorStop(0, '#7a4c0c'); gold.addColorStop(0.4, '#ffd877'); gold.addColorStop(1, '#8a5a12');
+  if (o.small) { gold.addColorStop(0, '#5d6770'); gold.addColorStop(0.4, '#eef3f7'); gold.addColorStop(1, '#6b757e'); } // the free small flask: silver
+  else { gold.addColorStop(0, '#7a4c0c'); gold.addColorStop(0.4, '#ffd877'); gold.addColorStop(1, '#8a5a12'); }
   ctx.fillStyle = gold;
   rr(-nw - 6, -7, g.neckW + 12, 11, 5); ctx.fill();
   rr(-nw - 2, g.neckH * 0.42, g.neckW + 4, 5, 2.5); ctx.fill();
   rr(-nw - 3, g.neckH - 4, g.neckW + 6, 6, 3); ctx.fill();
-  ctx.strokeStyle = '#e8b54a'; ctx.lineWidth = 1.8;
+  ctx.strokeStyle = o.small ? '#d6dde3' : '#e8b54a'; ctx.lineWidth = 1.8;
   for (const sd of [-1, 1]) {
     ctx.beginPath();
     const cx = sd * (nw + g.w * 0.13), cy = g.neckH + g.shH * 0.55;
@@ -638,6 +733,32 @@ function iconSpeaker(x, y, s, c, off) {
 function iconGrid(x, y, s, c) { ctx.fillStyle = c; for (let k = 0; k < 4; k++) { rr(x - s * 0.3 + (k % 2) * s * 0.34, y - s * 0.3 + Math.floor(k / 2) * s * 0.34, s * 0.26, s * 0.26, s * 0.05); ctx.fill(); } }
 function iconHouse(x, y, s, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x, y - s * 0.38); ctx.lineTo(x + s * 0.4, y - s * 0.02); ctx.lineTo(x + s * 0.28, y - s * 0.02); ctx.lineTo(x + s * 0.28, y + s * 0.34); ctx.lineTo(x - s * 0.28, y + s * 0.34); ctx.lineTo(x - s * 0.28, y - s * 0.02); ctx.lineTo(x - s * 0.4, y - s * 0.02); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#3a2210'; ctx.fillRect(x - s * 0.08, y + s * 0.08, s * 0.16, s * 0.26); }
 function iconLock(x, y, s, c) { ctx.strokeStyle = c; ctx.lineWidth = s * 0.1; ctx.beginPath(); ctx.arc(x, y - s * 0.1, s * 0.2, Math.PI, 0); ctx.stroke(); ctx.fillStyle = c; rr(x - s * 0.3, y - s * 0.1, s * 0.6, s * 0.44, s * 0.06); ctx.fill(); }
+function iconChart(x, y, s, c) { // the stats button: three bars on a baseline
+  ctx.fillStyle = c; const bw = s * 0.17, base = y + s * 0.3;
+  for (const [dx, hh] of [[-0.24, 0.3], [0, 0.52], [0.24, 0.72]]) { rr(x + dx * s - bw / 2, base - hh * s, bw, hh * s, s * 0.04); ctx.fill(); }
+  rr(x - s * 0.42, base, s * 0.84, s * 0.07, s * 0.03); ctx.fill();
+}
+function iconVial(x, y, s, c) { // the free small flask: a short round vial with a silver neck
+  ctx.fillStyle = c; ctx.strokeStyle = c; ctx.lineWidth = s * 0.07;
+  ctx.beginPath(); ctx.moveTo(x - s * 0.1, y - s * 0.42); ctx.lineTo(x - s * 0.1, y - s * 0.14);
+  ctx.bezierCurveTo(x - s * 0.36, y - s * 0.06, x - s * 0.36, y + s * 0.4, x, y + s * 0.4);
+  ctx.bezierCurveTo(x + s * 0.36, y + s * 0.4, x + s * 0.36, y - s * 0.06, x + s * 0.1, y - s * 0.14);
+  ctx.lineTo(x + s * 0.1, y - s * 0.42); ctx.closePath(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - s * 0.3, y + s * 0.12); ctx.bezierCurveTo(x - s * 0.28, y + s * 0.36, x + s * 0.28, y + s * 0.36, x + s * 0.3, y + s * 0.12); ctx.closePath(); ctx.fill();
+  rr(x - s * 0.16, y - s * 0.5, s * 0.32, s * 0.1, s * 0.04); ctx.fill();
+}
+function iconCheck(x, y, s, c) { ctx.strokeStyle = c; ctx.lineWidth = s * 0.14; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(x - s * 0.3, y); ctx.lineTo(x - s * 0.08, y + s * 0.22); ctx.lineTo(x + s * 0.32, y - s * 0.24); ctx.stroke(); ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'; }
+/** S2: the small honest 'صعبة' pill, centred at (x, y). */
+function badgeW(h = 40) { setFont(24, 'bold'); ctx.direction = 'rtl'; const w = Math.max(h * 2.2, ctx.measureText('صعبة').width + 34); ctx.direction = 'ltr'; return w; }
+function drawBadge(x, y, h = 40) {
+  const label = 'صعبة', w = badgeW(h);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; rr(x - w / 2 + 1, y - h / 2 + 3, w, h, h / 2); ctx.fill();
+  const g = ctx.createLinearGradient(0, y - h / 2, 0, y + h / 2); g.addColorStop(0, '#b8402c'); g.addColorStop(1, '#7e1f14');
+  ctx.fillStyle = g; rr(x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = '#e8b54a'; ctx.lineWidth = 2; ctx.stroke();
+  text(label, x, y + 1, 24, '#fff1d6', 'center', 'bold');
+  return w;
+}
 function starPath(x, y, r) { ctx.beginPath(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rad = k % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad); } ctx.closePath(); }
 function drawStar(x, y, r, on) {
   starPath(x, y, r);
@@ -749,7 +870,7 @@ function drawShop() {
     if (state.sel === k) glow = 'rgba(255,236,170,0.85)';
     const sealT = state.sealedAt[k];
     const stopper = sealT >= 0 && state.t >= sealT ? state.t - sealT : -1;
-    drawFlask(lay.g, pose.x, pose.y, pose.ang, flaskLayers(k), { glow, stopper, t: state.t });
+    drawFlask(geo(k), pose.x, pose.y, pose.ang, flaskLayers(k), { glow, stopper, t: state.t, small: P.small });
     if (stopper >= 0 && state.st[k].length) drawWisp(pose.x, pose.y - lay.g.neckW * 0.95, SCENT[ci(state.st[k][0])].hi, state.t + k, Math.min(1, stopper / 0.8));
     if (state.kbd && state.cursor === k && state.phase === 'play') {
       ctx.fillStyle = '#ffe08a'; const cy = lay.shelfY[P.row] + 50;
@@ -761,7 +882,7 @@ function drawShop() {
     if (u > 0.3 && u < 0.78) {
       const pose = flaskPose(a.i), T = lay.pos[a.j];
       const lipX = pose.x + Math.cos(pose.ang) * (a.side * lay.g.neckW * 0.5), lipY = pose.y + Math.sin(pose.ang) * (a.side * lay.g.neckW * 0.5);
-      const surf = T.y + lay.g.totalH - 6 - state.st[a.j].length * lay.g.layerH + a.n * lay.g.layerH * (1 - p);
+      const surf = T.y + geo(a.j).totalH - 6 - state.st[a.j].length * lay.g.layerH + a.n * lay.g.layerH * (1 - p);
       const sc = SCENT[a.c], wdt = 3 + 4 * Math.sin(Math.PI * Math.min(1, (u - 0.3) / 0.48));
       ctx.strokeStyle = sc.c; ctx.lineWidth = wdt; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(lipX, lipY); ctx.quadraticCurveTo(lipX + a.side * 10, (lipY + T.y) / 2, T.x, surf); ctx.stroke();
@@ -783,13 +904,14 @@ function drawGuide() {
   const pose = flaskPose(k), lay = state.lay;
   // point at the top layer when lifting, at the mouth when pouring
   const n = state.st[k].length, sel = state.sel === k;
-  const yTop = sel || !n ? pose.y - 18 : pose.y + lay.g.totalH - 6 - n * lay.g.layerH - 4;
+  const yTop = sel || !n ? pose.y - 18 : pose.y + geo(k).totalH - 6 - n * lay.g.layerH - 4;
   drawHand(pose.x + 6, Math.max(250, yTop), 92, state.t);
 }
 function drawHud() {
   drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
   drawButton(B.menu, '', iconGrid);
-  text(`المستوى ${state.level}`, W / 2, 150, 40, '#ffe7b6', 'center', 'bold');
+  text(state.daily ? 'عطر اليوم' : `المستوى ${state.level}`, W / 2, 150, 40, '#ffe7b6', 'center', 'bold');
+  if (state.phase !== 'deal' && state.hard) drawBadge(W / 2 + 170, 150); // S2: shown before the first pour
   if (state.phase !== 'deal') {
     const note = isNarrow(state.level) ? ' · قوارير ضيقة' : '';
     text(`السكبات ${state.moves} · الهدف ${state.par}${note}`, W / 2, 196, 28, '#e9d3a8');
@@ -805,6 +927,33 @@ function drawBanner() {
   ctx.fillStyle = warn ? '#5a1e14' : '#3a2412'; rr(x, y, w, h, 18); ctx.fill();
   ctx.strokeStyle = warn ? '#ff9a7a' : '#d6a44c'; ctx.lineWidth = 2.5; ctx.stroke();
   lines.slice(0, 2).forEach((ln, k) => text(ln, W / 2, y + h / 2 + (k - (Math.min(2, lines.length) - 1) / 2) * 32, 27, warn ? '#ffe1d6' : '#f6e3bd', 'center', 'bold'));
+}
+/** T1: whether the stuck panel offers the free small flask; places its buttons. */
+function stuckOffer() {
+  const offer = state.stuck && !state.extraUsed && state.extraOk !== false;
+  B.sUndo.y = B.sRestart.y = offer ? 746 : 640;
+  return offer;
+}
+function drawStuck() {
+  const offer = stuckOffer();
+  ctx.fillStyle = 'rgba(15,8,4,0.66)'; ctx.fillRect(0, 0, W, H);
+  const top = offer ? 430 : 470, h = offer ? 450 : 300;
+  ctx.fillStyle = '#3a2412'; rr(70, top, W - 140, h, 28); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 3; ctx.stroke();
+  text('لا توجد سكبات', W / 2, top + 62, 48, '#ffe2c4', 'center', 'bold');
+  const sub = offer ? 'كل المخارج هنا مجانية'
+    : state.extraUsed ? 'استعملت القارورة الصغيرة: تراجع أو أعد المستوى، مجانا'
+    : 'القارورة الصغيرة لن تكفي من هنا: تراجع أو أعد المستوى، مجانا';
+  wrap(sub, 27, W - 200, 'bold').slice(0, 2).forEach((ln, k, a) => text(ln, W / 2, top + 128 + (k - (a.length - 1) / 2) * 34, 27, '#e9d3a8', 'center', 'bold'));
+  if (offer) {
+    const b = B.sExtra;
+    drawButton(b, '', null, true);
+    const yy = b.y + (state.btnDown === b ? 3 : 0);
+    iconVial(b.x + b.w - 64, yy + b.h / 2, 74, '#3a2008');
+    text('قارورة صغيرة مجانية', b.x + b.w / 2 - 34, yy + b.h / 2 - 16, 34, '#3a2008', 'center', 'bold');
+    text(`${layersWord(smallCap(state.cap))}، مرة في كل محاولة`, b.x + b.w / 2 - 34, yy + b.h / 2 + 26, 24, '#5a3410', 'center', 'bold');
+  }
+  drawButton(B.sUndo, 'تراجع', null, !offer);
+  drawButton(B.sRestart, 'إعادة', null);
 }
 function drawControls() {
   const pulse = (state.dead || state.stuck) ? 0.45 + 0.45 * Math.sin(state.t * 7) : 0;
@@ -824,7 +973,7 @@ function flaskAt(p) {
 }
 const buttonAt = (p, list) => { for (const k of list) if (inRect(p, B[k])) return k; return null; };
 function handleMute(ev) { if (ev.type === 'down' && inRect(ev, B.mute)) { setMuted(!muted); return true; } return false; }
-function goPlay(lv) { reset(); scene = 'play'; startLevel(lv); }
+function goPlay(lv) { reset(); scene = 'play'; startLevel(lv); } // lv 0: the daily flask
 function toTitle() { const t = state.t; reset(); state.t = t; scene = 'title'; }
 const scenes = {
   figures: {
@@ -855,15 +1004,19 @@ const scenes = {
     update(dt) {
       state.t += dt;
       if (pressed('Enter') || pressed('Space')) goPlay(unlocked());
+      else if (pressed('KeyD')) goPlay(0);
+      else if (pressed('KeyS')) scene = 'stats';
     },
     pointer(ev) {
       if (handleMute(ev)) return;
       const tiles = [...Array(LEVELS).keys()];
-      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['start', 'home'])] || null; return; }
+      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['start', 'daily', 'stats', 'home'])] || null; return; }
       if (ev.type !== 'up') return;
       state.btnDown = null;
-      const k = buttonAt(ev, ['start', 'home']);
+      const k = buttonAt(ev, ['start', 'daily', 'stats', 'home']);
       if (k === 'start') { goPlay(unlocked()); return; }
+      if (k === 'daily') { goPlay(0); return; }
+      if (k === 'stats') { sfx.ui(); scene = 'stats'; return; }
       if (k === 'home' && location.protocol.startsWith('http')) { location.href = '../../'; return; }
       for (const n of tiles) if (inRect(ev, TILE(n)) && n + 1 <= unlocked()) { goPlay(n + 1); return; }
     },
@@ -883,7 +1036,13 @@ const scenes = {
       });
       const lv = unlocked();
       drawButton(B.start, lv > 1 ? `تابع: المستوى ${lv}` : 'ابدأ', null, true);
-      const bests = store.get('best', {});
+      // T3: the daily flask and its streak
+      const sk = streakNow(), db = B.daily, dy = db.y + (state.btnDown === db ? 3 : 0);
+      drawButton(db, '', null);
+      text('عطر اليوم', db.x + db.w / 2 + (sk.today ? 18 : 0), dy + 40, 32, '#fbeed2', 'center', 'bold');
+      if (sk.today) iconCheck(db.x + 40, dy + 40, 40, '#8fe0a0');
+      text(sk.n ? `سلسلة الأيام: ${sk.n}` : 'ابدأ سلسلة أيام', db.x + db.w / 2, dy + 82, 24, '#e9c98a', 'center', 'bold');
+      const bests = store.get('best', {}), rows = playLog.read().rows;
       for (let n = 0; n < LEVELS; n++) {
         const r = TILE(n), open = n + 1 <= lv, b = bests[n + 1];
         ctx.fillStyle = open ? '#4a2a14' : '#2a1810'; rr(r.x, r.y, r.w, r.h, 16); ctx.fill();
@@ -893,10 +1052,30 @@ const scenes = {
           for (let s = 0; s < 3; s++) drawStar(r.x + r.w / 2 + (s - 1) * 30, r.y + 84, 12, b && s < b.stars);
         } else iconLock(r.x + r.w / 2, r.y + r.h / 2, 56, 'rgba(201,150,62,0.55)');
       }
+      for (let n = 0; n < LEVELS; n++) { // S2: a level once dealt as hard says so on its tile (drawn last, over the gaps)
+        const q = rows['L' + (n + 1)], r = TILE(n);
+        if (q && q.hard && n + 1 <= lv) drawBadge(r.x + r.w - 30, r.y + 2, 30);
+      }
       CONTROLS.forEach((c, i) => text(c, W / 2, 1214 + i * 36, 25, '#e9d3a8'));
       drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
+      drawButton(B.stats, '', iconChart);
+      text('إحصائياتي', B.stats.x + B.stats.w / 2, B.stats.y + B.stats.h + 22, 24, '#e9d3a8', 'center', 'bold');
       if (location.protocol.startsWith('http')) drawButton(B.home, '', iconHouse);
     },
+  },
+  stats: { // S1: what this device logged, nothing more
+    update(dt) {
+      state.t += dt;
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('Backspace') || pressed('KeyS')) scene = 'title';
+    },
+    pointer(ev) {
+      if (handleMute(ev)) return;
+      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['back'])] || null; return; }
+      if (ev.type !== 'up') return;
+      const k = buttonAt(ev, ['back']); state.btnDown = null;
+      if (k === 'back') { sfx.ui(); scene = 'title'; }
+    },
+    draw() { drawStats(); drawButton(B.back, 'رجوع', null, true); drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted)); },
   },
   play: {
     update(dt) {
@@ -906,6 +1085,8 @@ const scenes = {
       if (state.anim) { state.anim.t += dt; if (state.anim.t >= tune.pour_time) state.anim = null; }
       if (state.hint && state.t - state.hint.t > tune.hint_time) state.hint = null;
       if (state.phase === 'won') { if (state.t >= state.winAt && !state.anim) finishLevel(); return; }
+      if (!state.stuck) state.time += dt; // S1: the play log's time (not shown in play)
+      if (pressed('KeyE')) addExtraFlask();
       const n = state.st.length, lay = state.lay;
       if (pressed('ArrowRight')) { state.kbd = true; state.cursor = (state.cursor + 1) % n; }
       if (pressed('ArrowLeft')) { state.kbd = true; state.cursor = (state.cursor + n - 1) % n; }
@@ -923,7 +1104,7 @@ const scenes = {
     pointer(ev) {
       if (handleMute(ev)) return;
       if (state.phase === 'deal') return;
-      const btns = state.stuck ? ['menu', 'sUndo', 'sRestart', 'undo', 'restart'] : ['menu', 'undo', 'hint', 'restart'];
+      const btns = state.stuck ? [...(stuckOffer() ? ['sExtra'] : []), 'menu', 'sUndo', 'sRestart', 'undo', 'restart'] : ['menu', 'undo', 'hint', 'restart'];
       if (ev.type === 'down') {
         state.kbd = false;
         const k = buttonAt(ev, btns); if (k) { state.btnDown = B[k]; return; }
@@ -942,6 +1123,7 @@ const scenes = {
         else if (k === 'undo' || k === 'sUndo') undo();
         else if (k === 'hint') useHint();
         else if (k === 'restart' || k === 'sRestart') restartLevel(false);
+        else if (k === 'sExtra') addExtraFlask();
       }
     },
     draw() {
@@ -951,14 +1133,7 @@ const scenes = {
       drawGuide();
       drawBanner();
       drawControls();
-      if (state.stuck) {
-        ctx.fillStyle = 'rgba(15,8,4,0.66)'; ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = '#3a2412'; rr(70, 470, W - 140, 300, 28); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 3; ctx.stroke();
-        text('لا توجد سكبات', W / 2, 540, 48, '#ffe2c4', 'center', 'bold');
-        text('تراجع أو أعد المستوى، مجانا', W / 2, 596, 28, '#e9d3a8');
-        drawButton(B.sUndo, 'تراجع', null, true);
-        drawButton(B.sRestart, 'إعادة', null);
-      }
+      if (state.stuck) drawStuck();
     },
   },
   results: {
@@ -980,18 +1155,58 @@ const scenes = {
       const x = 60, y = 330, w = W - 120, h = 730;
       ctx.fillStyle = 'rgba(0,0,0,0.4)'; rr(x + 4, y + 10, w, h, 30); ctx.fill();
       ctx.fillStyle = '#3a2412'; rr(x, y, w, h, 30); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 4; ctx.stroke();
-      text(state.allDone ? 'أكملت رف العطّار كله' : `اكتمل المستوى ${state.level}`, W / 2, y + 76, 44, '#ffe2a6', 'center', 'bold');
+      text(state.daily ? 'اكتمل عطر اليوم' : state.allDone ? 'أكملت رف العطّار كله' : `اكتمل المستوى ${state.level}`, W / 2, y + 76, 44, '#ffe2a6', 'center', 'bold');
+      if (state.hard) drawBadge(x + w - 62, y + 26);
       for (let k = 0; k < 3; k++) drawStar(W / 2 + (k - 1) * 118, y + 196, 50, k < state.stars);
       text(`السكبات ${state.moves} · الهدف ${state.par}`, W / 2, y + 300, 34, '#f6e3bd', 'center', 'bold');
-      if (state.best) text(`أفضل نتيجة: ${state.best.moves} سكبة`, W / 2, y + 352, 28, '#e9d3a8');
-      const why = state.hintUsed ? 'التلميح يحجب النجمة الثالثة' : `ثلاث نجوم بالهدف، ونجمتان حتى ${tune.star2_extra} سكبات زيادة`;
-      text(why, W / 2, y + 404, 26, '#e9d3a8');
-      drawButton(B.next, state.allDone ? 'القائمة' : 'المستوى التالي', null, true);
+      if (state.daily) text(`سلسلة الأيام: ${state.streak}${state.best ? ` · أفضل اليوم: ${state.best.moves} سكبة` : ''}`, W / 2, y + 352, 28, '#ffe2a6', 'center', 'bold');
+      else if (state.best) text(`أفضل نتيجة: ${state.best.moves} سكبة`, W / 2, y + 352, 28, '#e9d3a8');
+      const why = state.hintUsed ? 'التلميح يحجب النجمة الثالثة' // T2: the gentler rule, said in numbers
+        : `ثلاث نجوم بزيادة ${tune.star3_extra} سكبات أو أقل على الهدف، ونجمتان بزيادة ${Math.max(tune.star2_extra, tune.star3_extra)}`;
+      wrap(why, 26, w - 60, '').slice(0, 2).forEach((ln, k) => text(ln, W / 2, y + 404 + k * 32, 26, '#e9d3a8'));
+      drawButton(B.next, state.daily || state.allDone ? 'القائمة' : 'المستوى التالي', null, true);
       drawButton(B.again, 'أعد المستوى', null);
     },
   },
 };
-function nextLevel() { if (state.level >= LEVELS) { toTitle(); return; } const lv = state.level + 1; scene = 'play'; startLevel(lv); }
+const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s) % 60).padStart(2, '0')}`;
+/** S1: the إحصائياتي panel, read from the local play log. */
+function drawStats() {
+  drawWall();
+  text('إحصائياتي', W / 2, 60, 46, '#ffe7b6', 'center', 'bold');
+  const x = 30, y = 112, w = W - 60, h = 1040, ink = '#f6e3bd', soft = '#d8b97e';
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; rr(x + 4, y + 10, w, h, 26); ctx.fill();
+  ctx.fillStyle = '#3a2412'; rr(x, y, w, h, 26); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 3; ctx.stroke();
+  text('محفوظة على هذا الجهاز فقط، بلا إنترنت', W / 2, y + 40, 24, soft, 'center', 'bold');
+  const L = playLog.read(), rows = Object.values(L.rows), won = rows.filter(r => r.w > 0);
+  const sum = k => rows.reduce((t, r) => t + (r[k] || 0), 0);
+  [['مكتملة', won.length], ['محاولات', sum('a')], ['تلميحات', sum('h')]].forEach(([lab, n], k) => {
+    const tx = x + w - 30 - (k + 1) * 192 - k * 12, ty = y + 76;
+    ctx.fillStyle = '#4e3018'; rr(tx, ty, 192, 118, 16); ctx.fill(); ctx.strokeStyle = 'rgba(214,164,76,0.6)'; ctx.lineWidth = 2; ctx.stroke();
+    text(String(n), tx + 96, ty + 46, 48, '#ffe2a6', 'center', 'bold'); text(lab, tx + 96, ty + 94, 24, soft, 'center', 'bold');
+  });
+  text(`الفوز من أول محاولة: ${won.filter(r => r.f === 1).length} من ${won.length} · قوارير صغيرة: ${sum('e')}`, W / 2, y + 236, 26, ink, 'center', 'bold');
+  const sk = streakNow(), daysWon = rows.filter(r => r.d && r.w > 0).length;
+  text(`عطر اليوم: سلسلة ${sk.n} · الأطول ${sk.best || 0} · أيام محلولة ${daysWon}`, W / 2, y + 280, 26, ink, 'center', 'bold');
+  const R = x + w - 30, cols = [462, 372, 280, 184, 88];
+  text('المستويات', R, y + 336, 28, '#ffe2a6', 'right', 'bold');
+  ['المستوى', 'محاولات', 'فوز', 'سكبات', 'وقت', 'تلميح'].forEach((nm, k) => k === 0 ? text(nm, R, y + 378, 24, soft, 'right', 'bold') : text(nm, cols[k - 1], y + 378, 24, soft, 'center', 'bold'));
+  ctx.strokeStyle = 'rgba(214,164,76,0.35)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 30, y + 400); ctx.lineTo(R, y + 400); ctx.stroke();
+  const list = []; for (let n = 1; n <= LEVELS; n++) if (L.rows['L' + n]) list.push(L.rows['L' + n]);
+  const today = L.rows['D' + dateKey()]; if (today) list.push(today);
+  list.forEach((r, k) => {
+    const yy = y + 440 + k * 46, name = r.lvl ? String(r.lvl) : 'اليوم';
+    text(name, R, yy, 26, ink, 'right', 'bold');
+    if (r.hard) { setFont(26, 'bold'); const tw = ctx.measureText(name).width; drawBadge(R - tw - 12 - badgeW(32) / 2, yy, 32); }
+    text(String(r.a), cols[0], yy, 26, ink, 'center');
+    text(String(r.w), cols[1], yy, 26, ink, 'center');
+    text(r.bm == null ? '-' : `${r.bm} / ${r.par}`, cols[2], yy, 26, ink, 'center');
+    text(r.bt == null ? '-' : fmtTime(r.bt), cols[3], yy, 26, ink, 'center');
+    text(String(r.h), cols[4], yy, 26, ink, 'center');
+  });
+  if (!list.length) text('العب مستوى، وستظهر أرقامه هنا', W / 2, y + 450, 26, soft, 'center', 'bold');
+}
+function nextLevel() { if (state.daily || state.level >= LEVELS) { toTitle(); return; } const lv = state.level + 1; scene = 'play'; startLevel(lv); }
 
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------
 function step() {

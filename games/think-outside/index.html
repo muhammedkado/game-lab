@@ -216,6 +216,10 @@ const D = {
     ln(-8, 12, 8, 12, 2.5);
     if (lit) { ln(-26, -18, -21, -14, 3); ln(26, -18, 21, -14, 3); ln(0, -32, 0, -27, 3); }
   },
+  chart() { // the stats button: three bars on a baseline
+    ln(-20, 18, 20, 18, 4);
+    ink(sh.rect(-16, 2, 9, 14), { fill: '#4d96ff', lw: 3 }); ink(sh.rect(-4, -8, 9, 24), { fill: '#ffd93d', lw: 3 }); ink(sh.rect(8, -18, 9, 34), { fill: '#ff6b6b', lw: 3 });
+  },
   skip() {
     ink([10, -14, -4, 0, 10, 14], { open: true, sharp: true, lw: 5 });
     ink([-2, -14, -16, 0, -2, 14], { open: true, sharp: true, lw: 5 });
@@ -488,6 +492,7 @@ const KIND = ['فكرة لطيفة… جرّب غيرها', 'ليس هذا، ل�
 const RIDDLES = [
   { // 1 · read the riddle literally: "the dot" is the full stop
     q: 'اضغط على النقطة.', trick: 'اقرأ حرفيًا', answer: 'النقطة في آخر السؤال',
+    wrong: ['جميل، لكن هذه ليست نقطة.', 'النقطة لا تختبئ بين الأشكال.', 'أصغر… أصغر بكثير!', 'السؤال نفسه يعرف الجواب.'],
     hints: ['النقطة أصغر بكثير مما تظن.', 'انظر إلى آخر سطر السؤال.'],
     setup(R) {
       R.add({ id: 'circle', x: 210, y: 560, r: 90 }); R.add({ id: 'square', x: 500, y: 560, w: 170, h: 170 });
@@ -508,6 +513,7 @@ const RIDDLES = [
   },
   { // 2 · something hidden behind something else: the key under the mat
     q: 'افتح الباب.', trick: 'شيء مخبّأ خلف شيء', answer: 'المفتاح تحت ممسحة الأرجل',
+    wrong: ['طَرقتَ؟ لا أحد في البيت!', 'الباب لا يُفتح بالأمنيات.', 'كل بيت يخبّئ مفتاحًا في مكان ما.', 'المفاتيح تحب الأماكن المنخفضة.'],
     hints: ['أين يخبّئ الناس مفتاح البيت عادةً؟', 'اسحب ممسحة الأرجل جانبًا.'],
     setup(R) {
       R.add({ id: 'window', x: 170, y: 620, w: 180, h: 180 }); R.add({ id: 'door', x: 410, y: 785, w: 170, h: 330 });
@@ -541,6 +547,7 @@ const RIDDLES = [
   },
   { // 3 · drag a word of the question: the only fish is the word
     q: 'القطة تريد سمكة، لكن الصحن فارغ.', trick: 'اسحب كلمة من السؤال', answer: 'اسحب كلمة «سمكة» إلى الصحن',
+    wrong: ['مياو… ليس هذا ما طلبتُه.', 'القطة لا تأكل هذا!', 'الجوع لا ينتظر طويلًا.', 'أحيانًا يكون الجواب مكتوبًا أمامك.'],
     hints: ['السمكة التي تحتاجها ليست في الرسم.', 'اسحب كلمة «سمكة» من السؤال إلى الصحن.'],
     setup(R) {
       R.add({ id: 'cat', x: 200, y: 760, w: 220, h: 300 }); R.add({ id: 'plate', x: 420, y: 960, w: 200, h: 80 });
@@ -566,6 +573,7 @@ const RIDDLES = [
   },
   { // 4 · wait, do nothing: the chick hatches only in quiet
     q: 'ساعد الكتكوت على الخروج من البيضة.', trick: 'انتظر ولا تفعل شيئًا', answer: 'لا تلمس شيئًا وانتظر',
+    wrong: ['صه! الكتكوت يحتاج هدوءًا.', 'كل لمسة تعيده إلى البداية.', 'أصعب شيء: ألّا تفعل شيئًا.', 'تك… تك… الصبر جميل.'],
     hints: ['بعض الأشياء تحتاج إلى صبر.', `لا تلمس شيئًا… وانتظر بضع ثوانٍ.`],
     setup(R) {
       R.add({ id: 'clock', x: 140, y: 440, r: 60 }); R.add({ id: 'egg', x: 360, y: 700, w: 130, h: 170 });
@@ -592,12 +600,12 @@ const RIDDLES = [
     tap(R, o) {
       if (o.id === 'egg') { R.shake(o); return 'صه! أنت تُزعجه.'; }
       if (o.id === 'clock') return 'الوقت يمضي… تك، تك.';
-      return 'صه…';
     },
     drop(R, o) { if (o.id === 'hammer' && R.near(o, R.o.egg)) return 'لا! هذا خطر عليه.'; },
   },
   { // 5 · count things, the question included
     q: 'كم مرة كُتبت كلمة «قمر» في هذه الصفحة؟', trick: 'عُدّ مع السؤال نفسه', answer: '4: ثلاث في الرسم وواحدة في السؤال',
+    wrong: ['الصورة لا تُعدّ كلمة.', 'عُدّ مرة أخرى… بهدوء.', 'هل عددتَ الصفحة كلها؟', 'الأرقام لا تكذب، لكنها تختبئ.'],
     hints: ['اضغط على كل كلمة «قمر» تراها لتضع عليها علامة.', 'السؤال نفسه مكتوب في الصفحة أيضًا.'],
     setup(R) {
       R.add({ id: 'jar', x: 150, y: 528, w: 120, h: 150, word: 'قمر' }); R.add({ id: 'book', x: 340, y: 537, w: 110, h: 130, word: 'شمس' });
@@ -633,6 +641,7 @@ const RIDDLES = [
   },
   { // 6 · combine two objects: mix red and yellow
     q: 'لوّن البرتقالة.', trick: 'ادمج شيئين', answer: 'اخلط الأحمر بالأصفر ثم لوّن',
+    hard: true, wrong: ['البرتقالة ما زالت تنتظر لونها.', 'لا يوجد برتقالي… بعد.', 'الألوان تحب أن تلتقي.', 'رسّام بلا برتقالي؟ فكّر!'],
     hints: ['لا يوجد لون برتقالي هنا… لكن يمكنك أن تصنعه.', 'اسحب علبة الأحمر إلى علبة الأصفر.'],
     setup(R) {
       R.add({ id: 'fruit', x: 360, y: 580, r: 130 });
@@ -645,12 +654,9 @@ const RIDDLES = [
       R.at('fruit', () => D.orange(R.solved ? '#ff9f43' : null));
       for (const id of ['red', 'yellow', 'blue']) R.at(id, () => D.paintPot(COLORS[R.o[id].col]));
     },
-    update(R, dt) {
-      if (R.st.resetT > 0) {
-        R.st.resetT -= dt;
-        if (R.st.resetT <= 0) { for (const id of ['red', 'yellow', 'blue']) { const o = R.o[id]; o.col = id; o.vis = true; o.x = o.home.x; o.y = o.home.y; } R.say('لنبدأ من جديد.'); }
-      }
-    },
+    resetPots(R) { R.st.resetT = 0; for (const id of ['red', 'yellow', 'blue']) { const o = R.o[id]; o.col = id; o.vis = true; o.x = o.home.x; o.y = o.home.y; o.returning = false; } R.say('رجعت العلب: جرّب من جديد.'); },
+    update(R, dt) { if (R.st.resetT > 0) { R.st.resetT -= dt; if (R.st.resetT <= 0) this.resetPots(R); } },
+    anyDown(R) { if (R.st.resetT > 0) { this.resetPots(R); return 'consume'; } }, // instant retry: the touch brings the pots back
     tap(R, o) { if (o.id === 'fruit') return 'برتقالة بلا لون…'; return `لون ${CNAME[o.col]}.`; },
     drop(R, o) {
       if (R.near(o, R.o.fruit)) {
@@ -658,7 +664,7 @@ const RIDDLES = [
         const m = { red: 'حمراء؟ هذه ليست طماطم!', yellow: 'صفراء؟ هذه ليست ليمونة!', blue: 'زرقاء؟! لا يوجد برتقال أزرق.', green: 'خضراء؟ لم تنضج بعد!', purple: 'بنفسجية؟ أبدًا!' }[o.col];
         const pots = ['red', 'yellow', 'blue'].map(id => R.o[id]).filter(p => p.vis);
         const can = pots.some(p => p.col === 'orange') || (pots.some(p => p.col === 'red') && pots.some(p => p.col === 'yellow'));
-        if (!can) R.st.resetT = 1.4;
+        if (!can) R.st.resetT = tune.resetDelay;
         return m;
       }
       for (const id of ['red', 'yellow', 'blue']) {
@@ -668,13 +674,14 @@ const RIDDLES = [
         if (!m) return 'لون غريب… جرّب غيره.';
         b.col = m; o.vis = false; sfx.splash(); R.say(`صار عندك ${CNAME[m]}!`);
         const left = ['red', 'yellow', 'blue'].map(id => R.o[id]).filter(p => p.vis);
-        if (m !== 'orange' && !(left.some(p => p.col === 'red') && left.some(p => p.col === 'yellow'))) R.st.resetT = 1.8;
+        if (m !== 'orange' && !(left.some(p => p.col === 'red') && left.some(p => p.col === 'yellow'))) R.st.resetT = tune.resetDelay + 0.6; // long enough to see the new colour
         return true;
       }
     },
   },
   { // 7 · use the HUD: the sound button gives the bird its voice
     q: 'العصفور يفتح فمه، لكننا لا نسمع شيئًا.', trick: 'استعمل أزرار الشاشة', answer: 'اسحب زر الصوت إلى العصفور',
+    hard: true, wrong: ['العصفور يغنّي بصمت!', 'لا صوت… لا صوت أبدًا.', 'أين ذهب الصوت يا ترى؟', 'ربما الصوت أقرب مما تظن.'],
     hints: ['الصوت موجود على الشاشة… لكن ليس في الرسم.', 'اسحب زر الصوت من أعلى الشاشة إلى العصفور.'],
     hudDrag: true,
     setup(R) {
@@ -701,6 +708,7 @@ const RIDDLES = [
   },
   { // 8 · turn something off: both lights, one of them by its plug
     q: 'الفراشة لا تستطيع أن تنام.', trick: 'أطفئ شيئًا', answer: 'أطفئ المصباح العلوي واسحب قابس المصباح الصغير',
+    hard: true, wrong: ['الفراشة ما زالت تحوم.', 'كيف تنام والضوء في عينيها؟', 'نعسانة… لكن الضوء يوقظها.', 'كل الأضواء؟ كلها؟'],
     hints: ['الفراشات تحب الضوء… أطفئ كل الأضواء.', 'المصباح الصغير بلا زر. اسحب قابسه من الحائط.'],
     setup(R) {
       R.add({ id: 'ceil', x: 300, y: 470, w: 140, h: 120 }); R.add({ id: 'switch', x: 610, y: 600, w: 90, h: 120 });
@@ -753,6 +761,7 @@ const RIDDLES = [
   },
   { // 9 · look outside the frame: the missing piece sits at the screen's edge
     q: 'أكمِل اللوحة.', trick: 'انظر خارج الإطار', answer: 'القطعة على حافة الشاشة اليمنى، ثم أدِرها',
+    hard: true, wrong: ['اللوحة ما زالت ناقصة.', 'القطعة ليست حيث تبحث.', 'الإطار صغير… والشاشة أكبر.', 'هل نظرتَ إلى كل الحواف؟'],
     hints: ['ليست كل القطع داخل الإطار… ولا داخل الصفحة.', 'انظر إلى الحافة اليمنى للشاشة.'],
     setup(R) {
       R.add({ id: 'painting', x: 360, y: 540, w: 470, h: 350 });
@@ -801,6 +810,7 @@ const RIDDLES = [
   },
   { // 10 · change an object's state by dragging it somewhere: melt the ice by the flame
     q: 'اسقِ الوردة.', trick: 'غيّر حالة الشيء', answer: 'قرّب الثلج من الشمعة ليذوب، ثم اسقِ الوردة',
+    hard: true, wrong: ['الوردة عطشى جدًا.', 'الماء هنا… لكنه عنيد.', 'الثلج لا يسقي أحدًا.', 'الحرارة تغيّر كل شيء.'],
     hints: ['الماء هنا… لكنه متجمّد.', 'قرّب مكعب الثلج من لهب الشمعة.'],
     setup(R) {
       R.add({ id: 'saucer', x: 150, y: 920, w: 140, h: 40 }); R.add({ id: 'ice', x: 150, y: 880, w: 96, h: 96, drag: true });
@@ -835,7 +845,7 @@ const RIDDLES = [
       if (o.id === 'candle') {
         if (R.near(o, rose)) return 'ستحترق الوردة!';
         const i = R.o.ice;
-        if (i.vis && !R.st.melt && Math.hypot(o.x - i.x, o.y - 100 - i.y) < tune.dropReach) { R.st.melt = 0.001; R.say('يذوب…'); return; }
+        if (i.vis && !R.st.melt && Math.hypot(o.x - i.x, o.y - 100 - i.y) < tune.dropReach) { R.st.melt = 0.001; R.say('يذوب…'); o.returning = true; return true; }
       }
       if (o.id === 'glass' && R.near(o, rose)) return 'الكأس فارغة.';
       if (o.id === 'drop' && R.near(o, rose)) { o.vis = false; R.solve(); return true; }
@@ -870,11 +880,31 @@ function layoutQuestion(q) {
 }
 const HUD = { mute: { x: 64, y: 60, r: 44 }, hint: { x: 172, y: 60, r: 44 }, skip: { x: 280, y: 60, r: 44 } };
 const NEXT = { x: 200, y: 1146, w: 320, h: 96 };
+const STATS_BTN = { x: 548, y: 60, r: 44 }, STATS_BACK = { x: 200, y: 1150, w: 320, h: 96 };
 let run = null, R = null;
 let best = null;
 try { best = JSON.parse(localStorage.getItem('think-outside.v1')); } catch (_) { best = null; }
 if (!best || typeof best !== 'object') best = { time: 0, hints: 0, done: false, reached: 0 };
 function saveBest() { try { localStorage.setItem('think-outside.v1', JSON.stringify(best)); } catch (_) { /* fine */ } }
+// The local play log (gamelab:think-outside:log): per riddle, times opened, solved, skipped, best
+// solve time, hints used and wrong taps. It never leaves this device; إحصائياتي shows it as it is.
+const LOG_KEY = 'gamelab:think-outside:log';
+let playLog = { v: 1, riddles: {} };
+try { const s = JSON.parse(localStorage.getItem(LOG_KEY)); if (s && s.riddles && typeof s.riddles === 'object') playLog = s; } catch (_) { /* fine */ }
+function logRow(i) {
+  const k = String(i + 1);
+  return playLog.riddles[k] || (playLog.riddles[k] = { plays: 0, solved: 0, skipped: 0, bestTime: 0, hints: 0, wrong: 0 });
+}
+/** Notes one thing in the play log: 'play', 'solve' (with its time), 'skip', 'hint' or 'wrong'. */
+function logNote(i, what, t) {
+  const r = logRow(i);
+  if (what === 'play') r.plays++;
+  else if (what === 'skip') r.skipped++;
+  else if (what === 'hint') r.hints++;
+  else if (what === 'wrong') r.wrong++;
+  else if (what === 'solve') { r.solved++; const v = Math.round(t * 10) / 10; if (!r.bestTime || v < r.bestTime) r.bestTime = v; }
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(playLog)); } catch (_) { /* fine: the game plays without it */ }
+}
 
 /** Starts riddle i: a fresh page, its own objects, the hint clock at zero. */
 function startRiddle(i) {
@@ -897,18 +927,24 @@ function startRiddle(i) {
     solve() {
       if (this.solved) return;
       this.solved = true; this.solveT = 0; this.msg = ''; sfx.solve();
-      run.solved[this.i] = true; run.times[this.i] = this.t;
+      run.solved[this.i] = true; run.times[this.i] = this.t; run.skipped[this.i] = false;
+      logNote(this.i, 'solve', this.t);
       events.push({ type: 'solved', riddle: this.i + 1, t: this.t });
     },
   };
   seed = Number(params.get('seed')) || CONFIG.seed;
   def.setup(R);
   best.reached = Math.max(best.reached || 0, i); saveBest();
+  logNote(i, 'play');
+  if (def.hard) R.say('لغز صعب: يمكنك تخطّيه متى شئت'); // warned before the first move, skip open at once
   scene = 'play';
-  events.push({ type: 'riddle', riddle: i + 1 });
+  events.push({ type: 'riddle', riddle: i + 1, hard: !!def.hard });
+}
+function newRunState(practice) {
+  return { practice, totalT: 0, hints: 0, skips: 0, solved: new Array(10).fill(false), skipped: new Array(10).fill(false), times: new Array(10).fill(0) };
 }
 function newRun(practice = -1) {
-  run = { practice, totalT: 0, hints: 0, skips: 0, solved: new Array(10).fill(false), times: new Array(10).fill(0) };
+  run = newRunState(practice);
   startRiddle(practice >= 0 ? practice : 0);
 }
 function hintReady() {
@@ -921,7 +957,7 @@ function useHint() {
   if (R.solved) return;
   if (R.hints >= 2) { R.say(R.def.hints[1]); return; }
   if (!hintReady()) { R.say(`التلميح يُفتح بعد ${hintWait()} ثانية`); return; }
-  R.hintText = R.def.hints[R.hints]; R.hints++; run.hints++;
+  R.hintText = R.def.hints[R.hints]; R.hints++; run.hints++; logNote(R.i, 'hint');
   if (R.hints === 1) R.hint1At = R.t;
   sfx.hint(); events.push({ type: 'hint', riddle: R.i + 1, n: R.hints });
 }
@@ -930,7 +966,9 @@ function nextRiddle() {
   if (R.i < 9) startRiddle(R.i + 1);
   else finishRun();
 }
-function skipRiddle() { run.skips++; events.push({ type: 'skip', riddle: R.i + 1 }); nextRiddle(); }
+/** Skip, with no shame: open from the start on a hard riddle, after two hints on the others. */
+const canSkip = () => !R.solved && (R.hints >= 2 || !!R.def.hard);
+function skipRiddle() { run.skips++; run.skipped[R.i] = true; logNote(R.i, 'skip'); events.push({ type: 'skip', riddle: R.i + 1 }); nextRiddle(); }
 function finishRun() {
   const fresh = !best.done || run.totalT < best.time;
   best.time = fresh ? run.totalT : best.time;
@@ -944,7 +982,7 @@ function hitTest(p) {
   if (R.def.hudDrag && R.mute.vis && Math.hypot(p.x - R.mute.x, p.y - R.mute.y) <= 50) return R.mute;
   if (!R.def.hudDrag && hudHit(HUD.mute)) return { hud: true, id: 'mute' };
   if (hudHit(HUD.hint)) return { hud: true, id: 'hint' };
-  if (R.hints >= 2 && hudHit(HUD.skip)) return { hud: true, id: 'skip' };
+  if (canSkip() && hudHit(HUD.skip)) return { hud: true, id: 'skip' };
   // question words: the nearest whose box (at least 72 px) holds the point
   let bestTok = null, bd = 1e9;
   for (const t of R.toks) {
@@ -962,7 +1000,17 @@ function hitTest(p) {
   }
   return null;
 }
-function kindWord() { R.say(KIND[R.kindN++ % KIND.length]); sfx.wrong(); }
+/** Every wrong tap or drop answers back: a line (the thing's own, or one of the riddle's witty
+ *  lines in turn, never the same line twice running), a sound and a shake. Never silent. */
+function answerBack(line, target) {
+  if (R.solved) return;
+  const lines = R.def.wrong || KIND;
+  if (!line || (line === R.msg && R.msgT > 0)) line = lines[R.kindN++ % lines.length];
+  if (line === R.msg && R.msgT > 0) line = lines[R.kindN++ % lines.length];
+  R.say(line); sfx.wrong(); logNote(R.i, 'wrong');
+  if (target) R.shake(target); else R.pageShake = tune.shakeTime;
+  events.push({ type: 'wrong', riddle: R.i + 1, line });
+}
 function handleTap(target, p) {
   const def = R.def;
   if (target && target.hud) {
@@ -973,10 +1021,9 @@ function handleTap(target, p) {
   let res;
   if (target && target.isTok) res = def.tapTok ? def.tapTok(R, target) : undefined;
   else if (target) res = def.tap ? def.tap.call(def, R, target) : undefined;
-  if (typeof res === 'string') { R.say(res); if (!R.solved) sfx.wrong(); if (target) R.shake(target); return; }
+  if (typeof res === 'string') { answerBack(res, target); return; }
   if (res) return;
-  if (target) R.shake(target); else R.pageShake = tune.shakeTime;
-  kindWord();
+  answerBack(null, target);
 }
 function handleDrop(o, p) {
   const def = R.def;
@@ -984,9 +1031,10 @@ function handleDrop(o, p) {
   if (o.hud) res = def.dropHud ? def.dropHud(R, o) : undefined;
   else if (o.isTok) res = def.dropTok ? def.dropTok(R, o) : undefined;
   else res = def.drop ? def.drop.call(def, R, o, p) : undefined;
-  if (typeof res === 'string') { R.say(res); sfx.wrong(); o.returning = true; return; }
+  if (typeof res === 'string') { answerBack(res, o); o.returning = true; return; }
   if (res === true) { sfx.drop(); return; }
-  o.returning = true;
+  o.returning = true; // K3: back home at once, ready for the next try
+  answerBack(null, o);
 }
 function playPointer(e) {
   if (R.solved) {
@@ -997,7 +1045,7 @@ function playPointer(e) {
   if (e.t === 'down') {
     if (R.press) return;
     const target = hitTest(e);
-    if (R.def.anyDown) R.def.anyDown(R, target);
+    if (R.def.anyDown && R.def.anyDown.call(R.def, R, target) === 'consume') return;
     R.press = { id: e.id, x0: e.x, y0: e.y, target, dragging: false, ox: target ? e.x - target.x : 0, oy: target ? e.y - target.y : 0 };
   } else if (R.press && e.id === R.press.id) {
     const pr = R.press, o = pr.target;
@@ -1017,7 +1065,7 @@ function reset() {
   seed = Number(params.get('seed')) || CONFIG.seed;
   state = { t: 0, score: 0, gained: '' };
 }
-function gridTiles(y0) { const a = []; for (let i = 0; i < 10; i++) a.push({ i, x: 560 - (i % 5) * 120, y: y0 + Math.floor(i / 5) * 120, w: 100, h: 100 }); return a; }
+function gridTiles(y0) { const a = []; for (let i = 0; i < 10; i++) a.push({ i, x: 560 - (i % 5) * 120, y: y0 + Math.floor(i / 5) * 132, w: 100, h: 100 }); /* rows apart enough for the hard tags */ return a; }
 const scenes = {
   figures: {
     update(dt) { state.t += dt; },
@@ -1028,11 +1076,17 @@ const scenes = {
       if (e.t !== 'down') return;
       if (location.protocol.startsWith('http') && Math.hypot(e.x - 64, e.y - 60) <= 50) { location.href = '../../'; return; }
       if (Math.hypot(e.x - 656, e.y - 60) <= 50) { setMuted(!muted); return; }
-      if (best.done) for (const g of gridTiles(930)) if (e.x >= g.x && e.x <= g.x + g.w && e.y >= g.y && e.y <= g.y + g.h) { newRun(g.i); return; }
+      if (Math.hypot(e.x - STATS_BTN.x, e.y - STATS_BTN.y) <= 50) { scene = 'stats'; return; }
+      if (best.done) for (const g of gridTiles(924)) if (e.x >= g.x && e.x <= g.x + g.w && e.y >= g.y && e.y <= g.y + g.h) { newRun(g.i); return; }
       newRun();
     },
-    update(dt) { state.t += dt; if (pressed('Enter') || pressed('Space')) newRun(); },
+    update(dt) { state.t += dt; if (pressed('KeyS')) { scene = 'stats'; return; } if (pressed('Enter') || pressed('Space')) newRun(); },
     draw() { drawTitle(); },
+  },
+  stats: { // إحصائياتي: the local play log, as it is
+    pointer(e) { if (e.t === 'down' && e.x >= STATS_BACK.x && e.x <= STATS_BACK.x + STATS_BACK.w && e.y >= STATS_BACK.y && e.y <= STATS_BACK.y + STATS_BACK.h) scene = 'title'; },
+    update(dt) { state.t += dt; if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyS')) scene = 'title'; },
+    draw() { drawStats(); },
   },
   play: {
     pointer: playPointer,
@@ -1094,10 +1148,27 @@ function drawHUD() {
     }
   }, ready);
   if (R.hints > 0) { ctx.save(); ctx.translate(HUD.hint.x + 30, HUD.hint.y + 30); ink(sh.circ(0, 0, 14, 10), { fill: '#ff6b6b', lw: 2.5 }); text(`${R.hints}`, 0, 1, 20, '#fff', 'center', '800'); ctx.restore(); }
-  if (R.hints >= 2 && !R.solved) hudButton(HUD.skip, () => D.skip(), false);
-  // riddle number and the clock
+  if (canSkip()) hudButton(HUD.skip, () => D.skip(), false);
+  // riddle number and the clock, and the honest label on a hard riddle
   inkText(`لغز ${R.i + 1} من 10`, 560, 44, 30, INK, '800', FONT);
+  if (R.def.hard) hardTag(410, 58);
   text(fmtTime(run.totalT), 560, 86, 24, '#5a6aa8', 'center', '700');
+}
+/** The hard label: a red marker tag that says hard, on the HUD and the riddle tiles. */
+function hardTag(cx, cy) {
+  ctx.font = `800 24px ${FONT}`; const w = ctx.measureText('صعبة').width + 30;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(-0.04);
+  ink(sh.rect(-w / 2, -19, w, 38), { fill: '#ff6b6b', lw: 3 });
+  text('صعبة', 0, 1, 24, '#ffffff', 'center', '800');
+  ctx.restore();
+}
+/** A riddle tile on the title and results pages: its number, the hard tag, and how it went. */
+function riddleTile(g, how) {
+  const fill = how === 'solved' ? '#e2f7e8' : how === 'skipped' ? '#fff3c4' : '#ffffff';
+  ink(sh.rect(g.x, g.y, g.w, g.h), { fill, lw: 3 });
+  text(`${g.i + 1}`, g.x + g.w / 2, g.y + (how === 'skipped' ? 40 : 52), 40, INK, 'center', '800');
+  if (how === 'skipped') text('تخطيت', g.x + g.w / 2, g.y + 80, 24, '#8a6a12', 'center', '700');
+  if (RIDDLES[g.i].hard) hardTag(g.x + g.w / 2, g.y - 2);
 }
 function drawQuestion() {
   ctx.save(); ctx.font = `700 ${QSIZE}px ${HAND}`;
@@ -1140,6 +1211,8 @@ function drawSolved() {
   }
   inkText(['أحسنت!', 'رائع!', 'فكرة ذكية!', 'عبقري!'][R.i % 4], 360, 920, 54, '#2bb673', '800', HAND);
   if (k > tune.nextDelay) {
+    const nx = RIDDLES[R.i + 1];
+    if (run.practice < 0 && nx && nx.hard) { hardTag(NEXT.x + NEXT.w + 70, NEXT.y + NEXT.h / 2); text('اللغز التالي صعب، والتخطي متاح فيه', 360, 1080, 26, '#c23b3b', 'center', '700'); }
     ink(sh.rect(NEXT.x, NEXT.y, NEXT.w, NEXT.h), { fill: '#ffd93d', lw: 4 });
     text(R.i < 9 || run.practice >= 0 ? 'التالي' : 'النتيجة', NEXT.x + NEXT.w / 2 + 30, NEXT.y + NEXT.h / 2 + 2, 36, INK, 'center', '800');
     ink([NEXT.x + 70, NEXT.y + 30, NEXT.x + 46, NEXT.y + 48, NEXT.x + 70, NEXT.y + 66], { open: true, sharp: true, lw: 5 });
@@ -1162,6 +1235,7 @@ function drawTitle() {
   drawPaper();
   if (location.protocol.startsWith('http')) { ctx.save(); ctx.translate(64, 60); ink(sh.circ(0, 0, 38, 18), { fill: '#ffffff', lw: 3.5 }); D.house(INK); ctx.restore(); }
   ctx.save(); ctx.translate(656, 60); ink(sh.circ(0, 0, 38, 18), { fill: '#ffffff', lw: 3.5 }); D.speaker(!muted); ctx.restore();
+  ctx.save(); ctx.translate(STATS_BTN.x, STATS_BTN.y); ink(sh.circ(0, 0, 38, 18), { fill: '#ffffff', lw: 3.5 }); D.chart(); ctx.restore();
   // a box with a thought escaping it
   ctx.save(); ctx.translate(360, 470);
   ink([-120, -40, 120, -40, 120, 110, -120, 110], { fill: '#c08552', sharp: true });
@@ -1177,19 +1251,20 @@ function drawTitle() {
   ctx.globalAlpha = pulse; inkText('اضغط للبدء', 360, 680, 46, '#e34b4b', '800', HAND); ctx.globalAlpha = 1;
   text('عشرة ألغاز، وكل لغز له خدعة مختلفة', 360, 760, 28, INK);
   text('اضغط واسحب أي شيء… حتى كلمات السؤال!', 360, 806, 28, INK);
-  text('تلميح مجاني بعد 20 ثانية، وتخطٍّ بعد تلميحين', 360, 852, 26, '#5a6aa8');
+  text('تلميح مجاني بعد 20 ثانية، والصعبة تُتخطّى فورًا', 360, 852, 26, '#5a6aa8');
   if (best.done) {
-    text(`أفضل وقت ${fmtTime(best.time)} · أقل تلميحات ${best.hints}`, 360, 900, 26, '#2bb673', 'center', '700');
-    for (const g of gridTiles(930)) { ink(sh.rect(g.x, g.y, g.w, g.h), { fill: '#ffffff', lw: 3 }); text(`${g.i + 1}`, g.x + g.w / 2, g.y + g.h / 2 + 2, 40, INK, 'center', '800'); }
-    text('أو اختر لغزًا', 360, 1180, 24, '#5a6aa8');
+    text(`أفضل وقت ${fmtTime(best.time)} · أقل تلميحات ${best.hints}`, 360, 892, 26, '#2bb673', 'center', '700');
+    for (const g of gridTiles(924)) riddleTile(g, '');
+    text('أو اختر لغزًا', 360, 1184, 24, '#5a6aa8');
   }
-  text('Enter: متابعة · H: تلميح · M: الصوت', 360, 1230, 24, '#5a6aa8');
+  text('Enter: متابعة · H: تلميح · M: الصوت · S: إحصائياتي', 360, 1230, 24, '#5a6aa8');
 }
 function drawResults() {
   BOIL = Math.floor(state.t / tune.boil) % 3; JAMP = tune.jitter;
   drawPaper();
   const prac = run && run.practice >= 0;
-  inkText(prac ? 'حُلّ اللغز!' : 'انتهيت من الألغاز العشرة!', 360, 150, 50, INK, '800', HAND);
+  const pracSkip = prac && run.skipped[run.practice];
+  inkText(prac ? (pracSkip ? 'تخطيت هذا اللغز، لا بأس' : 'حُلّ اللغز!') : 'انتهيت من الألغاز العشرة!', 360, 150, 50, INK, '800', HAND);
   if (!prac) {
     ctx.save(); ctx.translate(360, 300); D.tick(1); ctx.restore();
     text(`الوقت: ${fmtTime(run.totalT)}`, 360, 470, 34, INK, 'center', '800');
@@ -1199,13 +1274,37 @@ function drawResults() {
     for (let i = 0; i < 3; i++) D.star(250 + i * 110, 690, 26, ['#ffd93d', '#ff9f43', '#4d96ff'][i]);
   }
   text('اختر لغزًا لتلعبه مرة أخرى', 360, 760, 28, INK, 'center', '700');
-  for (const g of gridTiles(800)) {
-    const ok = run && run.solved[g.i];
-    ink(sh.rect(g.x, g.y, g.w, g.h), { fill: ok ? '#e2f7e8' : '#ffffff', lw: 3 });
-    text(`${g.i + 1}`, g.x + g.w / 2, g.y + g.h / 2 + 2, 40, INK, 'center', '800');
-  }
+  for (const g of gridTiles(800)) riddleTile(g, run && run.solved[g.i] ? 'solved' : run && run.skipped && run.skipped[g.i] ? 'skipped' : '');
   ink(sh.rect(160, 1110, 400, 96), { fill: '#ffd93d', lw: 4 });
   text('العب من البداية', 360, 1160, 34, INK, 'center', '800');
+}
+/** إحصائياتي: the play log per riddle, as recorded on this device, on a notebook page. */
+function drawStats() {
+  BOIL = Math.floor(state.t / tune.boil) % 3; JAMP = tune.jitter;
+  drawPaper();
+  inkText('إحصائياتي', 360, 92, 56, INK, '800', HAND);
+  text('ما سجّلته اللعبة على هذا الجهاز فقط', 360, 158, 26, '#5a6aa8', 'center', '700');
+  const C = [612, 510, 415, 318, 205, 92], HEAD = ['لغز', 'لعبت', 'حللت', 'تخطيت', 'أفضل وقت', 'تلميحات'];
+  HEAD.forEach((h, k) => text(h, C[k], 226, 24, INK, 'center', '800'));
+  ln(40, 252, 640, 254, 3);
+  let plays = 0, solved = 0, wrong = 0;
+  RIDDLES.forEach((d, i) => {
+    const r = playLog.riddles[String(i + 1)] || { plays: 0, solved: 0, skipped: 0, bestTime: 0, hints: 0, wrong: 0 };
+    const y = 296 + i * 74;
+    plays += r.plays; solved += r.solved; wrong += r.wrong;
+    if (i % 2 === 1) { ctx.fillStyle = 'rgba(77,150,255,0.08)'; ctx.fillRect(40, y - 34, 600, 68); }
+    ctx.save(); ctx.translate(C[0] + 22, y); ink(sh.circ(0, 0, 22, 14), { fill: d.hard ? '#ffd6d6' : '#ffffff', lw: 3 }); ctx.restore();
+    text(`${i + 1}`, C[0] + 22, y + 2, 28, INK, 'center', '800');
+    if (d.hard) text('صعبة', C[0] - 42, y + 1, 24, '#c23b3b', 'center', '800');
+    const v = [r.plays, r.solved, r.skipped];
+    v.forEach((n, k) => text(`${n}`, C[k + 1], y + 2, 30, INK, 'center', '800'));
+    text(r.bestTime ? fmtTime(r.bestTime) : '—', C[4], y + 2, 28, INK, 'center', '700');
+    text(`${r.hints}`, C[5], y + 2, 30, INK, 'center', '800');
+  });
+  text(`المجموع: لعبت ${plays} · حللت ${solved} · نقرات خاطئة ${wrong}`, 360, 1050, 26, INK, 'center', '700');
+  text('لا يُرسل شيء إلى أي مكان', 360, 1096, 24, '#5a6aa8', 'center', '700');
+  ink(sh.rect(STATS_BACK.x, STATS_BACK.y, STATS_BACK.w, STATS_BACK.h), { fill: '#ffd93d', lw: 4 });
+  text('رجوع', STATS_BACK.x + STATS_BACK.w / 2, STATS_BACK.y + STATS_BACK.h / 2 + 2, 36, INK, 'center', '800');
 }
 function drawFigures() {
   BOIL = Math.floor(state.t / tune.boil) % 3; JAMP = tune.jitter;
@@ -1259,8 +1358,8 @@ window.game = {
 
 reset();
 scene = params.get('scene') || 'title';
-if (scene === 'play') { run = { practice: -1, totalT: 0, hints: 0, skips: 0, solved: new Array(10).fill(false), times: new Array(10).fill(0) }; startRiddle(clamp((Number(params.get('riddle')) || 1) - 1, 0, 9)); }
-if (scene === 'results' && !run) { run = { practice: -1, totalT: 0, hints: 0, skips: 0, solved: new Array(10).fill(false), times: new Array(10).fill(0) }; }
+if (scene === 'play') { run = newRunState(-1); startRiddle(clamp((Number(params.get('riddle')) || 1) - 1, 0, 9)); }
+if (scene === 'results' && !run) run = newRunState(-1);
 last = clock.now();
 if (params.get('manual') === '1') drawFrame();
 else { requestAnimationFrame(frame); setInterval(timer, 50); }

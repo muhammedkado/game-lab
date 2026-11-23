@@ -146,6 +146,7 @@ const sfx = {
   clash() { tone(170, 0.14, 'square', 0.1); },
   oasis() { tone(660, 0.18, 'sine', 0.18); tone(990, 0.22, 'sine', 0.12, 0.08); },
   hint() { tone(880, 0.1, 'triangle', 0.14); tone(1175, 0.16, 'triangle', 0.1, 0.07); },
+  refund() { tone(523, 0.12, 'sine', 0.16); tone(784, 0.18, 'sine', 0.14, 0.08); },
   win() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.3, 'triangle', 0.2, i * 0.11)); },
   ui() { tone(420, 0.05, 'triangle', 0.12); },
 };
@@ -409,14 +410,14 @@ function deduce(P, st, maxK) {
 function applyStep(st, s) { for (const i of s.cells) st[i] = s.kind === 'place' ? 1 : 2; }
 /** Solves by deduction alone; the difficulty score is the weighted count of the steps it needed. */
 function logicSolve(P, maxK) {
-  const N = P.N, st = new Int8Array(N * N), weight = [0, 1, 3, 5, 6];
+  const N = P.N, st = new Int8Array(N * N), weight = [0, 1, 3, 5, 6], prof = [0, 0, 0, 0, 0];
   let score = 0, maxLvl = 0, steps = 0;
   for (let guard = 0; guard < 400; guard++) {
     let placed = 0; for (let i = 0; i < N * N; i++) if (st[i] === 1) placed++;
-    if (placed === N) return { ok: true, score, maxLvl, steps };
+    if (placed === N) return { ok: true, score, maxLvl, steps, prof }; // prof: steps used at each level (O2's fingerprint)
     const s = deduce(P, st, maxK);
     if (!s || s.kind === 'bad') return { ok: false };
-    applyStep(st, s); steps++;
+    applyStep(st, s); steps++; prof[s.lvl]++;
     score += weight[s.lvl] + (s.k ? s.k * 2 : 0);
     if (s.lvl > maxLvl) maxLvl = s.lvl;
   }
@@ -438,8 +439,71 @@ function attempt(N, o) {
   if (!L.ok) return null;
   if (o.maxLvl !== undefined && L.maxLvl > o.maxLvl) return null;
   if (o.minLvl !== undefined && L.maxLvl < o.minLvl) return null;
-  P.score = L.score; P.maxLvl = L.maxLvl; P.steps = L.steps;
+  P.score = L.score; P.maxLvl = L.maxLvl; P.steps = L.steps; P.prof = L.prof;
   return P;
+}
+
+// ---- Round 2 (research/re): honest labels, fingerprints, the play log, the adaptive pick ----
+/** S2: a board is labelled صعبة when the deduction solver needed a lot of work for its size. */
+const isHard = P => P.score >= tune.hard_score * P.N;
+/** O2: one number for the oasis shapes, the same under the 8 turns and mirrors, colours ignored. */
+function shapeKey(N, reg) {
+  let best = null;
+  for (let s = 0; s < 8; s++) {
+    const map = new Map(); let out = '';
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      let y = r, x = c;
+      if (s & 1) x = N - 1 - x;
+      if (s & 2) y = N - 1 - y;
+      if (s & 4) { const t = x; x = y; y = t; }
+      const g = reg[y * N + x];
+      if (!map.has(g)) map.set(g, map.size);
+      out += String.fromCharCode(97 + map.get(g));
+    }
+    if (best === null || out < best) best = out;
+  }
+  let h = 2166136261; for (let k = 0; k < best.length; k++) { h ^= best.charCodeAt(k); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+/** O2: region-shape signature (sorted oasis sizes + exact shape key) and deduction-step profile. */
+function fingerprint(P) {
+  const sz = new Array(P.N).fill(0); for (const g of P.reg) sz[g]++;
+  return { n: P.N, s: sz.sort((a, b) => a - b), p: P.prof.slice(), k: shapeKey(P.N, P.reg) };
+}
+/** O2: too similar = the same shapes, or close oasis sizes and a close deduction profile. */
+function nearDup(a, b) {
+  if (a.n !== b.n) return false;
+  if (a.k === b.k) return true;
+  let ds = 0; for (let i = 0; i < a.n; i++) ds += Math.abs(a.s[i] - (b.s[i] || 0));
+  let dp = 0; for (let i = 0; i < 5; i++) dp += Math.abs(a.p[i] - (b.p[i] || 0));
+  return ds <= tune.dup_shape && dp <= tune.dup_steps;
+}
+/** S1: the local play log, per puzzle (L<level>, D<date>): attempts, wins, best time, hints. No network. */
+const LOG_KEY = 'gamelab:oases:log';
+const playLog = {
+  read() {
+    try { const v = JSON.parse(localStorage.getItem(LOG_KEY)); if (v && v.rows) { v.solves = v.solves || []; return v; } } catch (_) {}
+    return { v: 1, seq: 0, rows: {}, solves: [], solved: 0 };
+  },
+  write(L) { try { localStorage.setItem(LOG_KEY, JSON.stringify(L)); } catch (_) {} },
+  /** Changes the current puzzle's row with fn(row, log) and saves it. */
+  row(fn) {
+    const L = this.read(), key = state.daily ? 'D' + dateKey() : 'L' + state.level;
+    const r = L.rows[key] || (L.rows[key] = { lvl: state.daily ? 0 : state.level, d: state.daily ? dateKey() : 0, n: 0, a: 0, w: 0, b: null, h: 0, x: 0, f: 0 });
+    if (state.P) { r.n = state.P.N; r.hard = !!state.P.hard; r.rest = !!state.P.rest; }
+    fn(r, L); r.q = ++L.seq; this.write(L);
+  },
+};
+const targetOf = N => tune['target_' + Math.max(5, Math.min(9, N))];
+/**
+ * O1: compares the last 3 solves with their sizes' targets (time / target, median of 3).
+ * dir +1: well under target (the harder candidate), -1: well over (the easier), 0: as the ramp says.
+ */
+function adaptNow() {
+  const L = playLog.read(), need = Math.max(3, tune.adapt_after);
+  if ((L.solved || 0) < need || L.solves.length < 3) return { dir: 0, m: null, grace: need - (L.solved || 0) };
+  const r = L.solves.slice(-3).map(([n, t]) => t / targetOf(n)).sort((a, b) => a - b), m = r[1];
+  return { dir: m <= tune.adapt_fast ? 1 : m >= tune.adapt_slow ? -1 : 0, m, grace: 0 };
 }
 
 // ---- Levels and the ramp ---------------------------------------------------------------
@@ -468,6 +532,7 @@ const B = {
   start: { x: 140, y: 840, w: 440, h: 112 }, daily: { x: 140, y: 972, w: 440, h: 100 },
   next: { x: 160, y: 846, w: 400, h: 106 }, menu: { x: 220, y: 972, w: 280, h: 86 },
   resume: { x: 160, y: 620, w: 400, h: 106 }, pmenu: { x: 220, y: 750, w: 280, h: 90 },
+  stats: { x: 528, y: 16, w: 80, h: 80 }, back: { x: 220, y: 1172, w: 280, h: 86 },
 };
 const BOARD_TOP = 196, BOARD_SIZE = 660;
 let L = { cell: 132, bx: 30, by: 196, bw: 660 };
@@ -484,7 +549,7 @@ function reset() {
     mode: 'tent', auto: false, cursor: { r: 2, c: 2 }, kbd: false, press: null, hint: null,
     flash: [], shake: 0, solvedAt: [], ruleCard: null, firstTap: false, phaseT: 0, won: false,
     conflicts: new Set(), conflictPairs: [], deadUnits: [], autoMask: null, sparks: [], btnDown: null,
-    score: 0, gained: '', stars: 0, best: null, newBest: false,
+    score: 0, gained: '', stars: 0, best: null, newBest: false, refundAt: -9,
   };
 }
 function boardLayout(N) {
@@ -497,6 +562,7 @@ function startLevel(level, daily) {
   const slot = daily ? 'dsave' : 'save', sv = store.get(slot, null);
   if (sv && (daily ? sv.date === dateKey() : sv.level === level) && sv.N) {
     const P = buildPuzzle(sv.N, Int8Array.from(sv.reg), sv.sol, sv.color);
+    P.hard = !!sv.hard; P.rest = !!sv.rest; P.adapt = sv.adapt || 0; P.grace = sv.grace || 0;
     loadPuzzle(P);
     state.tents = Uint8Array.from(sv.tents); state.marks = Uint8Array.from(sv.marks);
     state.hearts = sv.hearts; state.heartsLost = sv.heartsLost; state.hintUsed = sv.hintUsed; state.time = sv.time;
@@ -508,8 +574,13 @@ function startLevel(level, daily) {
   if (daily) s = dateKey();
   else { const epoch = store.get('epoch', 0); store.set('epoch', epoch + 1); s = (seed * 7919 + level * 104729 + epoch * 15485863) | 0; }
   seed = s || 1;
-  state.gen = { N, level, daily: !!daily, o: filterFor(level, N, daily), tries: 0, found: [] };
-  events.push({ type: 'generate', N });
+  // the daily stays the same for everyone: no rest, no adaptation, no near-duplicate filter
+  const rest = !daily && level > 1 && store.get('hardRun', 0) >= tune.rest_after;   // O4
+  const adapt = !daily && !rest ? adaptNow() : { dir: 0, m: null, grace: 0 }; // O1
+  if (level === 1) adapt.dir = 0; // the teaching puzzle never adapts
+  state.gen = { N, level, daily: !!daily, o: filterFor(level, N, daily), tries: 0, found: [], rest, adapt, dups: 0,
+    recent: daily ? [] : store.get('recent', []).slice(-tune.dup_window) };
+  events.push({ type: 'generate', N, rest, adapt: adapt.dir });
 }
 function genStep() {
   const g = state.gen;
@@ -518,12 +589,27 @@ function genStep() {
     const relaxed = g.tries > tune.gen_tries;
     const o = relaxed ? (g.o.single ? { single: true } : {}) : g.o;
     const P = attempt(g.N, o);
-    if (P) g.found.push(P);
-    if (g.found.length >= tune.candidates || (g.found.length && relaxed)) {
+    if (P) {
+      P.fp = fingerprint(P); P.hard = isHard(P);
+      // O2: never a near-duplicate of the last served (once relaxed, only an exact repeat is refused)
+      if (tune.dup_window > 0 && g.recent.some(f => relaxed ? f.k === P.fp.k : nearDup(P.fp, f))) g.dups++;
+      else g.found.push(P);
+    }
+    const enough = g.found.length >= tune.candidates && (!g.rest || g.found.some(c => !c.hard));
+    if (enough || (g.found.length && relaxed)) {
       g.found.sort((a, b) => a.score - b.score);
-      const pos = g.daily ? 0.5 : (g.level === 1 ? 0 : bandPos(g.level));
-      const P2 = g.found[Math.round(pos * (g.found.length - 1))];
-      loadPuzzle(P2); state.gen = null; save(); return;
+      let idx;
+      if (g.rest) idx = 0;                                  // O4: the easiest board of this size
+      else if (g.adapt.dir > 0) idx = g.found.length - 1;   // O1: fast lately, the harder candidate
+      else if (g.adapt.dir < 0) idx = 0;                    // O1: slow lately, the easier candidate
+      else { const pos = g.daily ? 0.5 : (g.level === 1 ? 0 : bandPos(g.level)); idx = Math.round(pos * (g.found.length - 1)); }
+      const P2 = g.found[idx];
+      P2.rest = g.rest; P2.adapt = g.adapt.dir; P2.grace = g.adapt.grace;
+      loadPuzzle(P2); state.gen = null; save();
+      const rec = store.get('recent', []); rec.push(P2.fp); store.set('recent', rec.slice(-60));
+      playLog.row(r => { r.a++; });
+      events.push({ type: 'served', hard: P2.hard, rest: P2.rest, adapt: P2.adapt, dups: g.dups, tries: g.tries });
+      return;
     }
   }
 }
@@ -539,13 +625,16 @@ function loadPuzzle(P) {
   state.ruleCard = null;
   if (!state.daily && state.level === 1) state.ruleCard = { text: 'خيمة واحدة في كل واحة، لا تتكرر في صف أو عمود، ولا تتلامس', fade: -1 };
   else if (!state.daily && state.level === tune.auto_mark_puzzles + 1 && !prefs.auto) state.ruleCard = { text: 'من الآن ضع العلامات بنفسك: اضغط مطولا على الخانة، أو شغّل العلامات التلقائية', fade: -1 };
+  else if (P.rest) state.ruleCard = { text: 'لغز استراحة: أسهل قليلا بعد الألغاز الصعبة', fade: -1, tag: 'rest' };   // O4
+  else if (P.hard) state.ruleCard = { text: 'لغز صعب: يحتاج استنتاجا أعمق، والتلميح مجاني', fade: -1, tag: 'hard' }; // S2
   boardImg = makeBoardImage(P);
   refresh();
 }
 function save() {
   const P = state.P; if (!P) return;
   const sv = { level: state.level, date: state.daily ? dateKey() : 0, N: P.N, reg: Array.from(P.reg), sol: P.sol, color: P.color,
-    tents: Array.from(state.tents), marks: Array.from(state.marks), hearts: state.hearts, heartsLost: state.heartsLost, hintUsed: state.hintUsed, time: Math.floor(state.time) };
+    tents: Array.from(state.tents), marks: Array.from(state.marks), hearts: state.hearts, heartsLost: state.heartsLost, hintUsed: state.hintUsed, time: Math.floor(state.time),
+    hard: !!P.hard, rest: !!P.rest, adapt: P.adapt || 0, grace: P.grace || 0 };
   store.set(state.daily ? 'dsave' : 'save', sv);
 }
 /** Recomputes conflicts, auto-marks, blocked units and finished oases after any change. */
@@ -573,8 +662,8 @@ function refresh() {
   }
   state.score = tents.length;
 }
-function pushUndo() {
-  state.undo.push({ tents: state.tents.slice(), marks: state.marks.slice() });
+function pushUndo(refund = false) { // refund: undoing this move gives its heart back (O3)
+  state.undo.push({ tents: state.tents.slice(), marks: state.marks.slice(), refund });
   if (state.undo.length > 400) state.undo.shift();
 }
 function boardChanged(clearHint = true) {
@@ -598,10 +687,11 @@ function tapCell(i) {
   let clash = false;
   for (let j = 0; j < P.N * P.N; j++) if (state.tents[j] && P.blockSet[i][j]) { clash = true; break; }
   if (clash) { pushUndo(); state.tents[i] = 1; sfx.clash(); events.push({ type: 'clash' }); boardChanged(); return; }
-  if (!P.solSet[i]) { // a tent the unique answer does not have: costs a heart
-    pushUndo(); state.marks[i] = 1;
+  if (!P.solSet[i]) { // a tent the unique answer does not have: costs a heart (undo gives it back)
+    pushUndo(true); state.marks[i] = 1;
     state.hearts--; state.heartsLost++; state.shake = tune.shake_time;
     state.flash.push({ i, t: state.t }); sfx.wrong(); events.push({ type: 'heart', left: state.hearts });
+    playLog.row(r => { r.x++; });
     if (state.hearts <= 0) { state.phase = 'lost'; state.phaseT = 0; }
     boardChanged(); return;
   }
@@ -616,13 +706,18 @@ function toggleMark(i, op) { // op: 'add' | 'remove' | undefined (toggle); retur
 }
 function undo() {
   const u = state.undo.pop(); if (!u) return;
-  state.tents = u.tents; state.marks = u.marks; sfx.lift(); boardChanged();
+  state.tents = u.tents; state.marks = u.marks;
+  // O3: undoing the wrong tent that cost a heart gives the heart back; the lost star stays (heartsLost)
+  if (u.refund && state.hearts < tune.hearts) { state.hearts++; state.refundAt = state.t; sfx.refund(); events.push({ type: 'refund', hearts: state.hearts }); }
+  else sfx.lift();
+  boardChanged();
 }
 function restartPuzzle() {
   const P = state.P, N = P.N;
   state.tents = new Uint8Array(N * N); state.marks = new Uint8Array(N * N); state.undo = [];
   state.hearts = tune.hearts; state.heartsLost = 0; state.hintUsed = false; state.time = 0;
   state.hint = null; state.flash = []; state.phase = 'play'; state.solvedAt = new Array(N).fill(-1);
+  playLog.row(r => { r.a++; });
   boardChanged();
 }
 function checkWin() {
@@ -642,6 +737,11 @@ function checkWin() {
     store.set('level', state.level + 1);
   }
   store.set(state.daily ? 'dsave' : 'save', null);
+  if (!state.daily) store.set('hardRun', P.hard && !P.rest ? store.get('hardRun', 0) + 1 : 0); // O4
+  playLog.row((r, Lg) => {
+    r.w++; if (!r.f) r.f = r.a || 1; r.b = r.b === null ? secs : Math.min(r.b, secs);
+    if (!state.daily) { Lg.solved = (Lg.solved || 0) + 1; Lg.solves.push([P.N, secs]); Lg.solves = Lg.solves.slice(-12); }
+  });
   state.gained = `${state.stars}`;
   for (let k = 0; k < 40; k++) state.sparks.push({ x: L.bx + hash01(k, state.level) * L.bw, y: L.by + hash01(k, 7 + state.level) * L.bw, v: 40 + hash01(k, 3) * 90, t: 0, life: 1 + hash01(k, 5) });
   sfx.win(); events.push({ type: 'win', stars: state.stars });
@@ -673,6 +773,7 @@ function useHint() {
   firstTouch();
   const h = computeHint(); if (!h) return;
   state.hintUsed = true; sfx.hint(); events.push({ type: 'hint', kind: h.kind });
+  playLog.row(r => { r.h++; });
   if (h.kind === 'elim') { pushUndo(); for (const i of h.cells) state.marks[i] = 1; }
   if (h.kind === 'place' && state.marks[h.cells[0]]) { pushUndo(); state.marks[h.cells[0]] = 0; }
   boardChanged(false);
@@ -861,6 +962,22 @@ function iconHouse(x, y, s, c) {
   ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x, y - s * 0.38); ctx.lineTo(x + s * 0.4, y - s * 0.02); ctx.lineTo(x + s * 0.28, y - s * 0.02); ctx.lineTo(x + s * 0.28, y + s * 0.34); ctx.lineTo(x - s * 0.28, y + s * 0.34); ctx.lineTo(x - s * 0.28, y - s * 0.02); ctx.lineTo(x - s * 0.4, y - s * 0.02); ctx.closePath(); ctx.fill();
   ctx.fillStyle = C.woodDark; ctx.fillRect(x - s * 0.08, y + s * 0.08, s * 0.16, s * 0.26);
 }
+function iconChart(x, y, s, c) { // the stats button: three bars on a baseline
+  ctx.fillStyle = c; const bw = s * 0.17, base = y + s * 0.3;
+  for (const [dx, hh] of [[-0.24, 0.3], [0, 0.52], [0.24, 0.72]]) { rr(x + dx * s - bw / 2, base - hh * s, bw, hh * s, s * 0.04); ctx.fill(); }
+  rr(x - s * 0.42, base, s * 0.84, s * 0.07, s * 0.03); ctx.fill();
+}
+/** S2 / O4: a small honest label pill, 'صعبة' (hard) or 'استراحة' (rest), centred at (x, y). */
+function badgeW(kind, h = 40) { setFont(24, 'bold'); ctx.direction = 'rtl'; const w = Math.max(h * 2.2, ctx.measureText(kind === 'rest' ? 'استراحة' : 'صعبة').width + 34); ctx.direction = 'ltr'; return w; }
+function drawBadge(x, y, kind, h = 40) {
+  const label = kind === 'rest' ? 'استراحة' : 'صعبة', w = badgeW(kind, h);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; rr(x - w / 2 + 1, y - h / 2 + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = kind === 'rest' ? '#5f8a4a' : '#a8321f'; rr(x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,235,200,0.45)'; ctx.lineWidth = 1.5; rr(x - w / 2 + 4, y - h / 2 + 4, w - 8, h - 8, h / 2 - 4); ctx.stroke();
+  text(label, x, y + 1, 24, C.cream, 'center', 'bold');
+  return w;
+}
 function drawButton(b, label, icon, on = false, pulse = 0, enabled = true) {
   const press = state && state.btnDown === b;
   const y = b.y + (press ? 3 : 0);
@@ -1018,7 +1135,12 @@ function drawHud() {
   const title = state.daily ? 'لغز اليوم' : `لغز ${state.level}`;
   text(title, W / 2, 48, 44, C.cream, 'center', 'bold');
   if (P) text(`${P.N} × ${P.N}`, W / 2, 98, 28, C.dim);
-  for (let k = 0; k < tune.hearts; k++) drawHeart(668 - k * 58, 152, 52, k < state.hearts);
+  if (P && (P.hard || P.rest)) drawBadge(W / 2 + 122, 98, P.rest ? 'rest' : 'hard'); // S2 / O4: said before the first tap
+  const ra = state.t - state.refundAt;
+  for (let k = 0; k < tune.hearts; k++) {
+    const pop = k === state.hearts - 1 && ra < 0.6 ? 1 + 0.35 * Math.sin(Math.PI * ra / 0.6) : 1; // O3: the heart comes back
+    drawHeart(668 - k * 58, 152, 52 * pop, k < state.hearts);
+  }
   text(fmtTime(state.time), 52, 152, 34, C.cream, 'left', 'bold');
 }
 function drawBanner() {
@@ -1036,9 +1158,11 @@ function drawBanner() {
   ctx.fillStyle = gold ? '#f7e3a6' : '#efdfb4'; rr(x, y, w, h, 18); ctx.fill();
   ctx.strokeStyle = gold ? '#b5801c' : '#8a6a3a'; ctx.lineWidth = 3; ctx.stroke();
   if (gold) iconLantern(x + w - 40, y + h / 2, 52, '#6b4208', false);
-  const lines = wrap(msg, 28, w - (gold ? 110 : 40), 'bold');
+  const tag = !gold && state.ruleCard && state.ruleCard.tag;
+  if (tag) drawBadge(x + w - 70, y + h / 2, tag);
+  const lines = wrap(msg, 28, w - (gold ? 110 : tag ? 170 : 40), 'bold');
   const lh = 36, y0 = y + h / 2 - (lines.length - 1) * lh / 2;
-  lines.slice(0, 2).forEach((ln, k) => text(ln, x + (gold ? w / 2 - 30 : w / 2), y0 + k * lh, 28, '#3a2008', 'center', 'bold'));
+  lines.slice(0, 2).forEach((ln, k) => text(ln, x + (gold ? w / 2 - 30 : tag ? w / 2 - 66 : w / 2), y0 + k * lh, 28, '#3a2008', 'center', 'bold'));
   ctx.restore();
 }
 function drawControls() {
@@ -1048,7 +1172,9 @@ function drawControls() {
   drawButton(B.modeMark, '', null, state.mode === 'mark');
   tentIcon(B.modeTent.x + 62, B.modeTent.y + 44, 70); text('خيمة', B.modeTent.x + 160, B.modeTent.y + 46, 30, state.mode === 'tent' ? '#3a2008' : C.cream, 'center', 'bold');
   markIcon(B.modeMark.x + 62, B.modeMark.y + 44, 70); text('علامة', B.modeMark.x + 160, B.modeMark.y + 46, 30, state.mode === 'mark' ? '#3a2008' : C.cream, 'center', 'bold');
-  drawButton(B.undo, 'تراجع', iconUndo, false, 0, state.undo.length > 0);
+  const refund = state.undo.length > 0 && state.undo[state.undo.length - 1].refund && state.hearts < tune.hearts;
+  drawButton(B.undo, 'تراجع', iconUndo, false, refund ? 0.35 + 0.25 * Math.sin(state.t * 4) : 0, state.undo.length > 0);
+  if (refund) drawHeart(B.undo.x + 26, B.undo.y + 24, 34, true); // O3: undo gives this heart back
   const hintPulse = state.heartsLost > 0 && !state.hintUsed ? 0.3 + 0.3 * Math.sin(state.t * 4) : 0;
   drawButton(B.hint, 'تلميح', (x, y, s, c) => iconLantern(x, y, s, c, true), false, hintPulse);
   drawButton(B.restart, 'إعادة', iconRestart);
@@ -1084,6 +1210,10 @@ const scenes = {
       iconLantern(cells[8][0], cells[8][1] - 10, 120, '#6b4208', true);
       const names = ['خيمة', 'خيمة مخالفة', 'علامة أقدام', 'علامة تلقائية', 'نخلة', 'واحة مكتملة', 'قلب', 'نجمة', 'فانوس التلميح'];
       cells.forEach(([x, y], k) => text(names[k], x, y + 120, 28, '#3a2008', 'center', 'bold'));
+      // round 2: the honest labels and the stats button
+      drawBadge(150, 1060, 'hard'); drawBadge(360, 1060, 'rest');
+      ctx.fillStyle = '#6b4424'; rr(530, 1020, 80, 80, 18); ctx.fill(); iconChart(570, 1060, 50, C.cream);
+      [[150, 'لغز صعب'], [360, 'لغز استراحة'], [570, 'إحصائياتي']].forEach(([x, nm]) => text(nm, x, 1126, 26, '#3a2008', 'center', 'bold'));
     },
   },
   title: {
@@ -1091,14 +1221,16 @@ const scenes = {
       state.t += dt;
       if (pressed('Enter') || pressed('Space')) { goPlay(false); return; }
       if (pressed('KeyD')) goPlay(true);
+      if (pressed('KeyS')) scene = 'stats';
     },
     pointer(ev) {
       if (handleMute(ev)) return;
-      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['start', 'daily', 'home'])] || null; return; }
+      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['start', 'daily', 'home', 'stats'])] || null; return; }
       if (ev.type !== 'up') return;
-      const k = buttonAt(ev, ['start', 'daily', 'home']); state.btnDown = null;
+      const k = buttonAt(ev, ['start', 'daily', 'home', 'stats']); state.btnDown = null;
       if (k === 'start') goPlay(false);
       else if (k === 'daily') goPlay(true);
+      else if (k === 'stats') { sfx.ui(); scene = 'stats'; }
       else if (k === 'home' && location.protocol.startsWith('http')) location.href = '../../';
       else if (!k && ev.y > 300 && ev.y < 800) goPlay(false);
     },
@@ -1120,13 +1252,31 @@ const scenes = {
       drawTent(W / 2 - 20, 640, 300);
       const lvl = store.get('level', 1);
       drawButton(B.start, lvl > 1 ? `تابع: لغز ${lvl}` : 'ابدأ', null, true);
+      const sv = store.get('save', null); // S2: a saved hard puzzle says so before it is opened
+      if (sv && sv.level === lvl && (sv.hard || sv.rest)) drawBadge(B.start.x + B.start.w - 56, B.start.y, sv.rest ? 'rest' : 'hard');
       drawButton(B.daily, 'لغز اليوم', null);
       const bests = store.get('best', {}), sizes = Object.keys(bests).sort();
       if (sizes.length) text('أفضل الأوقات: ' + sizes.map(n => `${n}×${n} ${fmtTime(bests[n])}`).join('  ·  '), W / 2, 1110, 26, C.dim);
       CONTROLS.forEach((c, i) => text(c, W / 2, 1168 + i * 42, 26, C.cream));
       drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
+      drawButton(B.stats, '', iconChart);
+      text('إحصائياتي', B.stats.x + B.stats.w / 2, B.stats.y + B.stats.h + 22, 24, C.dim, 'center', 'bold');
       if (location.protocol.startsWith('http')) drawButton(B.home, '', iconHouse);
     },
+  },
+  stats: { // S1: what this device logged, nothing more
+    update(dt) {
+      state.t += dt;
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('Backspace') || pressed('KeyS')) scene = 'title';
+    },
+    pointer(ev) {
+      if (handleMute(ev)) return;
+      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['back'])] || null; return; }
+      if (ev.type !== 'up') return;
+      const k = buttonAt(ev, ['back']); state.btnDown = null;
+      if (k === 'back') { sfx.ui(); scene = 'title'; }
+    },
+    draw() { drawStats(); drawButton(B.back, 'رجوع', null, true); drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted)); },
   },
   play: {
     update(dt) {
@@ -1263,17 +1413,78 @@ const scenes = {
       ctx.fillStyle = 'rgba(0,0,0,0.4)'; rr(x + 4, y + 10, w, h, 28); ctx.fill();
       ctx.fillStyle = '#efdfb4'; rr(x, y, w, h, 28); ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = 5; ctx.stroke();
       text(state.daily ? 'حللت لغز اليوم' : `حللت لغز ${state.level}`, W / 2, y + 80, 48, '#3a2008', 'center', 'bold');
-      for (let k = 0; k < 3; k++) drawStar(W / 2 + (k - 1) * 120, y + 200, 50, k < state.stars);
-      text(`الوقت ${fmtTime(state.time)}`, W / 2, y + 310, 38, '#3a2008', 'center', 'bold');
-      text(`أفضل وقت ${state.daily ? 'اليوم' : state.P.N + '×' + state.P.N}: ${fmtTime(state.best || 0)}${state.newBest ? ' (جديد)' : ''}`, W / 2, y + 370, 30, '#5a3a18');
-      const why = state.stars === 3 ? 'بلا قلب ضائع ولا تلميح' : state.hintUsed ? 'التلميح يحجب النجمة الثالثة' : 'كل قلب ضائع ينقص نجمة';
-      text(why, W / 2, y + 430, 28, '#5a3a18');
-      if (state.daily) text('عد غدا للغز جديد', W / 2, y + 490, 28, '#5a3a18');
+      if (state.P.hard || state.P.rest) drawBadge(x + w - 66, y + 32, state.P.rest ? 'rest' : 'hard');
+      for (let k = 0; k < 3; k++) drawStar(W / 2 + (k - 1) * 120, y + 190, 50, k < state.stars);
+      text(`الوقت ${fmtTime(state.time)}`, W / 2, y + 290, 38, '#3a2008', 'center', 'bold');
+      text(`أفضل وقت ${state.daily ? 'اليوم' : state.P.N + '×' + state.P.N}: ${fmtTime(state.best || 0)}${state.newBest ? ' (جديد)' : ''}`, W / 2, y + 345, 30, '#5a3a18');
+      const why = state.stars === 3 ? 'بلا خيمة خاطئة ولا تلميح' : state.hintUsed && state.heartsLost === 0 ? 'التلميح يحجب النجمة الثالثة' : 'كل خيمة خاطئة تنقص نجمة';
+      text(why, W / 2, y + 397, 28, '#5a3a18');
+      if (state.daily) text('عد غدا للغز جديد', W / 2, y + 450, 28, '#5a3a18');
+      else wrap(challengeNote(), 26, w - 70, 'bold').slice(0, 2).forEach((ln, k) => text(ln, W / 2, y + 450 + k * 34, 26, '#3a2008', 'center', 'bold')); // O1: never hidden
       drawButton(B.next, state.daily ? 'القائمة' : 'اللغز التالي', null, true);
       drawButton(B.menu, state.daily ? 'العب الألغاز' : 'القائمة', null);
     },
   },
 };
+/** O1: the results card's note on how this puzzle was picked (never hidden). */
+function challengeNote() {
+  const P = state.P;
+  if (P.rest) return 'مستوى التحدي: لغز استراحة أسهل بعد الألغاز الصعبة';
+  if (P.adapt > 0) return 'مستوى التحدي: أعلى، لأن آخر ثلاثة حلول كانت أسرع من الهدف';
+  if (P.adapt < 0) return 'مستوى التحدي: أهدأ، لأن آخر ثلاثة حلول كانت أبطأ من الهدف';
+  if (P.grace > 0) return `مستوى التحدي: عادي، ويبدأ التكيف مع وقتك من اللغز ${state.level + P.grace}`;
+  return `مستوى التحدي: عادي، وهدف هذا الحجم ${fmtTime(targetOf(P.N))}`;
+}
+/** S1: the إحصائياتي panel, read from the local play log. */
+function drawStats() {
+  drawDesert(state.t);
+  text('إحصائياتي', W / 2, 60, 48, C.cream, 'center', 'bold');
+  const x = 30, y = 112, w = W - 60, h = 1040, ink = '#3a2008', soft = '#6a4a26';
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; rr(x + 4, y + 10, w, h, 24); ctx.fill();
+  ctx.fillStyle = '#efdfb4'; rr(x, y, w, h, 24); ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = 4; ctx.stroke();
+  text('محفوظة على هذا الجهاز فقط، بلا إنترنت', W / 2, y + 40, 24, soft, 'center', 'bold');
+  const L = playLog.read(), rows = Object.values(L.rows);
+  const sum = k => rows.reduce((t, r) => t + (r[k] || 0), 0), won = rows.filter(r => r.w > 0);
+  [['ألغاز محلولة', won.length], ['محاولات', sum('a')], ['تلميحات', sum('h')]].forEach(([lab, n], k) => {
+    const tx = x + w - 30 - (k + 1) * 192 - k * 12, ty = y + 76;
+    ctx.fillStyle = '#e2cb93'; rr(tx, ty, 192, 118, 16); ctx.fill(); ctx.strokeStyle = 'rgba(90,55,25,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+    text(String(n), tx + 96, ty + 46, 48, ink, 'center', 'bold'); text(lab, tx + 96, ty + 94, 24, soft, 'center', 'bold');
+  });
+  text(`الفوز من أول محاولة: ${won.filter(r => r.f === 1).length} من ${won.length}`, W / 2, y + 236, 28, ink, 'center', 'bold');
+  const R = x + w - 30, cols = [420, 318, 214, 108];
+  const line = yy => { ctx.strokeStyle = 'rgba(90,55,25,0.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 30, yy); ctx.lineTo(R, yy); ctx.stroke(); };
+  const head = (yy, names) => { names.forEach((nm, k) => k === 0 ? text(nm, R, yy, 24, soft, 'right', 'bold') : text(nm, cols[k - 1], yy, 24, soft, 'center', 'bold')); line(yy + 20); };
+  // by size: solved, best, median of the last 3 solves, target (O1's numbers, in the open)
+  text('حسب الحجم', R, y + 292, 28, ink, 'right', 'bold');
+  head(y + 334, ['الحجم', 'حلول', 'الأفضل', 'آخر 3', 'الهدف']);
+  let n = 0;
+  for (let N = 5; N <= 9; N++) {
+    const rs = rows.filter(r => r.n === N); if (!rs.length) continue;
+    const yy = y + 376 + n * 42, best = rs.filter(r => r.b !== null && r.w > 0).map(r => r.b);
+    const last = L.solves.filter(v => v[0] === N).slice(-3).map(v => v[1]).sort((a, b) => a - b);
+    text(`${N}×${N}`, R, yy, 26, ink, 'right', 'bold');
+    text(String(rs.filter(r => r.w > 0).length), cols[0], yy, 26, ink, 'center');
+    text(best.length ? fmtTime(Math.min(...best)) : '-', cols[1], yy, 26, ink, 'center');
+    text(last.length ? fmtTime(last[(last.length - 1) >> 1]) : '-', cols[2], yy, 26, ink, 'center');
+    text(fmtTime(targetOf(N)), cols[3], yy, 26, soft, 'center');
+    n++;
+  }
+  if (!n) text('لا أرقام بعد: حل لغزا واحدا', W / 2, y + 380, 26, soft, 'center', 'bold');
+  // the latest puzzles, newest first
+  text('آخر الألغاز', R, y + 610, 28, ink, 'right', 'bold');
+  head(y + 652, ['اللغز', 'محاولات', 'فوز', 'الأفضل', 'تلميح']);
+  const recent = rows.slice().sort((a, b) => (b.q || 0) - (a.q || 0)).slice(0, 8);
+  recent.forEach((r, k) => {
+    const yy = y + 696 + k * 42, name = r.lvl ? `لغز ${r.lvl}` : (r.d === dateKey() ? 'لغز اليوم' : 'لغز يومي');
+    text(name, R, yy, 26, ink, 'right', 'bold');
+    if (r.hard || r.rest) { const kind = r.rest ? 'rest' : 'hard'; setFont(26, 'bold'); ctx.direction = 'rtl'; const tw = ctx.measureText(name).width; ctx.direction = 'ltr'; drawBadge(R - tw - 12 - badgeW(kind, 34) / 2, yy, kind, 34); }
+    text(String(r.a), cols[0], yy, 26, ink, 'center');
+    text(String(r.w), cols[1], yy, 26, ink, 'center');
+    text(r.b !== null && r.w > 0 ? fmtTime(r.b) : '-', cols[2], yy, 26, ink, 'center');
+    text(String(r.h), cols[3], yy, 26, ink, 'center');
+  });
+  if (!recent.length) text('العب لغزا، وستظهر أرقامه هنا', W / 2, y + 700, 26, soft, 'center', 'bold');
+}
 function drawHud0() {
   drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
   text(state.daily ? 'لغز اليوم' : `لغز ${state.level}`, W / 2, 48, 44, C.cream, 'center', 'bold');

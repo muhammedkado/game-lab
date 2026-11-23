@@ -143,6 +143,19 @@ try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && Array.isArr
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* no storage */ } }
 function totalStars() { return save.stars.reduce((a, b) => a + (b || 0), 0); }
 
+// ---- Local play log (S1): honest per-level numbers for the owner's playtests, on this device only --
+// An attempt counts from its first camel tap; firstTryWin is 1 when the very first attempt was won.
+const LOG_KEY = 'gamelab:caravan-jam:log';
+let playLog = { v: 1, levels: {} };
+try { const s = JSON.parse(localStorage.getItem(LOG_KEY)); if (s && s.levels && typeof s.levels === 'object') playLog = s; } catch (e) { /* no storage */ }
+function logRec(L) {
+  const k = String(L);
+  return playLog.levels[k] || (playLog.levels[k] = { attempts: 0, wins: 0, stuck: 0, firstTryWin: null, bestTime: null, undos: 0, extraPosts: 0 });
+}
+function logSave() { try { localStorage.setItem(LOG_KEY, JSON.stringify(playLog)); } catch (e) { /* no storage */ } }
+function logClear() { playLog = { v: 1, levels: {} }; logSave(); }
+function fmtTime(s) { const m = Math.floor(s / 60), r = Math.floor(s % 60); return m + ':' + (r < 10 ? '0' : '') + r; }
+
 // ---- Small drawing helpers ----------------------------------------------------------------
 const lerp = (a, b, u) => a + (b - a) * u;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -222,6 +235,7 @@ function drawCamel(cx, cy, ang, len, c, ci, fill, o) {
   const [fur, furL, furD] = big ? FUR.big : FUR.small;
   const ph = o.ph || 0, bob = (o.bob || 0) * c;
   const lw = Math.max(1.2, c * 0.03);
+  const cover = o.cover || 0, coverFull = cover >= 1; // a plain cloth over the saddle hides its colour (C2)
   ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
   if (o.alpha != null) ctx.globalAlpha = o.alpha;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -270,7 +284,7 @@ function drawCamel(cx, cy, ang, len, c, ci, fill, o) {
     ctx.fillStyle = '#1e1008'; ell(hx - g.headLen * 0.06, s * g.headW * 0.38, c * 0.036, c * 0.03); ctx.fill();
     ctx.fillStyle = '#fff'; ell(hx - g.headLen * 0.04, s * g.headW * 0.38 - c * 0.008, c * 0.011, c * 0.011); ctx.fill();
   }
-  ctx.strokeStyle = P.robe; ctx.lineWidth = Math.max(1.5, c * 0.035);
+  ctx.strokeStyle = cover >= 0.5 ? '#8a7350' : P.robe; ctx.lineWidth = Math.max(1.5, c * 0.035);
   ctx.beginPath(); ctx.moveTo(hx + g.headLen * 0.12, -g.headW * 0.48); ctx.lineTo(hx + g.headLen * 0.12, g.headW * 0.48); ctx.stroke();
   // humps and saddle blanket
   const bw = g.bodyW * 1.14;
@@ -291,13 +305,32 @@ function drawCamel(cx, cy, ang, len, c, ci, fill, o) {
     ctx.strokeStyle = P.light; ctx.lineWidth = Math.max(1, c * 0.022); ctx.stroke();
     for (const s of [-1, 1]) blanketPattern(ci, x0 + ins, x0 + bl - ins, s * (bw / 2 - ins / 2), c, P.light);
   };
+  // the plain undyed cloth: rope ties, a stitched hem and one soft fold; slides off by `off`
+  const cloth = (bl, off, a) => {
+    const x0 = g.bodyMid - bl / 2, cw = bw + c * 0.12;
+    ctx.save(); ctx.globalAlpha *= a; ctx.translate(0, off);
+    ctx.strokeStyle = '#8a7350'; ctx.lineWidth = Math.max(1, c * 0.022);
+    for (const fx of [0.25, 0.75]) for (const s of [-1, 1]) {
+      const x = x0 + bl * fx;
+      ctx.beginPath(); ctx.moveTo(x, s * cw * 0.42); ctx.lineTo(x, s * (cw / 2 + c * 0.05)); ctx.stroke();
+      ctx.fillStyle = '#c9b48a'; ell(x, s * (cw / 2 + c * 0.065), c * 0.03, c * 0.03); ctx.fill();
+    }
+    rrect(x0 - c * 0.04, -cw / 2, bl + c * 0.08, cw, c * 0.1);
+    ctx.fillStyle = '#e8dcc2'; ctx.fill(); ctx.strokeStyle = '#8f7a56'; ctx.lineWidth = lw; ctx.stroke();
+    rrect(x0 + c * 0.03, -cw / 2 + c * 0.07, bl - c * 0.06, cw - c * 0.14, c * 0.06);
+    ctx.setLineDash([c * 0.04, c * 0.035]); ctx.strokeStyle = '#a8946e'; ctx.lineWidth = Math.max(1, c * 0.018); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(140,115,80,0.5)'; ctx.lineWidth = Math.max(1, c * 0.025);
+    ctx.beginPath(); ctx.moveTo(x0 + bl * 0.2, -cw * 0.3); ctx.quadraticCurveTo(x0 + bl * 0.5, 0, x0 + bl * 0.8, cw * 0.28); ctx.stroke();
+    ctx.restore();
+  };
   const hump = (x, rx, ry) => {
     const gr = ctx.createRadialGradient(x - rx * 0.2, -ry * 0.25, 1, x, 0, Math.max(rx, ry));
     gr.addColorStop(0, furL); gr.addColorStop(1, fur);
     ctx.fillStyle = gr; ell(x, 0, rx, ry); ctx.fill(); ctx.strokeStyle = furD; ctx.lineWidth = lw * 0.8; ctx.stroke();
   };
+  const bl = g.bodyLen * (big ? 0.52 : 0.62);
   if (big) {
-    blanket(g.bodyLen * 0.52);
+    if (coverFull) cloth(bl, 0, 1); else blanket(bl);
     for (const s of [-1, 1]) {
       const x = g.bodyMid + s * g.bodyLen * 0.34; hump(x, c * 0.22, g.bodyW * 0.36);
       ctx.strokeStyle = furD; ctx.lineWidth = Math.max(1, c * 0.02);
@@ -305,15 +338,16 @@ function drawCamel(cx, cy, ang, len, c, ci, fill, o) {
     }
   } else {
     hump(g.bodyMid, g.bodyLen * 0.38, g.bodyW * 0.4);
-    blanket(g.bodyLen * 0.62);
+    if (coverFull) cloth(bl, 0, 1); else blanket(bl);
   }
   // seats and riders
-  const seats = o.seats || (big ? 6 : 3);
+  const seats = coverFull ? 0 : o.seats || (big ? 6 : 3);
   for (let k = 0; k < seats; k++) {
     const [sx, sy] = seatLocal(len, c, k);
     if (k < fill) drawRider(sx, sy, c, ci);
     else { ctx.fillStyle = P.dark; ell(sx, sy, c * 0.08, c * 0.08); ctx.fill(); ctx.strokeStyle = P.light; ctx.lineWidth = Math.max(1, c * 0.02); ctx.stroke(); }
   }
+  if (cover > 0 && !coverFull) cloth(bl, (1 - cover) * c * 0.75, cover); // the cloth sliding off
   // neck bell
   ctx.fillStyle = '#e9c24a'; ell(g.bodyFront + c * 0.01, 0, c * 0.055, c * 0.055); ctx.fill();
   ctx.strokeStyle = '#7d5c10'; ctx.lineWidth = Math.max(1, c * 0.02); ctx.stroke();
@@ -403,9 +437,30 @@ function drawIcon(kind, x, y, s, col) {
     ctx.beginPath(); ctx.moveTo(-s * 0.42, -s * 0.02); ctx.lineTo(0, -s * 0.4); ctx.lineTo(s * 0.42, -s * 0.02); ctx.stroke();
     rrect(-s * 0.28, -s * 0.06, s * 0.56, s * 0.42, s * 0.04); ctx.fill();
     ctx.fillStyle = '#5a3a24'; rrect(-s * 0.08, s * 0.1, s * 0.16, s * 0.26, s * 0.03); ctx.fill();
+  } else if (kind === 'chart') { // three bars on a base line: the play log
+    ctx.beginPath(); ctx.moveTo(-s * 0.44, s * 0.38); ctx.lineTo(s * 0.44, s * 0.38); ctx.stroke();
+    [[-0.3, 0.3], [0, 0.62], [0.3, 0.44]].forEach(([bx, bh]) => { rrect(s * (bx - 0.1), s * (0.3 - bh), s * 0.2, s * bh, s * 0.04); ctx.fill(); });
   }
   ctx.restore();
 }
+// The honest difficulty label (S2): a red pill with two drawn peaks and the word "صعبة".
+function hardPill(cx, cy, s = 1) {
+  const w = 108 * s, h = 36 * s;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; rrect(cx - w / 2 + 2, cy - h / 2 + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = '#b8321f'; rrect(cx - w / 2, cy - h / 2, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = '#ffe3b0'; ctx.lineWidth = 2.5; ctx.stroke();
+  const px = cx + w / 2 - 20 * s, py = cy + 8 * s;
+  ctx.fillStyle = '#ffe3b0'; ctx.beginPath();
+  ctx.moveTo(px - 13 * s, py); ctx.lineTo(px - 5 * s, py - 15 * s); ctx.lineTo(px, py - 8 * s);
+  ctx.lineTo(px + 4 * s, py - 12 * s); ctx.lineTo(px + 11 * s, py); ctx.closePath(); ctx.fill();
+  text('صعبة', cx - 17 * s, cy + 1, Math.max(24, Math.round(24 * s)), '#fff6e6');
+}
+function crossMark(x, y, s, c) {
+  ctx.strokeStyle = c; ctx.lineWidth = s * 0.2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.36, y - s * 0.36); ctx.lineTo(x + s * 0.36, y + s * 0.36);
+  ctx.moveTo(x + s * 0.36, y - s * 0.36); ctx.lineTo(x - s * 0.36, y + s * 0.36); ctx.stroke();
+}
+function dashMark(x, y, c) { ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x - 11, y); ctx.lineTo(x + 11, y); ctx.stroke(); }
 function woodButton(x, y, w, h, on = true) {
   ctx.fillStyle = 'rgba(0,0,0,0.25)'; rrect(x + 2, y + 4, w, h, 16); ctx.fill();
   const gr = ctx.createLinearGradient(0, y, 0, y + h);
@@ -428,8 +483,11 @@ const BAY_TOP = 864, BAY_HEAD = 1004, LANE_Y = 1040;
 const GATE_X = 630, GATE_HALF = 50, WALL_Y = 1190;
 const Q_ROW1 = 1098, Q_ROW2 = 1154, Q_FRONT_X = 500, Q_GAP = 42, Q_PER_ROW = 12;
 const BTN = { mute: [14, 12, 76, 72], menu: [98, 12, 76, 72], undo: [530, 12, 82, 72], restart: [624, 12, 82, 72] };
-const bayX = slot => 60 + (600 / tune.posts) * (slot + 0.5);
-const postPos = slot => [60 + (600 / tune.posts) * slot + 2, 996];
+// Posts in use now: the config's posts plus the free extra one once it is taken (C1).
+const nPosts = () => tune.posts + (state ? state.extra : 0);
+const bayXn = (slot, n) => 60 + (600 / n) * (slot + 0.5);
+const bayX = slot => bayXn(slot, nPosts());
+const postPos = slot => [60 + (600 / nPosts()) * slot + 2, 996];
 function slotPos(k) {
   if (k < Q_PER_ROW) return [Q_FRONT_X - k * Q_GAP, Q_ROW1];
   if (k < Q_PER_ROW * 2) return [Q_FRONT_X - (Q_PER_ROW - 1) * Q_GAP + (k - Q_PER_ROW) * Q_GAP, Q_ROW2];
@@ -447,8 +505,11 @@ function levelSpec(L) {
   const plan = L === 1 ? 1 : L < tune.chain_from ? 2 : tune.plan_posts;
   const minDepth = L === 1 ? 1 : L === 2 ? 2 : L >= tune.chain_from ? 3 : 2;
   const maxDepth = L === 1 ? 1 : L === 2 ? 2 : 99;
-  return { L, cols, rows, n, colours, nBig, plan, minDepth, maxDepth };
+  const nHidden = L < tune.hidden_from ? 0 : L === tune.hidden_from ? tune.hidden_intro : Math.round(n * tune.hidden_share);
+  return { L, cols, rows, n, colours, nBig, plan, minDepth, maxDepth, nHidden, hard: isHard(L) };
 }
+// S2: the levels meant to be harder, said openly before they start (title tile, banner, HUD).
+function isHard(L) { return L >= tune.hard_from && (L - tune.hard_from) % tune.hard_every === 0; }
 // Each new camel is set down only where its own way out is clear, so leaving in reverse order
 // always works: no camel can ever be locked in for good.
 function placeCamels(sp) {
@@ -484,6 +545,23 @@ function computeBlock(camels, cols, rows, occ) {
     return m;
   });
 }
+// Camels that share a cell edge: when one leaves, a covered neighbour's cloth slides off (C2).
+function neighbours(camels, cols, rows, occ) {
+  return camels.map(cm => {
+    let m = 0;
+    for (const k of cm.cells) {
+      const c = k % cols, r = Math.floor(k / cols);
+      for (const [dx, dy] of DIRS) {
+        const c2 = c + dx, r2 = r + dy;
+        if (c2 < 0 || r2 < 0 || c2 >= cols || r2 >= rows) continue;
+        const o = occ[r2 * cols + c2]; if (o >= 0 && o !== cm.id) m |= 1 << o;
+      }
+    }
+    return m;
+  });
+}
+// A covered camel is seen once any neighbour has left; the mask alone says which have.
+const isCovered = (lv, mask, i) => (lv.hidden >> i & 1) === 1 && !(lv.nbr[i] & ~mask);
 function depthOf(block, n) {
   let mask = (1 << n) - 1, d = 0;
   while (mask) {
@@ -541,8 +619,9 @@ function applyTap(S, i, lv, evs) {
   return { mask, posts, qi };
 }
 function canExit(lv, S, i) { return (S.mask >> i & 1) === 1 && !(lv.block[i] & S.mask); }
-// Depth-first search with a memo; returns a winning tap order or null.
-function solve(lv, limit, start) {
+// Depth-first search with a memo; returns a winning tap order or null. `dead`, when given, is a
+// set shared between searches of one level: states fully searched and found lost.
+function solve(lv, limit, start, dead) {
   const n = lv.camels.length, Q = lv.queue.length, NP = tune.posts;
   const seen = new Set(), path = []; let nodes = 0;
   const firstIdx = (qi, col) => { for (let k = qi; k < Q; k++) if (lv.queue[k] === col) return k; return Q; };
@@ -551,10 +630,11 @@ function solve(lv, limit, start) {
     if (S.posts.length >= NP) return false;
     if (++nodes > limit) return false;
     const key = S.mask + '|' + S.qi + '|' + S.posts.map(p => p.id + ':' + p.fill).join(',');
-    if (seen.has(key)) return false;
+    if (seen.has(key) || (dead && dead.has(key))) return false;
     seen.add(key);
     const cand = [];
-    for (let i = 0; i < n; i++) if (canExit(lv, S, i)) cand.push([i, firstIdx(S.qi, lv.camels[i].colour)]);
+    // The proof never taps a covered camel: a win always exists without guessing (C2).
+    for (let i = 0; i < n; i++) if (canExit(lv, S, i) && !isCovered(lv, S.mask, i)) cand.push([i, firstIdx(S.qi, lv.camels[i].colour)]);
     cand.sort((a, b) => a[1] - b[1]);
     for (const [i] of cand) {
       path.push(i);
@@ -562,6 +642,7 @@ function solve(lv, limit, start) {
       path.pop();
       if (nodes > limit) return false;
     }
+    if (dead) dead.add(key); // every move from here was searched to the end and lost
     return false;
   }
   const ok = rec(start || { mask: (1 << n) - 1, posts: [], qi: 0 });
@@ -573,32 +654,79 @@ function seatsMatch(lv) {
   lv.queue.forEach(c => { trav[c]++; });
   return seats.every((v, i) => v === trav[i]);
 }
-function dealLevel(L) {
-  const base = levelSpec(L);
-  seed = (Math.imul(Number(params.get('seed')) || CONFIG.seed, 7919) + L * 104729) | 0;
-  for (let attempt = 0; attempt < 600; attempt++) {
-    const sp = attempt < 400 ? base : Object.assign({}, base, { minDepth: 1, maxDepth: 99 }); // fallback keeps the solver check
-    const g = placeCamels(sp); if (!g) continue;
-    const block = computeBlock(g.camels, sp.cols, sp.rows, g.occ);
-    const depth = depthOf(block, sp.n);
-    if (depth < sp.minDepth || depth > sp.maxDepth) continue;
-    if (L === 2 && block.filter(b => b).length > 2) continue;
-    const list = []; for (let i = 0; i < sp.n; i++) list.push(i % sp.colours);
-    for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
-    g.camels.forEach((c, i) => { c.colour = list[i]; c.seats = c.len === 3 ? tune.seats_big : tune.seats_small; });
-    const order = exitOrder(block, sp.n);
-    const queue = makeQueue(g.camels, order, sp.plan);
-    const lv = { L, cols: sp.cols, rows: sp.rows, camels: g.camels, occ: Array.from(g.occ), block, queue, depth, colours: sp.colours };
-    if (!seatsMatch(lv)) continue;
-    const res = solve(lv, tune.solver_nodes);
-    if (!res.ok) continue;
-    lv.solution = res.path; lv.solverNodes = res.nodes; lv.attempts = attempt + 1;
-    const cell = Math.min((AV.x1 - AV.x0) / sp.cols, (AV.y1 - AV.y0) / sp.rows, tune.cell_max);
-    lv.geo = { cell, gx: (AV.x0 + AV.x1) / 2 - cell * sp.cols / 2, gy: (AV.y0 + AV.y1) / 2 - cell * sp.rows / 2 };
-    events.push({ type: 'dealt', level: L, camels: sp.n, travellers: queue.length, attempts: attempt + 1, solverNodes: res.nodes });
-    return lv;
+// Covered camels are chosen so the dealer's own way out sees each one before it is its turn:
+// some neighbour leaves earlier in that order.
+function pickHidden(order, nbr, k) {
+  if (k <= 0) return 0;
+  const pos = []; order.forEach((id, j) => { pos[id] = j; });
+  const ok = order.filter(id => order.some(o => (nbr[id] >> o & 1) && pos[o] < pos[id]));
+  for (let i = ok.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [ok[i], ok[j]] = [ok[j], ok[i]]; }
+  let m = 0; ok.slice(0, k).forEach(id => { m |= 1 << id; });
+  return m;
+}
+// Traps: along the proven way out, the free (uncovered) taps after which the level can no
+// longer be won. More traps = more ways to go wrong = a harder level, measured, not guessed.
+// A search that runs out of budget counts as a trap; the whole count stops at tune.trap_nodes.
+function trapCount(lv) {
+  let S = { mask: (1 << lv.camels.length) - 1, posts: [], qi: 0 }, n = 0, spent = 0;
+  const dead = new Set();
+  for (const m of lv.solution) {
+    for (let i = 0; i < lv.camels.length && spent < tune.trap_nodes; i++) {
+      if (i === m || !canExit(lv, S, i) || isCovered(lv, S.mask, i)) continue;
+      const T = applyTap(S, i, lv);
+      if (T.qi >= lv.queue.length) continue;
+      if (T.posts.length >= tune.posts) { n++; continue; }
+      const r = solve(lv, 1500, T, dead); spent += r.nodes; if (!r.ok) n++;
+    }
+    S = applyTap(S, m, lv);
   }
-  throw new Error('dealer found no solvable level ' + L);
+  return n;
+}
+// A hard level (S2) compares several solvable deals and keeps the one with the most traps; it
+// keeps looking (up to three times as many) while the best one has none.
+function dealLevel(L) {
+  const base = levelSpec(L), want = base.hard ? Math.max(1, tune.hard_candidates) : 1;
+  seed = (Math.imul(Number(params.get('seed')) || CONFIG.seed, 7919) + L * 104729) | 0;
+  let best = null, found = 0, tried = 0;
+  const more = () => found < want || (want > 1 && best && !best.traps && found < want * 3);
+  for (let attempt = 0; attempt < 600 && more(); attempt++) {
+    tried = attempt + 1;
+    const lv = dealOnce(L, base, attempt); if (!lv) continue;
+    found++;
+    if (want > 1) lv.traps = trapCount(lv);
+    if (!best || (lv.traps || 0) > (best.traps || 0)) best = lv;
+  }
+  if (!best) throw new Error('dealer found no solvable level ' + L);
+  best.attempts = tried; best.candidates = found; best.hard = base.hard;
+  const cell = Math.min((AV.x1 - AV.x0) / best.cols, (AV.y1 - AV.y0) / best.rows, tune.cell_max);
+  best.geo = { cell, gx: (AV.x0 + AV.x1) / 2 - cell * best.cols / 2, gy: (AV.y0 + AV.y1) / 2 - cell * best.rows / 2 };
+  let nh = 0; for (let i = 0; i < best.camels.length; i++) if (best.hidden >> i & 1) nh++;
+  events.push({ type: 'dealt', level: L, camels: best.camels.length, travellers: best.queue.length, attempts: tried, solverNodes: best.solverNodes, hard: base.hard, candidates: found, traps: best.traps, hidden: nh });
+  return best;
+}
+function dealOnce(L, base, attempt) {
+  const sp = attempt < 400 ? base : Object.assign({}, base, { minDepth: 1, maxDepth: 99 }); // fallback keeps the solver check
+  const g = placeCamels(sp); if (!g) return null;
+  const block = computeBlock(g.camels, sp.cols, sp.rows, g.occ);
+  const depth = depthOf(block, sp.n);
+  if (depth < sp.minDepth || depth > sp.maxDepth) return null;
+  if (L === 2 && block.filter(b => b).length > 2) return null;
+  const list = []; for (let i = 0; i < sp.n; i++) list.push(i % sp.colours);
+  for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+  g.camels.forEach((c, i) => { c.colour = list[i]; c.seats = c.len === 3 ? tune.seats_big : tune.seats_small; });
+  const order = exitOrder(block, sp.n);
+  const queue = makeQueue(g.camels, order, sp.plan);
+  const nbr = neighbours(g.camels, sp.cols, sp.rows, g.occ);
+  const hidden = pickHidden(order, nbr, sp.nHidden);
+  const lv = { L, cols: sp.cols, rows: sp.rows, camels: g.camels, occ: Array.from(g.occ), block, queue, depth, colours: sp.colours, nbr, hidden };
+  if (!seatsMatch(lv)) return null;
+  // Never a level whose first move must be a guess: some free camel is uncovered at the start.
+  const full = (1 << sp.n) - 1;
+  if (hidden && !g.camels.some(c => !(block[c.id] & full) && !isCovered(lv, full, c.id))) return null;
+  const res = solve(lv, tune.solver_nodes);
+  if (!res.ok) return null;
+  lv.solution = res.path; lv.solverNodes = res.nodes;
+  return lv;
 }
 
 // ---- Paths for walking camels -------------------------------------------------------------
@@ -654,6 +782,9 @@ function startLevel(L) {
     vc: [], tr: [], qv: 0, lastBoard: -9, postFree: [], busyUntil: 0,
     fx: [], parts: [], msg: '', msgT: -9, flashPostsT: -9, blockLine: null,
     cursor: -1, kbd: false, tapped: false, bannerT: 0, won: false, winT: 0, prevBest: 0, hint: -1,
+    extra: 0, extraLeft: tune.extra_posts, extraT: -9, // C1: the free extra post
+    revealed: ((1 << lv.camels.length) - 1) & ~lv.hidden, // C2: camels whose colour has been seen (only grows)
+    counted: false, firstTry: false, // S1: an attempt is logged from its first camel tap
   };
   settle();
   const free = lv.camels.filter(c => canExit(lv, state.S, c.id));
@@ -665,13 +796,13 @@ function startLevel(L) {
 // Rebuild the picture from the rules state at once (start, undo, restart).
 function settle() {
   const lv = state.lv, S = state.S, t = state.t;
-  state.vc = lv.camels.map((c, i) => ({ walk: null, leave: null, slot: -1, parked: false, gone: false, fillBase: 0, shakeT: -9, flashT: -9 }));
+  state.vc = lv.camels.map((c, i) => ({ walk: null, leave: null, slot: -1, parked: false, gone: false, fillBase: 0, shakeT: -9, flashT: -9, revealT: -9 }));
   lv.camels.forEach((c, i) => { if (!(S.mask >> i & 1)) state.vc[i].gone = true; });
   S.posts.forEach(p => { const v = state.vc[p.id]; v.gone = false; v.parked = true; v.slot = p.slot; v.fillBase = p.fill; });
   state.tr = lv.queue.map((col, k) => ({ col, var: Math.floor(hash(k, lv.L * 31) * 3), x: null, y: null, startT: null, endT: null, camel: -1, seat: 0, done: k < S.qi, fx0: 0, fy0: 0, ang: 0 }));
   state.qv = S.qi;
   for (let k = S.qi; k < Math.min(lv.queue.length, S.qi + 26); k++) { const p = slotPos(k - S.qi); state.tr[k].x = p[0]; state.tr[k].y = p[1]; }
-  state.lastBoard = t - 1; state.postFree = new Array(tune.posts).fill(t - 1); state.busyUntil = t; state.fx = [];
+  state.lastBoard = t - 1; state.postFree = new Array(nPosts()).fill(t - 1); state.busyUntil = t; state.fx = [];
 }
 function leaveTimeTo(v, target) { // seconds after a full camel starts leaving until its head has gone `target` px
   const D = v.leave.path.total - v.leave.s0, dur = v.leave.t1 - v.leave.t0;
@@ -685,8 +816,9 @@ function schedule(evs) {
     const v = state.vc[ev.id], cm = lv.camels[ev.id];
     if (ev.type === 'post') {
       const w = walkPath(ev.id, ev.slot), d = Math.max(0.45, w.path.total / tune.walk_speed);
-      const t1 = Math.max(t + d, state.postFree[ev.slot] + 0.05);
-      v.walk = Object.assign(w, { t0: t1 - d, t1 }); v.slot = ev.slot;
+      const t0 = clearWalkStart(ev.id, w, d, Math.max(t + d, state.postFree[ev.slot] + 0.05) - d), t1 = t0 + d;
+      v.walk = Object.assign(w, { t0, t1 }); v.slot = ev.slot;
+      revealAround(ev.id, t0);
       state.fx.push({ t: t1, k: 'park', x: bayX(ev.slot), y: BAY_HEAD - 20 });
       state.busyUntil = Math.max(state.busyUntil, t1);
     } else if (ev.type === 'board') {
@@ -710,6 +842,57 @@ function schedule(evs) {
     }
   }
 }
+// ---- C3: camels on the walkway queue one behind the other -----------------------------------
+// A camel's body as a segment (tail to front) and its half width, at time tau of its walk.
+function walkSeg(i, w, tau) {
+  const lv = state.lv, cm = lv.camels[i], gc = lv.geo.cell, bc = tune.bay_cell;
+  const u = clamp((tau - w.t0) / (w.t1 - w.t0), 0, 1), s = w.s0 + (w.path.total - w.s0) * easeInOut(u);
+  const cell = s <= w.sExit ? gc : lerp(gc, bc, clamp((s - w.sExit) / 170, 0, 1));
+  return { a: pathAt(w.path, s - cm.len * cell), b: pathAt(w.path, s), hw: cell * 0.4, inYard: s - cm.len * cell < w.sExit };
+}
+function gridSeg(i) {
+  const q = gridGeom(i), c = state.lv.geo.cell;
+  return { a: [q.fx - q.dx * q.L, q.fy - q.dy * q.L], b: [q.fx, q.fy], hw: c * 0.4 };
+}
+function segDist(p, q, r, s) { // shortest distance between segments pq and rs
+  const d = (a, b, c) => { const vx = b[0] - a[0], vy = b[1] - a[1], l = vx * vx + vy * vy || 1, u = clamp(((c[0] - a[0]) * vx + (c[1] - a[1]) * vy) / l, 0, 1); return Math.hypot(c[0] - a[0] - vx * u, c[1] - a[1] - vy * u); };
+  const o = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+  if (o(p, q, r) * o(p, q, s) < 0 && o(r, s, p) * o(r, s, q) < 0) return 0;
+  return Math.min(d(p, q, r), d(p, q, s), d(r, s, p), d(r, s, q));
+}
+// The earliest start from t0 at which camel i's walk never touches another camel that is walking
+// to the posts, or (while i is still in its own lane) one waiting in the courtyard for its turn.
+function clearWalkStart(i, w, d, t0) {
+  const others = state.vc.map((v, j) => j).filter(j => j !== i && state.vc[j].walk && state.vc[j].walk.t1 > t0);
+  if (!others.length) return t0;
+  const hit = start => {
+    const me = Object.assign({}, w, { t0: start, t1: start + d });
+    for (let tau = start; tau <= start + d + 1e-6; tau += 1 / 40) {
+      const A = walkSeg(i, me, tau);
+      for (const j of others) {
+        const wj = state.vc[j].walk; if (tau >= wj.t1 || (tau < wj.t0 && !A.inYard)) continue;
+        const B = tau < wj.t0 ? gridSeg(j) : walkSeg(j, wj, tau);
+        if (segDist(A.a, A.b, B.a, B.b) < A.hw + B.hw + tune.walk_gap) return true;
+      }
+    }
+    return false;
+  };
+  for (let k = 0; k < 400 && hit(t0); k++) t0 += 1 / 30;
+  return t0;
+}
+// C2: when camel i leaves, covered neighbours show their colour as it starts to walk.
+function revealAround(i, when) {
+  const lv = state.lv;
+  if (!(state.revealed >> i & 1)) { state.revealed |= 1 << i; state.vc[i].revealT = state.t; }
+  for (let h = 0; h < lv.camels.length; h++) {
+    if ((lv.nbr[i] >> h & 1) && !(state.revealed >> h & 1)) { state.revealed |= 1 << h; state.vc[h].revealT = when + 0.05; events.push({ type: 'reveal', id: h }); }
+  }
+}
+function coverOf(i) { // 1 covered, 0 open; in between while the cloth slides off
+  if (!(state.lv.hidden >> i & 1)) return 0;
+  if (!(state.revealed >> i & 1)) return 1;
+  return clamp(1 - (state.t - state.vc[i].revealT) / tune.reveal_time, 0, 1);
+}
 function toast(s) { state.msg = s; state.msgT = state.t; }
 function doTap(i) {
   const lv = state.lv, S = state.S;
@@ -730,7 +913,11 @@ function doTap(i) {
     toast('الطريق مسدود'); sfx.blocked(); events.push({ type: 'blocked', id: i });
     return;
   }
-  if (S.posts.length >= tune.posts) { toast('المرابط ممتلئة'); state.flashPostsT = state.t; sfx.blocked(); return; }
+  if (S.posts.length >= nPosts()) { toast('المرابط ممتلئة'); state.flashPostsT = state.t; sfx.blocked(); return; }
+  if (!state.counted) { // S1: the first tap makes this an attempt
+    const r = logRec(state.level); state.counted = true; state.firstTry = r.attempts === 0;
+    r.attempts++; if (state.firstTry) r.firstTryWin = 0; logSave();
+  }
   state.hist.push(JSON.stringify(S));
   const evs = [];
   state.S = applyTap(S, i, lv, evs);
@@ -738,12 +925,24 @@ function doTap(i) {
   sfx.tap(); events.push({ type: 'tap', id: i });
   const S2 = state.S;
   if (S2.qi >= lv.queue.length) state.pending = 'win';
-  else if (S2.posts.length >= tune.posts || !lv.camels.some(c => canExit(lv, S2, c.id))) state.pending = 'stuck';
+  else if (S2.posts.length >= nPosts() || !lv.camels.some(c => canExit(lv, S2, c.id))) state.pending = 'stuck';
+}
+// C1: the free extra post, once per level, offered on the stuck screen.
+function canTakeExtra() { return state.extraLeft > 0 && state.S.posts.length >= nPosts(); }
+function takeExtra() {
+  if (!canTakeExtra()) return false;
+  state.extra++; state.extraLeft--; state.extraT = state.t; state.postFree.push(state.t - 1);
+  state.pending = ''; scene = 'play'; bgKey = '';
+  const r = logRec(state.level); r.extraPosts++; logSave();
+  sfx.park(); tone(784, 0.12, 'triangle', 0.2, 0.08); toast('عمود إضافي: هدية مجانية');
+  events.push({ type: 'extra', level: state.level });
+  return true;
 }
 function doUndo() {
   if (!state.hist.length) { toast('لا شيء للتراجع'); return false; }
   if (state.undos <= 0) { toast('انتهت مرات التراجع'); return false; }
   state.S = JSON.parse(state.hist.pop()); state.undos--; state.undosUsed++;
+  { const r = logRec(state.level); r.undos++; logSave(); }
   state.pending = ''; state.parts = []; settle(); sfx.undo(); events.push({ type: 'undo' });
   scene = 'play'; return true;
 }
@@ -757,6 +956,9 @@ function finishLevel() {
   if (L >= tune.levels) save.done = true;
   persist();
   state.score = totalStars(); state.gained = `المرحلة ${L}: ${stars} نجوم`;
+  const r = logRec(L); r.wins++; if (state.firstTry) r.firstTryWin = 1;
+  const secs = Math.round(state.t * 10) / 10; if (r.bestTime == null || secs < r.bestTime) r.bestTime = secs;
+  logSave();
   state.won = true; scene = 'results'; sfx.win();
   for (let k = 0; k < 40; k++) state.parts.push({ x: W / 2, y: 470, vx: (rng() - 0.5) * 700, vy: -rng() * 600 - 100, r: 5 + rng() * 6, life: 1.6, max: 1.6, col: PAL[k % 5].robe, g: 700 });
   events.push({ type: 'win', level: L, stars });
@@ -790,7 +992,10 @@ function trainPose(path, s, len, cell, phase) {
   return { x: (h[0] + tl[0]) / 2, y: (h[1] + tl[1]) / 2, ang: Math.atan2(h[1] - tl[1], h[0] - tl[0]), cell, phase, walk: s / (cell * 0.35) };
 }
 function parkPose(i) {
-  const cm = state.lv.camels[i], bc = tune.bay_cell, bx = bayX(state.vc[i].slot);
+  const cm = state.lv.camels[i], bc = tune.bay_cell, slot = state.vc[i].slot;
+  let bx = bayX(slot);
+  const ue = (state.t - state.extraT) / 0.45; // the bays make room for the extra post: parked camels slide over
+  if (state.extra && ue < 1) bx = lerp(bayXn(slot, nPosts() - 1), bx, easeInOut(clamp(ue, 0, 1)));
   return { x: bx, y: BAY_HEAD - cm.len * bc / 2, ang: Math.PI / 2, cell: bc, phase: 'park' };
 }
 function gridPose(i) {
@@ -879,7 +1084,7 @@ function paintBackground(lv) {
   for (let x = 70; x < GATE_X - 20; x += 46) { ell(x, LANE_Y - 7, 4, 3); ctx.fill(); ell(x + 12, LANE_Y + 8, 4, 3); ctx.fill(); }
   for (let y = LANE_Y + 30; y < WALL_Y; y += 40) { ell(GATE_X - 8, y, 3, 4); ctx.fill(); ell(GATE_X + 8, y + 14, 3, 4); ctx.fill(); }
   // bays: straw mats between rope rails
-  const NP = tune.posts, bw = 600 / NP;
+  const NP = nPosts(), bw = 600 / NP;
   for (let i = 0; i < NP; i++) {
     const x0 = 60 + bw * i;
     ctx.fillStyle = '#e4c987'; rrect(x0 + 12, BAY_TOP + 4, bw - 24, BAY_HEAD - BAY_TOP + 6, 16); ctx.fill();
@@ -956,7 +1161,7 @@ function drawGateFront() {
 
 // ---- Drawing the play scene ----------------------------------------------------------------
 function drawPlay() {
-  const lv = state.lv, S = state.S, t = state.t, NP = tune.posts;
+  const lv = state.lv, S = state.S, t = state.t, NP = nPosts();
   drawBackground('lv' + lv.L + ':' + NP, lv);
   // posts glow amber when all but one are taken, red when all are
   const taken = S.posts.length, flashP = t - state.flashPostsT < 0.6;
@@ -987,9 +1192,10 @@ function drawPlay() {
     }
     const free = ph === 'grid' && canExit(lv, S, i) && !state.pending;
     const flash = t - v.flashT < 0.6 ? 0.55 * (1 - (t - v.flashT) / 0.6) * (0.5 + 0.5 * Math.sin((t - v.flashT) * 30)) : 0;
+    const waiting = ph === 'grid' && v.walk && t < v.walk.t0; // tapped, waiting for the walkway or its post (C3)
     drawCamel(p.x, p.y, p.ang, cm.len, p.cell, cm.colour, v.fillBase + fills[i], {
       ph: i * 1.7, bob: free ? Math.sin(t * 4 + i) * 0.035 : 0, walk: ph === 'walk' || ph === 'leave' ? p.walk : null,
-      flash, seats: cm.seats,
+      flash, seats: cm.seats, cover: coverOf(i), glow: waiting ? `rgba(255,214,90,${0.45 + 0.3 * Math.sin(t * 7)})` : null,
     });
   });
   // keyboard cursor
@@ -1029,7 +1235,7 @@ const TIPS = {
   3: 'لون ثالث: اقرأ الطابور قبل أن تضغط',
   4: 'سلاسل أعمق: لا تشغل المرابط بلون لا يُطلب',
   5: 'الجمل الكبير بسنامين يحمل ستة مسافرين',
-  6: 'لون رابع يدخل الساحة',
+  6: 'جمال مغطّاة: يظهر لونها حين يخرج جارها',
   7: 'ساحة واسعة: خطّط للمرابط الأربعة',
   8: 'ساحة كاملة وأربعة ألوان',
   9: 'خمسة ألوان: انظر بعيداً في الطابور',
@@ -1042,6 +1248,7 @@ function drawBanner() {
   text(TIPS[L] || 'خطّط قبل أن تضغط', W / 2, 916, 30, '#fff2d6');
   text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, 962, 26, '#bfe8a8');
   checkMark(W / 2 + 178, 962, 26, '#8fd67a');
+  if (state.lv.hard) hardPill(W / 2, 878, 1.1); // S2: said before the level starts
 }
 function drawQueue() {
   const t = state.t, lv = state.lv, Q = lv.queue.length;
@@ -1077,7 +1284,8 @@ function drawHud() {
   ctx.strokeStyle = '#fff2d6'; ctx.lineWidth = 2; ctx.stroke();
   text(String(state.undos), b.undo[0] + 70, b.undo[1] + 15, 22, '#fff');
   woodButton(...b.restart); drawIcon('restart', b.restart[0] + 41, b.restart[1] + 36, 46, '#fff2d6');
-  text(`المرحلة ${lv.L}`, 352, 36, 34, '#fff2d6');
+  text(`المرحلة ${lv.L}`, lv.hard ? 388 : 352, 36, 34, '#fff2d6');
+  if (lv.hard) hardPill(244, 36, 1);
   const left = lv.queue.length - state.qv;
   text(`مسافرون ينتظرون: ${left}`, 352, 74, 24, '#e6c99a', 'center', 600);
 }
@@ -1092,7 +1300,38 @@ function panel(y0, h) {
   ctx.strokeStyle = '#c89a5a'; ctx.lineWidth = 2; rrect(64, y0 + 14, 592, h - 28, 22); ctx.stroke();
 }
 const OVER_BTNS = { restart: [130, 800, 460, 104], undo: [130, 922, 460, 96] };
+const OFFER_BTNS = { extra: [130, 748, 460, 108], undo: [130, 886, 460, 88], restart: [130, 990, 460, 88] };
+// A drawn loading post with a plus: the free extra post (C1).
+function drawPostPlus(x, y, s) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.fillStyle = '#7b5230'; ell(0, 6, 15, 15); ctx.fill(); ctx.strokeStyle = '#3e2612'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.strokeStyle = '#a87a4c'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(0, 6, 9, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = '#fff3d6'; ell(17, -12, 13, 13); ctx.fill(); ctx.strokeStyle = '#1f6a33'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.strokeStyle = '#1f6a33'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(10, -12); ctx.lineTo(24, -12); ctx.moveTo(17, -19); ctx.lineTo(17, -5); ctx.stroke();
+  ctx.restore();
+}
+function drawOffer() { // the first time the posts fill up in a level: a free extra post
+  drawPlay();
+  panel(330, 780);
+  text('المرابط ممتلئة', W / 2, 400, 54, '#8c2219');
+  const front = state.tr[state.S.qi];
+  if (front) {
+    text(`أول مسافر يريد جملاً ${COLOUR_ADJ[front.col]}`, W / 2, 470, 32, '#4a2c14');
+    text('ولا جمل بلونه عند المرابط', W / 2, 516, 32, '#4a2c14');
+    ctx.fillStyle = 'rgba(120,80,40,0.15)'; ell(W / 2, 622, 56, 56); ctx.fill();
+    drawTraveller(W / 2, 622, front.col, front.var, -Math.PI / 2, 2.1, 0);
+  }
+  text('خذ عموداً إضافياً مجاناً، مرة في كل مرحلة', W / 2, 710, 28, '#2f6a2a');
+  bigButton(...OFFER_BTNS.extra, 'عمود إضافي', '#2f8a46');
+  drawPostPlus(OFFER_BTNS.extra[0] + 400, OFFER_BTNS.extra[1] + 56, 1.35);
+  const canUndo = state.undos > 0 && state.hist.length > 0;
+  if (canUndo) bigButton(...OFFER_BTNS.undo, `تراجع (${state.undos})`, '#8a5a2a');
+  else text('لا تراجع متبقٍ', W / 2, OFFER_BTNS.undo[1] + 44, 28, '#6a4a2a');
+  bigButton(...OFFER_BTNS.restart, 'أعد المرحلة', '#8a5a2a');
+}
 function drawOver() {
+  if (canTakeExtra()) { drawOffer(); return; }
   drawPlay();
   panel(360, 690);
   text('القافلة عالقة', W / 2, 440, 56, '#8c2219');
@@ -1124,11 +1363,12 @@ function drawResults() {
   text(state.stars > state.prevBest ? 'أفضل نتيجة جديدة!' : `أفضل نتيجة: ${best} من 3`, W / 2, 680, 30, '#8a4a10');
   text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : `التراجع المستعمل: ${state.undosUsed}`, W / 2, 736, 28, '#4a2c14', 'center', 600);
   bigButton(...RES_BTNS.next, last ? 'القائمة' : 'المرحلة التالية', '#2f8a46');
+  if (!last && isHard(L + 1)) hardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 64, RES_BTNS.next[1], 1); // S2: the next one is hard
   bigButton(...RES_BTNS.again, 'أعد هذه المرحلة', '#8a5a2a');
 }
 
 // ---- Title and figures -------------------------------------------------------------------------
-const TITLE_BTNS = { start: [150, 560, 420, 116], home: [14, 12, 76, 72], mute: [630, 12, 76, 72] };
+const TITLE_BTNS = { start: [150, 560, 420, 116], home: [14, 12, 76, 72], mute: [630, 12, 76, 72], stats: [438, 12, 182, 72] };
 const levelBtn = i => [62 + (i % 5) * 122, 760 + Math.floor(i / 5) * 116, 106, 100];
 function drawTitle() {
   drawBackground('title', null);
@@ -1145,14 +1385,69 @@ function drawTitle() {
   for (let i = 0; i < tune.levels; i++) {
     const [x, y, w, h] = levelBtn(i), open = i + 1 <= (save.unlocked || 1);
     woodButton(x, y, w, h, open);
-    text(String(i + 1), x + w / 2, y + 38, 36, open ? '#fff2d6' : '#9c8a72');
-    for (let k = 0; k < 3; k++) drawStar(x + w / 2 + (k - 1) * 26, y + 76, 11, k < (save.stars[i] || 0));
+    text(String(i + 1), x + w / 2, y + 40, 36, open ? '#fff2d6' : '#9c8a72');
+    for (let k = 0; k < 3; k++) drawStar(x + w / 2 + (k - 1) * 26, y + 77, 11, k < (save.stars[i] || 0));
+    if (isHard(i + 1)) hardPill(x + w / 2, y + 3, 0.9); // S2: hard levels say so on their tile
   }
   ctx.fillStyle = 'rgba(30,15,5,0.6)'; rrect(30, 1000, 660, 210, 24); ctx.fill();
   CONTROLS.forEach((c, i) => text(c, W / 2, 1036 + i * 46, i < 2 ? 28 : 26, i < 2 ? '#fff2d6' : '#e6c99a', 'center', i < 2 ? 700 : 600));
   text(`نجومك: ${totalStars()} من ${tune.levels * 3}`, W / 2, 1244, 26, '#e6c99a', 'center', 600);
   if (location.protocol.startsWith('http')) { woodButton(...TITLE_BTNS.home); drawIcon('home', TITLE_BTNS.home[0] + 38, TITLE_BTNS.home[1] + 36, 46, '#fff2d6'); }
   woodButton(...TITLE_BTNS.mute); drawIcon(muted ? 'mute' : 'sound', TITLE_BTNS.mute[0] + 38, TITLE_BTNS.mute[1] + 36, 44, '#fff2d6');
+  const sb = TITLE_BTNS.stats; // S1: the play log
+  woodButton(...sb); drawIcon('chart', sb[0] + sb[2] - 30, sb[1] + 36, 38, '#fff2d6');
+  text('إحصائياتي', sb[0] + 64, sb[1] + 38, 26, '#fff2d6');
+}
+// ---- S1: the play log panel, "إحصائياتي" -------------------------------------------------------
+const STATS_BTNS = { back: [372, 1060, 300, 96], clear: [48, 1060, 300, 96] };
+let statsClearT = -9; // a second tap on "clear" within 3 seconds wipes the log
+function drawStats() {
+  drawBackground('title', null);
+  ctx.fillStyle = 'rgba(20,10,4,0.6)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(28, 112, 672, 1080, 30); ctx.fill();
+  const gr = ctx.createLinearGradient(0, 104, 0, 1184); gr.addColorStop(0, '#f6e6c2'); gr.addColorStop(1, '#e8cf9e');
+  ctx.fillStyle = gr; rrect(24, 104, 672, 1080, 30); ctx.fill();
+  ctx.strokeStyle = '#8a5a2a'; ctx.lineWidth = 5; ctx.stroke();
+  ctx.strokeStyle = '#c89a5a'; ctx.lineWidth = 2; rrect(38, 118, 644, 1052, 22); ctx.stroke();
+  drawIcon('chart', W / 2 + 128, 166, 44, '#8a5a2a');
+  text('إحصائياتي', W / 2 - 20, 168, 48, '#4a2c14');
+  text('سجل على هذا الجهاز فقط، لا يُرسل إلى أي مكان', W / 2, 218, 24, '#6a4a2a', 'center', 600);
+  const recs = []; let A = 0, Wn = 0, St = 0, F = 0, Fp = 0;
+  for (let L = 1; L <= tune.levels; L++) {
+    const r = playLog.levels[String(L)] || null; recs.push(r);
+    if (!r) continue;
+    A += r.attempts; Wn += r.wins; St += r.stuck;
+    if (r.firstTryWin != null) { Fp++; if (r.firstTryWin === 1) F++; }
+  }
+  text(`محاولات: ${A} · فوز: ${Wn} · عالقة: ${St}`, W / 2, 262, 28, '#4a2c14');
+  text(`فوز من أول محاولة: ${F} من ${Fp}`, W / 2, 302, 28, '#4a2c14');
+  // the table, right to left: level, attempts, wins, first attempt, best time, undos, extra posts
+  const heads = [['مرحلة'], ['محاولات'], ['فوز'], ['أول', 'محاولة'], ['أفضل', 'وقت'], ['تراجع'], ['عمود', 'إضافي']];
+  const cw = 632 / heads.length, cx = k => 676 - cw * (k + 0.5);
+  ctx.fillStyle = 'rgba(138,90,42,0.18)'; rrect(44, 330, 632, 70, 12); ctx.fill();
+  heads.forEach((h, k) => h.forEach((w, j) => text(w, cx(k), h.length === 1 ? 366 : 350 + j * 30, 24, '#5a3416')));
+  const RH = 56, y0 = 430;
+  recs.forEach((r, i) => {
+    const y = y0 + i * RH, L = i + 1;
+    if (i % 2) { ctx.fillStyle = 'rgba(150,100,50,0.1)'; rrect(44, y - RH / 2, 632, RH, 8); ctx.fill(); }
+    if (isHard(L)) { ctx.fillStyle = '#b8321f'; rrect(cx(0) - 26, y - 18, 52, 36, 18); ctx.fill(); text(String(L), cx(0), y + 1, 28, '#fff6e6'); }
+    else text(String(L), cx(0), y + 1, 28, '#4a2c14');
+    if (!r || !r.attempts) { for (let k = 1; k < heads.length; k++) dashMark(cx(k), y, 'rgba(90,52,22,0.45)'); return; }
+    text(String(r.attempts), cx(1), y + 1, 28, '#4a2c14');
+    text(String(r.wins), cx(2), y + 1, 28, '#4a2c14');
+    if (r.firstTryWin === 1) checkMark(cx(3), y, 26, '#2f8a46');
+    else if (r.firstTryWin === 0) crossMark(cx(3), y, 24, '#a8402c');
+    else dashMark(cx(3), y, 'rgba(90,52,22,0.45)');
+    if (r.bestTime != null) text(fmtTime(r.bestTime), cx(4), y + 1, 28, '#4a2c14'); else dashMark(cx(4), y, 'rgba(90,52,22,0.45)');
+    text(String(r.undos), cx(5), y + 1, 28, '#4a2c14');
+    text(String(r.extraPosts), cx(6), y + 1, 28, '#4a2c14');
+  });
+  const ly = y0 + recs.length * RH + 10;
+  ctx.fillStyle = '#b8321f'; rrect(W / 2 + 84, ly - 16, 44, 32, 16); ctx.fill(); text('4', W / 2 + 106, ly + 1, 24, '#fff6e6');
+  text('مرحلة صعبة', W / 2 - 4, ly + 1, 24, '#5a3416');
+  bigButton(...STATS_BTNS.back, 'رجوع', '#2f8a46');
+  const armed = gt - statsClearT < 3;
+  bigButton(...STATS_BTNS.clear, armed ? 'اضغط للتأكيد' : 'مسح السجل', armed ? '#a8402c' : '#8a5a2a');
 }
 function drawFigures() {
   ctx.fillStyle = '#e6cc9a'; ctx.fillRect(0, 0, W, H);
@@ -1172,6 +1467,8 @@ function drawFigures() {
   ctx.save(); ctx.translate(-70, -170); drawGateFront(); ctx.restore(); lab('البوابة المقوّسة', 560, 1090);
   for (let k = 0; k < 3; k++) drawStar(260 + k * 100, 1170, 34, k < 2);
   lab('النجوم', 360, 1230);
+  drawCamel(130, 1070, 0, 2, 62, 3, 0, { ph: 4, cover: 1 }); lab('جمل مغطّى', 130, 1124);
+  hardPill(330, 1056, 1); lab('وسم صعبة', 330, 1100);
 }
 
 // ---- Scenes ---------------------------------------------------------------------------------
@@ -1266,15 +1563,31 @@ const scenes = {
     update() {
       const L = Math.min(save.unlocked || 1, tune.levels);
       if (pressed('Enter') || pressed('Space')) { startLevel(L); scene = 'play'; sfx.ui(); return; }
+      if (pressed('KeyL')) { scene = 'stats'; statsClearT = -9; sfx.ui(); return; }
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...TITLE_BTNS.mute)) { setMuted(!muted); continue; }
         if (location.protocol.startsWith('http') && inRect(p, ...TITLE_BTNS.home)) { location.href = '../../'; return; }
+        if (inRect(p, ...TITLE_BTNS.stats)) { scene = 'stats'; statsClearT = -9; sfx.ui(); return; }
         if (inRect(p, ...TITLE_BTNS.start)) { startLevel(L); scene = 'play'; sfx.ui(); return; }
         for (let i = 0; i < tune.levels; i++) if (inRect(p, ...levelBtn(i)) && i + 1 <= (save.unlocked || 1)) { startLevel(i + 1); scene = 'play'; sfx.ui(); return; }
       }
     },
     draw() { drawTitle(); },
+  },
+  stats: {
+    update() {
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyL') || pressed('Backspace')) { scene = 'title'; sfx.ui(); return; }
+      let p;
+      while ((p = takeTap())) {
+        if (inRect(p, ...STATS_BTNS.back)) { scene = 'title'; sfx.ui(); return; }
+        if (inRect(p, ...STATS_BTNS.clear)) {
+          if (gt - statsClearT < 3) { logClear(); statsClearT = -9; sfx.undo(); events.push({ type: 'log-cleared' }); }
+          else { statsClearT = gt; sfx.ui(); }
+        }
+      }
+    },
+    draw() { drawStats(); },
   },
   play: {
     update(dt) {
@@ -1284,7 +1597,10 @@ const scenes = {
       updatePlayWorld(dt);
       if (state.pending && state.t >= state.busyUntil + 0.35) {
         if (state.pending === 'win') { state.winT = state.t; finishLevel(); }
-        else { scene = 'over'; sfx.stuck(); events.push({ type: 'stuck', level: state.level }); state.gained = 'القافلة عالقة'; }
+        else {
+          scene = 'over'; sfx.stuck(); events.push({ type: 'stuck', level: state.level, offer: canTakeExtra() }); state.gained = 'القافلة عالقة';
+          const r = logRec(state.level); r.stuck++; logSave();
+        }
       }
     },
     draw() { drawPlay(); },
@@ -1292,6 +1608,19 @@ const scenes = {
   over: {
     update(dt) {
       state.t += dt; updatePlayWorld(dt);
+      if (canTakeExtra()) { // C1: the offer screen; Enter, Space or E takes the free post
+        if (pressed('KeyE') || pressed('Enter') || pressed('Space')) { takeExtra(); return; }
+        if (pressed('KeyR')) { doRestart(); return; }
+        if (pressed('KeyU')) { doUndo(); return; }
+        if (pressed('Escape')) { scene = 'title'; return; }
+        let p;
+        while ((p = takeTap())) {
+          if (inRect(p, ...OFFER_BTNS.extra)) { takeExtra(); return; }
+          if (inRect(p, ...OFFER_BTNS.undo) && state.undos > 0 && state.hist.length) { doUndo(); return; }
+          if (inRect(p, ...OFFER_BTNS.restart)) { doRestart(); return; }
+        }
+        return;
+      }
       if (pressed('KeyR') || pressed('Enter') || pressed('Space')) { doRestart(); return; }
       if (pressed('KeyU')) { doUndo(); return; }
       if (pressed('Escape')) { scene = 'title'; return; }

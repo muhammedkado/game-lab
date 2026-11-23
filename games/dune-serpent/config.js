@@ -9,8 +9,31 @@ window.CONFIG = {
   boost_mult: { value: 1.9, min: 1.2, max: 3, step: 0.05 },       // speed while sprinting
   boost_cost: { value: 5, min: 1, max: 15, step: 0.5 },           // segments per second spent while sprinting
   min_boost_len: { value: 14, min: 4, max: 40, step: 1 },         // shorter than this: no sprint
-  start_len: { value: 12, min: 4, max: 40, step: 1 },             // segments at spawn (player, foragers, cowards)
-  coiler_start_len: { value: 26, min: 4, max: 60, step: 1 },      // coilers start longer than you
+  start_len: { value: 12, min: 4, max: 40, step: 1 },             // your segments at spawn
+  // D1: a readable food chain. Bots spawn in three size classes scaled to your length: small prey,
+  // peers and a few giants; dead bots come back one at a time until the storm has closed this far.
+  init_small: { value: 3, min: 0, max: 8, step: 1 },              // the mix the arena keeps (8 bots in all)
+  init_peer: { value: 3, min: 0, max: 8, step: 1 },
+  init_giant: { value: 2, min: 0, max: 8, step: 1 },
+  small_mult_min: { value: 0.35, min: 0.1, max: 1, step: 0.05 },  // small prey: this share of your length
+  small_mult_max: { value: 0.7, min: 0.1, max: 1, step: 0.05 },
+  peer_mult_min: { value: 0.8, min: 0.5, max: 1.5, step: 0.05 },  // peers: about your length
+  peer_mult_max: { value: 1.25, min: 0.5, max: 2, step: 0.05 },
+  giant_mult_min: { value: 2, min: 1.2, max: 5, step: 0.1 },      // giants: several times your length
+  giant_mult_max: { value: 3.2, min: 1.2, max: 6, step: 0.1 },
+  small_min_len: { value: 5, min: 3, max: 20, step: 1 },
+  giant_min_len: { value: 26, min: 4, max: 80, step: 1 },         // a giant is at least this long (so the first coiler is longer than you)
+  giant_max_len: { value: 280, min: 60, max: 600, step: 10 },     // and at most this (keeps the step cheap)
+  spawn_gap: { value: 1.5, min: 0.2, max: 6, step: 0.1 },         // seconds between two arrivals (the trickle)
+  spawn_stop_share: { value: 0.5, min: 0, max: 1, step: 0.05 },   // no arrivals once the storm has closed this share
+  // D2: arena tiers, sand -> copper -> gold, opened on this device by reaching a length in a round
+  tier_goal_1: { value: 100, min: 20, max: 400, step: 10 },       // length in the sand arena that opens copper
+  tier_goal_2: { value: 170, min: 30, max: 600, step: 10 },       // length in the copper arena that opens gold
+  tier_skill: { value: 0.08, min: 0, max: 0.2, step: 0.01 },      // each tier adds this to every bot's skill
+  hard_tier: { value: 1, min: 1, max: 2, step: 1 },               // S2: from this tier the arena says "صعبة"
+  // D3: one earned revive a round, free
+  revive_min_len: { value: 40, min: 10, max: 200, step: 5 },      // die at least this long to be offered it
+  revive_grace: { value: 1.5, min: 0, max: 4, step: 0.25 },       // seconds you pass through bodies after it
   seg_spacing: { value: 9, min: 4, max: 16, step: 0.5 },          // px between body segments
   base_radius: { value: 13, min: 6, max: 20, step: 0.5 },         // body half-width at spawn (px)
   radius_growth: { value: 0.035, min: 0, max: 0.1, step: 0.005 }, // extra half-width per segment

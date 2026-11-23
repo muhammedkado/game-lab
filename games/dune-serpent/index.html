@@ -294,14 +294,20 @@ function makeBead(r, bright) {
   return c;
 }
 const beadSmall = makeBead(5.5, false), beadBig = makeBead(8.5, true);
-function makeNightTile() {
+// D2: three arenas; each tints the moonlit dunes (sand keeps the first build's indigo night)
+const TIERS = [
+  { name: 'ساحة الرمل', short: 'الرمل', base: '#211e55', glow: 'rgba(120,120,220,0.12)', hi: 'rgba(150,160,240,0.33)', speck: 'rgba(160,170,255,0.35)', col: '#b9b4f0', deep: '#2a2766', dark: '#14123a' },
+  { name: 'ساحة النحاس', short: 'النحاس', base: '#3a1c2e', glow: 'rgba(230,130,90,0.14)', hi: 'rgba(240,160,120,0.36)', speck: 'rgba(255,190,150,0.4)', col: '#e08a55', deep: '#4a2236', dark: '#2a0f1c' },
+  { name: 'ساحة الذهب', short: 'الذهب', base: '#2e2a16', glow: 'rgba(240,200,90,0.14)', hi: 'rgba(250,215,120,0.38)', speck: 'rgba(255,235,160,0.45)', col: '#f2c14e', deep: '#3c3618', dark: '#1e1a08' },
+];
+function makeNightTile(T) {
   const S = 512, c = mk(S, S), g = c.getContext('2d');
-  g.fillStyle = '#211e55'; g.fillRect(0, 0, S, S);
+  g.fillStyle = T.base; g.fillRect(0, 0, S, S);
   for (let k = 0; k < 8; k++) {
     const x = hash(k * 3 + 11) * S, y = hash(k * 3 + 12) * S, r = 60 + hash(k * 3 + 13) * 110;
     for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
       const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
-      gr.addColorStop(0, k & 1 ? 'rgba(120,120,220,0.12)' : 'rgba(5,5,30,0.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      gr.addColorStop(0, k & 1 ? T.glow : 'rgba(5,5,30,0.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = gr; g.fillRect(x + dx - r, y + dy - r, 2 * r, 2 * r);
     }
   }
@@ -316,14 +322,13 @@ function makeNightTile() {
         }
       };
       g.lineWidth = 3; g.strokeStyle = 'rgba(8,6,30,0.55)'; path(3); g.stroke();
-      g.lineWidth = 2; g.strokeStyle = 'rgba(150,160,240,0.33)'; path(0); g.stroke();
+      g.lineWidth = 2; g.strokeStyle = T.hi; path(0); g.stroke();
     }
   }
-  for (let k = 0; k < 160; k++) { g.fillStyle = k % 4 ? 'rgba(160,170,255,0.35)' : 'rgba(230,235,255,0.6)'; g.fillRect((hash(k + 300) * S) | 0, (hash(k + 700) * S) | 0, 2, 2); }
+  for (let k = 0; k < 160; k++) { g.fillStyle = k % 4 ? T.speck : 'rgba(230,235,255,0.6)'; g.fillRect((hash(k + 300) * S) | 0, (hash(k + 700) * S) | 0, 2, 2); }
   return c;
 }
-const nightTile = makeNightTile();
-const nightPat = ctx.createPattern(nightTile, 'repeat');
+const tierPats = TIERS.map(T => ctx.createPattern(makeNightTile(T), 'repeat'));
 let moonGrad = null, vignGrad = null;
 function grads() {
   moonGrad = ctx.createRadialGradient(120, 60, 0, 120, 60, 1100);
@@ -342,7 +347,7 @@ const bNext = new Int32Array(BCAP);
 function hcell(x, y) { return clamp(((y + HOFF) / HC) | 0, 0, HG - 1) * HG + clamp(((x + HOFF) / HC) | 0, 0, HG - 1); }
 function buildHashes() {
   sHead.fill(-1); let k = 0;
-  for (const s of snakes) if (s.alive) for (let i = 0; i < s.xs.length && k < SCAP; i++) {
+  for (const s of snakes) if (s.alive && !ghost(s)) for (let i = 0; i < s.xs.length && k < SCAP; i++) {
     const c = hcell(s.xs[i], s.ys[i]); sNext[k] = sHead[c]; sHead[c] = k; sOwn[k] = s.id; sIdx[k] = i; k++;
   }
   bHead.fill(-1);
@@ -373,7 +378,7 @@ function makeSnake(id, x, y, a, len) {
     alive: true, boosting: false, wantBoost: false, dropAcc: 0, kills: 0, skill: 0.7, think: 0, gx: x, gy: y, lapse: false,
     prey: -1, lesson: false, lessonEnd: 0, respawnT: 0, final: 0, wander: a, boostT: 0 };
   for (let i = 0; i < Math.floor(len); i++) { s.xs.push(x - Math.cos(a) * i * tune.seg_spacing); s.ys.push(y - Math.sin(a) * i * tune.seg_spacing); }
-  s.skill = tune.bot_skill_min + rng() * Math.max(0, tune.bot_skill_max - tune.bot_skill_min);
+  s.skill = clamp(tune.bot_skill_min + rng() * Math.max(0, tune.bot_skill_max - tune.bot_skill_min) + (state ? state.tier : 0) * tune.tier_skill, 0, 0.98); // D2: a little smarter per tier
   return s;
 }
 function radiusOf(s) { return tune.base_radius + Math.min(tune.radius_max_add, s.len * tune.radius_growth); }
@@ -443,7 +448,7 @@ function killSnake(s, by, why) {
     state.alive = false; state.final = s.len; state.why = why; state.killer = by ? by.id : -1; state.endT = state.t + 1.3;
     state.camX = s.xs[0]; state.camY = s.ys[0]; state.shake = 16; sfx.die();
   } else {
-    s.respawnT = state.t < tune.storm_start ? state.t + tune.respawn_time : Infinity;
+    s.respawnT = canSpawn() ? state.t + tune.respawn_time : Infinity;
     if (by && by.isPlayer) { state.kills++; sfx.burst(); say(`${s.name} اصطدم بك فانفجر خرزًا`, '#ffe08a', 2.4); }
     else sfx.far();
   }
@@ -459,9 +464,29 @@ function spawnSpot(minD) {
   return best;
 }
 function respawn(s) {
-  const [x, y] = spawnSpot(500), a = rng() * TAU, ns = makeSnake(s.id, x, y, a, s.kind === 'coiler' ? tune.coiler_start_len : tune.start_len);
+  const cls = neededClass(), [x, y] = spawnSpot(500), a = rng() * TAU, ns = makeSnake(s.id, x, y, a, classLen(cls));
   ns.kills = s.kills; snakes[s.id] = ns;
-  events.push({ type: 'respawn', who: s.id });
+  events.push({ type: 'respawn', who: s.id, cls, len: Math.floor(ns.len) });
+}
+// D1: the food chain. Sizes are read against your length, so the arena always holds prey, peers and giants.
+const CLASSES = ['small', 'peer', 'giant'], KIND_ORDER = { coiler: 0, forager: 1, coward: 2 };
+function playerLen() { const me = snakes[0]; return Math.max(tune.start_len, me && me.alive ? me.len : state.final || tune.start_len); }
+function classLen(c) {
+  const L = playerLen(), k = rng();
+  if (c === 'small') return clamp(Math.round(L * lerp(tune.small_mult_min, tune.small_mult_max, k)), tune.small_min_len, tune.max_len);
+  if (c === 'peer') return clamp(Math.round(L * lerp(tune.peer_mult_min, tune.peer_mult_max, k)), tune.small_min_len, tune.max_len);
+  return clamp(Math.round(Math.max(tune.giant_min_len, L * lerp(tune.giant_mult_min, tune.giant_mult_max, k))), tune.small_min_len, Math.min(tune.max_len, tune.giant_max_len));
+}
+function sizeClass(len, L) { return len < L * 0.75 ? 0 : len > L * 1.6 ? 2 : 1; } // as you see it now
+function neededClass() { // the class furthest below the mix the arena keeps
+  const want = [tune.init_small, tune.init_peer, tune.init_giant], have = [0, 0, 0], L = playerLen();
+  for (const o of snakes) if (!o.isPlayer && o.alive) have[sizeClass(o.len, L)]++;
+  let best = 1, bd = -1e9;
+  for (let c = 0; c < 3; c++) { const d = want[c] - have[c] + rng() * 0.1; if (d > bd) { bd = d; best = c; } }
+  return CLASSES[best];
+}
+function canSpawn() { // arrivals keep coming until the storm has closed spawn_stop_share of its way
+  return state.safeR > lerp(tune.arena_radius, tune.storm_end_radius, tune.spawn_stop_share) - 1e-6;
 }
 
 // ---- The game: bots (labelled as bots everywhere) ---------------------------------------
@@ -558,6 +583,53 @@ function say(s, col, dur) { state.msg = { s, col, until: state.t + dur }; }
 // ---- The game: round -----------------------------------------------------------------
 function loadBest() { try { return Number(localStorage.getItem('gamelab.dune-serpent.best')) || 0; } catch (_) { return 0; } }
 function saveBest(v) { try { localStorage.setItem('gamelab.dune-serpent.best', String(v)); } catch (_) { /* private mode */ } }
+// S1: the local play log, on this device only (never sent anywhere): per arena, rounds started, finished,
+// wins, longest serpent, longest time alive, free revives used; and the last 30 results.
+const LOG_KEY = 'gamelab:dune-serpent:log', ARENA_KEY = 'gamelab:dune-serpent:arena';
+function blankLog() { return { v: 1, rounds: 0, finished: 0, revives: 0, byTier: [0, 1, 2].map(() => ({ n: 0, done: 0, wins: 0, best: 0, alive: 0, rev: 0 })), recent: [] }; }
+function loadJSON(key) { try { return JSON.parse(localStorage.getItem(key)); } catch (_) { return null; } }
+function saveJSON(key, o) { try { localStorage.setItem(key, JSON.stringify(o)); } catch (_) { /* private mode */ } }
+let playLog = (o => o && o.v === 1 && Array.isArray(o.byTier) && Array.isArray(o.recent) ? o : blankLog())(loadJSON(LOG_KEY));
+function saveLog() { saveJSON(LOG_KEY, playLog); }
+// D2: which arenas this device has opened, and which one the title has picked
+const arena = (o => ({ open: clamp((o && o.open) | 0, 0, 2), pick: clamp((o && o.pick) | 0, 0, 2) }))(loadJSON(ARENA_KEY));
+arena.pick = Math.min(arena.pick, arena.open);
+function saveArena() { saveJSON(ARENA_KEY, arena); }
+function tierGoal(t) { return t === 0 ? tune.tier_goal_1 : tune.tier_goal_2; } // the length in arena t that opens arena t + 1
+function pickTier(t) {
+  if (t > arena.open) { state.lockMsg = { t, until: state.t + 2.6 }; sfx.far(); return; }
+  if (t !== arena.pick) { arena.pick = t; saveArena(); sfx.pop(); }
+}
+function unlockNext() { // reached the goal in the highest open arena: the next one opens, with a short celebration
+  const t = arena.open + 1; arena.open = t; arena.pick = t; saveArena();
+  state.unlocked = t; state.party = { t, until: state.t + 3.2 };
+  const me = snakes[0];
+  for (let k = 0; k < 28; k++) { const a = k / 28 * TAU; parts.push({ x: me.xs[0], y: me.ys[0], vx: Math.cos(a) * 260, vy: Math.sin(a) * 260, t: 0, life: 0.9, col: TIERS[t].col, r: 9, k: 0 }); }
+  parts.push({ x: me.xs[0], y: me.ys[0], vx: 0, vy: 0, t: 0, life: 1, col: TIERS[t].col, r: 160, k: 1 });
+  sfx.win(); events.push({ type: 'unlock', tier: t });
+}
+// D3: one earned revive a round, free: only above a length, and only once
+function canRevive() { return !state.revived && state.final >= tune.revive_min_len; }
+function doRevive() {
+  const old = snakes[0], len = Math.max(tune.start_len, Math.floor(state.final / 2));
+  const [x, y] = spawnSpot(450), a = Math.atan2(-y, -x); // facing the middle, away from the storm
+  const s = makeSnake(0, x, y, a, len);
+  s.kills = old.kills; s.grace = state.t + tune.revive_grace; snakes[0] = s;
+  state.alive = true; state.revived = true; state.final = 0; state.why = ''; state.killer = -1; state.camX = x; state.camY = y;
+  playLog.revives++; playLog.byTier[state.tier].rev++; saveLog();
+  scene = 'play'; sfx.start(); say('عدت بنصف طولك: عودة واحدة في كل جولة', '#c4fff6', 3);
+  events.push({ type: 'revive', len });
+}
+const ghost = s => s.isPlayer && state.t < (s.grace || 0); // just revived: passes through bodies for a moment
+function logResult(R) {
+  const L = playLog.byTier[state.tier], win = R.reason === 'last' || (R.reason === 'time' && R.rank === 1);
+  L.done++; if (win) L.wins++;
+  L.best = Math.max(L.best, R.fin); L.alive = Math.max(L.alive, Math.round(state.aliveT));
+  playLog.finished++;
+  playLog.recent.push({ a: state.tier, l: R.fin, r: R.rank, w: win ? 1 : 0, e: R.reason, t: Math.round(state.t), v: state.revived ? 1 : 0 });
+  if (playLog.recent.length > 30) playLog.recent.shift();
+  saveLog();
+}
 let scene, state;
 function reset() {
   seed = Number(params.get('seed')) || CONFIG.seed;
@@ -566,18 +638,29 @@ function reset() {
   beads = []; parts = [];
   state = { t: 0, score: 0, len: 0, gained: '', kills: 0, best: loadBest(), alive: true, final: 0, why: '', killer: -1, endT: 0,
     result: null, msg: null, zoom: tune.zoom_start, camX: 0, camY: 0, shake: 0, safeR: tune.arena_radius, lastTick: -1,
-    said: {}, steered: false, lessonOn: false, lessonEnd: 0, boosted: false };
+    said: {}, steered: false, lessonOn: false, lessonEnd: 0, boosted: false,
+    tier: arena.pick, revived: false, unlocked: -1, party: null, banner: null, lockMsg: null, nextSpawn: 0, aliveT: 0 };
   snakes = [makeSnake(0, 0, 0, -Math.PI / 2, tune.start_len)];
+  // D1: the opening mix: giants go to coilers first, small prey to cowards first
+  const ids = PALS.map((P, k) => k).slice(1).sort((a, b) => KIND_ORDER[PALS[a].kind] - KIND_ORDER[PALS[b].kind] || a - b), cls = [];
+  let ng = tune.init_giant, np = tune.init_peer;
+  for (const id of ids) cls[id] = ng-- > 0 ? 'giant' : np-- > 0 ? 'peer' : 'small';
   for (let k = 1; k < PALS.length; k++) {
     const a = (k - 1) / (PALS.length - 1) * TAU + rng() * 0.4, d = 800 + rng() * 450;
-    snakes.push(makeSnake(k, Math.cos(a) * d, Math.sin(a) * d, rng() * TAU, PALS[k].kind === 'coiler' ? tune.coiler_start_len : tune.start_len));
+    snakes.push(makeSnake(k, Math.cos(a) * d, Math.sin(a) * d, rng() * TAU, classLen(cls[k])));
   }
   const R = tune.arena_radius - 60;
   for (let k = 0; k < tune.bead_count; k++) { const a = rng() * TAU, d = Math.sqrt(rng()) * R; addBead(Math.cos(a) * d, Math.sin(a) * d, tune.bead_growth, false, 0, 0); beads[beads.length - 1].nat = true; }
   for (let k = 0; k < 70; k++) { const a = rng() * TAU, d = 60 + rng() * 260; addBead(Math.cos(a) * d, Math.sin(a) * d - 120, tune.bead_growth, false, 0, 0); beads[beads.length - 1].nat = true; }
   for (const b of beads) b.t0 = -1;
 }
-function startRound() { reset(); scene = 'play'; sfx.start(); events.push({ type: 'start' }); say('اسحب لتوجّه الأفعى نحو الخرز', '#fff', 4); }
+function startRound() {
+  reset(); scene = 'play'; sfx.start();
+  state.banner = { until: 3.2 }; // S2: the arena's name, and "صعبة" when it is meant to be harder
+  playLog.rounds++; playLog.byTier[state.tier].n++; saveLog();
+  events.push({ type: 'start', tier: state.tier, hard: state.tier >= tune.hard_tier });
+  say('اسحب لتوجّه الأفعى نحو الخرز', '#fff', 4);
+}
 function endRound(reason) {
   const me = snakes[0], fin = state.alive ? me.len : state.final;
   const stand = snakes.map(s => ({ id: s.id, alive: s.alive, len: s.alive ? s.len : s.final })).sort((a, b) => (b.alive - a.alive) || (b.len - a.len));
@@ -585,6 +668,7 @@ function endRound(reason) {
   const newBest = Math.floor(fin) > state.best;
   if (newBest) { state.best = Math.floor(fin); saveBest(state.best); }
   state.result = { reason, fin: Math.floor(fin), stand, rank, newBest };
+  logResult(state.result);
   state.score = Math.floor(fin); state.gained = `طولك ${Math.floor(fin)}`;
   scene = 'results';
   if (reason === 'last' || (reason === 'time' && rank === 1)) sfx.win();
@@ -618,7 +702,7 @@ function drawWorld() {
   const z = state.zoom; viewZ = z; viewX = cx; viewY = cy;
   const hw = W / 2 / z, hh = H / 2 / z, x0 = cx - hw - 60, x1 = cx + hw + 60, y0 = cy - hh - 60, y1 = cy + hh + 60;
   ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-cx, -cy);
-  ctx.fillStyle = nightPat; ctx.fillRect(cx - hw - 2, cy - hh - 2, hw * 2 + 4, hh * 2 + 4);
+  ctx.fillStyle = tierPats[state.tier]; ctx.fillRect(cx - hw - 2, cy - hh - 2, hw * 2 + 4, hh * 2 + 4);
   // beads
   for (const b of beads) {
     if (b.dead || b.x < x0 || b.x > x1 || b.y < y0 || b.y > y1) continue;
@@ -634,7 +718,9 @@ function drawWorld() {
   for (const s of order) {
     let seen = false;
     for (let i = 0; i < s.xs.length; i += 6) if (s.xs[i] > x0 - 40 && s.xs[i] < x1 + 40 && s.ys[i] > y0 - 40 && s.ys[i] < y1 + 40) { seen = true; break; }
-    if (seen) drawBody(ctx, s, ALPHA, t);
+    if (!seen) continue;
+    if (ghost(s)) ctx.globalAlpha = 0.45 + 0.25 * Math.sin(t * 18);
+    drawBody(ctx, s, ALPHA, t); ctx.globalAlpha = 1;
   }
   // bursts
   for (const q of parts) {
@@ -662,13 +748,19 @@ function drawWorld() {
   ctx.restore();
   ctx.fillStyle = moonGrad; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = vignGrad; ctx.fillRect(0, 0, W, H);
-  // name tags: every bot is labelled as a bot
+  // name tags: every bot is labelled as a bot; D1: the rim says where it sits in the food chain against you
+  const myLen = p.alive ? p.len : 0;
   for (const s of snakes) if (s.alive) {
     const X = (s.xs[0] - cx) * z + W / 2, Y = (s.ys[0] - cy) * z + H / 2;
     if (X < -60 || X > W + 60 || Y < -60 || Y > H + 60) continue;
     const tag = s.isPlayer ? 'أنت' : s.name;
     ctx.font = `bold 24px ${FONT}`; const tw = ctx.measureText(tag).width / 2 + 16;
-    pill(tag, clamp(X, tw + 4, W - tw - 4), clamp(Y - s.r * z * 1.6 - 26, 24, H - 24), 24, '#fff', hexA(s.pal.dark, 0.85));
+    const tx = clamp(X, tw + 4, W - tw - 4), ty = clamp(Y - s.r * z * 1.6 - 26, 24, H - 24);
+    pill(tag, tx, ty, 24, '#fff', hexA(s.pal.dark, 0.85));
+    if (!s.isPlayer && myLen) {
+      const c = sizeClass(s.len, myLen);
+      if (c !== 1) { ctx.strokeStyle = c === 2 ? '#ff6a55' : '#9be870'; ctx.lineWidth = 3; rr(ctx, tx - tw + 2, ty - 17, tw * 2 - 4, 34, 17); ctx.stroke(); }
+    }
   }
 }
 function drawButton(b, kind) {
@@ -685,9 +777,41 @@ function drawButton(b, kind) {
   } else if (kind === 'home') {
     ctx.beginPath(); ctx.moveTo(cx, cy - 22); ctx.lineTo(cx + 24, cy); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx + 17, cy + 20); ctx.lineTo(cx - 17, cy + 20); ctx.lineTo(cx - 17, cy); ctx.lineTo(cx - 24, cy); ctx.closePath(); ctx.fill();
     ctx.fillStyle = 'rgba(14,12,40,0.9)'; ctx.fillRect(cx - 6, cy + 6, 12, 14);
+  } else if (kind === 'stats') { // S1: a drawn bar chart
+    rr(ctx, cx - 21, cy + 2, 10, 16, 2); ctx.fill(); rr(ctx, cx - 5, cy - 10, 10, 28, 2); ctx.fill(); rr(ctx, cx + 11, cy - 20, 10, 38, 2); ctx.fill();
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; line(ctx, cx - 25, cy + 21, cx + 25, cy + 21);
   }
 }
 function fmtTime(s) { s = Math.max(0, Math.ceil(s)); return `${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`; }
+function hardBadge(x, y, size = 26) { // S2: an honest "hard" label, said before the round starts
+  ctx.font = `bold ${size}px ${FONT}`;
+  const w = ctx.measureText('صعبة').width + size * 1.9, h = size * 1.45;
+  ctx.fillStyle = '#9c2a18'; rr(ctx, x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = '#ffd0a8'; ctx.lineWidth = 2; rr(ctx, x - w / 2 + 3, y - h / 2 + 3, w - 6, h - 6, h / 2 - 3); ctx.stroke();
+  const fx = x + w / 2 - size * 0.75; // a small drawn flame
+  ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.moveTo(fx, y - size * 0.42); ctx.quadraticCurveTo(fx + size * 0.32, y, fx + size * 0.2, y + size * 0.3);
+  ctx.quadraticCurveTo(fx, y + size * 0.42, fx - size * 0.2, y + size * 0.3); ctx.quadraticCurveTo(fx - size * 0.3, y, fx, y - size * 0.42); ctx.fill();
+  text('صعبة', x - size * 0.3, y + 1, size, '#fff3e0', 'center', 'bold');
+  return w;
+}
+function drawLock(x, y, k, col) { // a drawn padlock
+  ctx.strokeStyle = col; ctx.lineWidth = 3 * k; ctx.beginPath(); ctx.arc(x, y - 4 * k, 7 * k, Math.PI, 0); ctx.stroke();
+  ctx.fillStyle = col; rr(ctx, x - 10 * k, y - 4 * k, 20 * k, 15 * k, 3 * k); ctx.fill();
+  ctx.fillStyle = 'rgba(14,12,40,0.9)'; circ(ctx, x, y + 2 * k, 2.4 * k); ctx.fill(); ctx.fillRect(x - 1 * k, y + 2 * k, 2 * k, 5 * k);
+}
+function drawMedal(x, y, r, tier, t) { // D2: the arena's medal, with turning rays
+  const T = TIERS[tier];
+  ctx.save(); ctx.translate(x, y); ctx.rotate(t * 0.8);
+  ctx.fillStyle = hexA(T.col, 0.35);
+  for (let k = 0; k < 12; k++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, r * 1.6, k * TAU / 12, k * TAU / 12 + 0.18); ctx.closePath(); ctx.fill(); }
+  ctx.restore();
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+  g.addColorStop(0, '#fff6dc'); g.addColorStop(0.5, T.col); g.addColorStop(1, T.dark);
+  ctx.fillStyle = g; circ(ctx, x, y, r); ctx.fill(); ctx.strokeStyle = '#fff3d8'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.strokeStyle = T.dark; ctx.lineWidth = r * 0.14; ctx.lineCap = 'round'; ctx.beginPath(); // a coiled serpent on the medal
+  for (let i = 0; i <= 40; i++) { const a = i / 40 * TAU * 1.6, rr2 = r * (0.62 - i / 40 * 0.42); i ? ctx.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2) : ctx.moveTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2); }
+  ctx.stroke();
+}
 function drawHUD() {
   const t = state.t, me = snakes[0];
   drawButton(BTN_PAUSE, 'pause'); drawButton(BTN_MUTE, 'mute');
@@ -726,6 +850,27 @@ function drawHUD() {
   ctx.strokeStyle = me.len > tune.min_boost_len ? '#ffd27a' : '#77759a'; ctx.lineWidth = 5; circ(ctx, BOOST.x, BOOST.y, BOOST.r - 14); ctx.stroke();
   ctx.fillStyle = me.len > tune.min_boost_len ? '#ffe2a6' : '#77759a';
   for (const o of [-14, 10]) { ctx.beginPath(); ctx.moveTo(BOOST.x - 4 + o, BOOST.y - 24); ctx.lineTo(BOOST.x + 16 + o, BOOST.y); ctx.lineTo(BOOST.x - 4 + o, BOOST.y + 24); ctx.lineTo(BOOST.x - 12 + o, BOOST.y + 24); ctx.lineTo(BOOST.x + 8 + o, BOOST.y); ctx.lineTo(BOOST.x - 12 + o, BOOST.y - 24); ctx.closePath(); ctx.fill(); }
+  // S2: the arena's name as the round starts, with "صعبة" when it is meant to be harder
+  if (state.banner && t < state.banner.until) {
+    const T = TIERS[state.tier], hard = state.tier >= tune.hard_tier;
+    ctx.globalAlpha = clamp((state.banner.until - t) * 2, 0, 1);
+    ctx.fillStyle = 'rgba(14,12,40,0.86)'; rr(ctx, 110, 800, 500, hard ? 150 : 96, 24); ctx.fill(); // below your head, which leads upward
+    ctx.strokeStyle = T.col; ctx.lineWidth = 4; rr(ctx, 116, 806, 488, hard ? 138 : 84, 20); ctx.stroke();
+    text(T.name, W / 2, 848, 36, T.col, 'center', 'bold');
+    if (hard) { hardBadge(W / 2 + 120, 912, 24); text('البوتات أذكى قليلًا', W / 2 - 50, 912, 24, '#e9e6ff', 'center'); }
+    ctx.globalAlpha = 1;
+  }
+  // D2: a new arena opened
+  if (state.party && t < state.party.until) {
+    const T = TIERS[state.party.t], f = clamp((state.party.until - t) * 2, 0, 1);
+    ctx.globalAlpha = f;
+    ctx.fillStyle = 'rgba(14,12,40,0.88)'; rr(ctx, 80, 780, 560, 245, 28); ctx.fill(); // clear of your head and the buttons
+    ctx.strokeStyle = T.col; ctx.lineWidth = 5; rr(ctx, 87, 787, 546, 231, 22); ctx.stroke();
+    drawMedal(W / 2, 848, 40, state.party.t, t);
+    text(`فتحت ${T.name}`, W / 2, 932, 40, T.col, 'center', 'bold');
+    text('تجدها في القائمة للجولة القادمة', W / 2, 980, 26, '#e9e6ff', 'center');
+    ctx.globalAlpha = 1;
+  }
   // message line
   if (state.msg && t < state.msg.until) {
     ctx.globalAlpha = clamp((state.msg.until - t) * 2, 0, 1);
@@ -738,7 +883,7 @@ function drawHUD() {
     ctx.fillStyle = 'rgba(200,240,255,0.25)'; circ(ctx, q.x, q.y, 14); ctx.fill();
   }
 }
-function drawNight() { ctx.fillStyle = nightPat; ctx.fillRect(0, 0, W, H); ctx.fillStyle = moonGrad; ctx.fillRect(0, 0, W, H); }
+function drawNight(tier = 0) { ctx.fillStyle = tierPats[tier]; ctx.fillRect(0, 0, W, H); ctx.fillStyle = moonGrad; ctx.fillRect(0, 0, W, H); }
 function demoSnake(id, pts, len, t) { // a posed serpent for the title and figures
   const s = makeSnakeShape(id, pts, len); drawBody(ctx, s, 1, t);
 }
@@ -752,13 +897,28 @@ function makeSnakeShape(id, fn, n) {
 // ---- Scenes ---------------------------------------------------------------------------
 const BTN_AGAIN = [150, 990, 420, 100], BTN_MENU = [210, 1110, 300, 84];
 const BTN_RESUME = [150, 540, 420, 100], BTN_RESTART = [150, 664, 420, 100], BTN_QUIT = [150, 788, 420, 100];
-function bigButton(b, s, main) {
+const BTN_STATS = [620, 16, 84, 84], STATS_HIT = [496, 10, 214, 96], BTN_BACK = [150, 1040, 420, 100], BTN_CLEAR = [190, 1158, 340, 80];
+const BTN_REVIVE = [150, 650, 420, 110], BTN_GIVEUP = [190, 796, 340, 88];
+const TIER_CHIPS = [[465, 958, 192, 104], [264, 958, 192, 104], [63, 958, 192, 104]], CHIP_BAND = [40, 915, 640, 160]; // sand, copper, gold, right to left
+function tierChip(b, k) { // D2: one arena; locked ones show the length that opens them
+  const T = TIERS[k], open = k <= arena.open, on = k === arena.pick, cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+  ctx.fillStyle = 'rgba(0,0,10,0.4)'; rr(ctx, b[0] + 3, b[1] + 5, b[2], b[3], 20); ctx.fill();
+  if (on) { const g = ctx.createLinearGradient(0, b[1], 0, b[1] + b[3]); g.addColorStop(0, T.col); g.addColorStop(1, T.deep); ctx.fillStyle = g; }
+  else ctx.fillStyle = open ? 'rgba(30,26,80,0.92)' : 'rgba(20,18,50,0.85)';
+  rr(ctx, b[0], b[1], b[2], b[3], 20); ctx.fill();
+  ctx.strokeStyle = on ? '#fff3d8' : open ? T.col : 'rgba(150,150,190,0.5)'; ctx.lineWidth = 3; rr(ctx, b[0] + 5, b[1] + 5, b[2] - 10, b[3] - 10, 16); ctx.stroke();
+  text(T.short, cx, cy - 20, 30, on ? '#14102e' : open ? '#fff' : '#9a98b8', 'center', 'bold');
+  if (!open) { drawLock(cx + 52, cy + 22, 1, '#9a98b8'); text(`طول ${tierGoal(k - 1)}`, cx - 14, cy + 24, 24, '#b8b6d8', 'center', 'bold'); }
+  else if (k >= tune.hard_tier) hardBadge(cx, cy + 25, 24);
+}
+function openStats() { scene = 'stats'; state.clearAsk = 0; }
+function bigButton(b, s, main, size) {
   ctx.fillStyle = 'rgba(0,0,10,0.4)'; rr(ctx, b[0] + 4, b[1] + 6, b[2], b[3], 24); ctx.fill();
   const g = ctx.createLinearGradient(0, b[1], 0, b[1] + b[3]);
   g.addColorStop(0, main ? '#3fd6cf' : '#3a3678'); g.addColorStop(1, main ? '#14817f' : '#24205a');
   ctx.fillStyle = g; rr(ctx, b[0], b[1], b[2], b[3], 24); ctx.fill();
   ctx.strokeStyle = main ? '#c4fff6' : '#9a98d8'; ctx.lineWidth = 3; rr(ctx, b[0] + 5, b[1] + 5, b[2] - 10, b[3] - 10, 20); ctx.stroke();
-  text(s, b[0] + b[2] / 2, b[1] + b[3] / 2 + 2, main ? 38 : 32, main ? '#05262c' : '#fff', 'center', 'bold');
+  text(s, b[0] + b[2] / 2, b[1] + b[3] / 2 + 2, size || (main ? 38 : 32), main ? '#05262c' : '#fff', 'center', 'bold');
 }
 const scenes = {
   figures: {
@@ -798,29 +958,116 @@ const scenes = {
     update() {
       for (const p of tapList) {
         if (location.protocol.startsWith('http') && inRect(p, BTN_HOME)) { location.href = '../../'; return; }
+        if (inRect(p, STATS_HIT)) { openStats(); return; }
+        const c = TIER_CHIPS.findIndex(b => inRect(p, b));
+        if (c >= 0) { pickTier(c); continue; }
+        if (inRect(p, CHIP_BAND)) continue; // a near miss on the arenas never starts a round
         startRound(); return;
       }
+      if (pressed('KeyI')) { openStats(); return; }
+      if (pressed('Digit1')) pickTier(0); if (pressed('Digit2')) pickTier(1); if (pressed('Digit3')) pickTier(2);
+      if (pressed('ArrowLeft')) pickTier(Math.min(arena.open, arena.pick + 1)); if (pressed('ArrowRight')) pickTier(Math.max(0, arena.pick - 1));
       if (pressed('Enter') || pressed('Space')) startRound();
       state.t += STEP;
     },
     draw() {
-      drawNight();
+      drawNight(arena.pick);
       const t = clock.now();
       for (let k = 0; k < 40; k++) { const sc = 0.5 + 0.5 * Math.sin(t * 2 + k); ctx.globalAlpha = 0.6; ctx.drawImage(beadSmall, (hash(k + 5) * W) | 0, 380 + ((hash(k + 9) * 900) | 0), 22 * sc + 10, 22 * sc + 10); }
       ctx.globalAlpha = 1;
       if (location.protocol.startsWith('http')) drawButton(BTN_HOME, 'home');
-      ctx.save(); ctx.translate(360, 520); ctx.scale(1.7, 1.7);
+      drawButton(BTN_STATS, 'stats');
+      text('إحصائياتي', BTN_STATS[0] - 12, BTN_STATS[1] + BTN_STATS[3] / 2, 24, '#e9e6ff', 'right', 'bold'); // beside the button, clear of the title
+      ctx.save(); ctx.translate(360, 468); ctx.scale(1.7, 1.7);
       demoSnake(0, i => i < 0 ? [13] : [Math.cos(i * 0.16 + t * 0.8) * (120 - i * 1.1), Math.sin(i * 0.16 + t * 0.8) * (60 - i * 0.55)], 60, t);
       ctx.restore();
       text(TITLE, W / 2, 190, 104, '#ffe2a6', 'center', 'bold');
       text(TITLE_EN, W / 2, 290, 40, '#b8bdf0', 'center', 'bold');
-      ctx.fillStyle = 'rgba(14,12,40,0.7)'; rr(ctx, 30, 690, 660, 340, 26); ctx.fill();
-      CONTROLS.forEach((c, i) => text(c, W / 2, 730 + i * 54, 28, '#fff', 'center', i === 1 ? 'bold' : ''));
-      text('المنافسون الثمانية بوتات وليسوا لاعبين حقيقيين', W / 2, 1000, 24, '#c9c6f0', 'center');
-      if (state.best > 0) text(`أطول أفعى لك: ${state.best}`, W / 2, 1066, 30, '#ffd27a', 'center', 'bold');
+      ctx.fillStyle = 'rgba(14,12,40,0.7)'; rr(ctx, 30, 598, 660, 300, 26); ctx.fill();
+      CONTROLS.forEach((c, i) => text(c, W / 2, 634 + i * 48, 28, '#fff', 'center', i === 1 ? 'bold' : ''));
+      text('المنافسون الثمانية بوتات وليسوا لاعبين حقيقيين', W / 2, 872, 24, '#c9c6f0', 'center');
+      text('الساحة', W / 2, 934, 26, '#ffe2a6', 'center', 'bold');
+      TIER_CHIPS.forEach((b, k) => tierChip(b, k));
+      const lm = state.lockMsg;
+      if (lm && state.t < lm.until) text(`اوصل إلى طول ${tierGoal(lm.t - 1)} في ${TIERS[lm.t - 1].name} لتفتحها`, W / 2, 1106, 26, '#ffc8a0', 'center', 'bold');
+      else if (state.best > 0) text(`أطول أفعى لك: ${state.best}`, W / 2, 1106, 28, '#ffd27a', 'center', 'bold');
       ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
-      pill('المس الشاشة للبدء', W / 2, 1170, 44, '#05262c', '#3fd6cf');
+      pill('المس الشاشة للبدء', W / 2, 1190, 44, '#05262c', '#3fd6cf');
       ctx.globalAlpha = 1;
+    },
+  },
+  stats: { // S1: what this device remembers, honestly, for the owner's playtest notes
+    update(dt) {
+      state.t += dt;
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyI') || pressed('Backspace')) { scene = 'title'; return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_BACK)) { scene = 'title'; return; }
+        if (inRect(p, BTN_CLEAR)) {
+          if (state.clearAsk && state.t < state.clearAsk) { playLog = blankLog(); saveLog(); state.clearAsk = 0; sfx.far(); }
+          else { state.clearAsk = state.t + 3; sfx.pop(); }
+        }
+      }
+    },
+    draw() {
+      drawNight(arena.pick);
+      ctx.fillStyle = 'rgba(24,20,62,0.96)'; rr(ctx, 30, 24, 660, 1232, 30); ctx.fill();
+      ctx.strokeStyle = PALS[0].base; ctx.lineWidth = 6; rr(ctx, 40, 34, 640, 1212, 24); ctx.stroke();
+      text('إحصائياتي', W / 2, 100, 56, '#fff', 'center', 'bold');
+      text('سجل محلي على هذا الجهاز فقط ولا يُرسل إلى أي مكان', W / 2, 156, 24, '#c9c6f0', 'center');
+      const cols = [598, 510, 445, 355, 225, 105], heads = ['الساحة', 'بدأت', 'فوز', 'أطول أفعى', 'أطول بقاء', 'عودة'];
+      ctx.fillStyle = 'rgba(255,255,255,0.07)'; rr(ctx, 60, 192, 600, 330, 18); ctx.fill();
+      heads.forEach((h, k) => text(h, cols[k], 226, 24, '#ffd27a', 'center', 'bold'));
+      const tot = { n: 0, done: 0, wins: 0, best: 0, alive: 0, rev: 0 };
+      TIERS.forEach((T, k) => {
+        const L = playLog.byTier[k], y = 290 + k * 62, open = k <= arena.open;
+        ctx.strokeStyle = 'rgba(200,205,255,0.18)'; ctx.lineWidth = 1.5; line(ctx, 76, y - 31, 644, y - 31);
+        tot.n += L.n; tot.done += L.done; tot.wins += L.wins; tot.rev += L.rev; tot.best = Math.max(tot.best, L.best); tot.alive = Math.max(tot.alive, L.alive);
+        [T.short, `${L.n}`, `${L.wins}`, L.done ? `${L.best}` : '-', L.done ? fmtTime(L.alive) : '-', `${L.rev}`]
+          .forEach((v, c) => text(v, cols[c], y, 26, c ? (open ? '#fff' : '#8a88a8') : (open ? T.col : '#8a88a8'), 'center', c ? '' : 'bold'));
+        if (!open) drawLock(646, y - 2, 0.7, '#8a88a8');
+      });
+      ctx.strokeStyle = 'rgba(200,205,255,0.4)'; ctx.lineWidth = 2; line(ctx, 76, 445, 644, 445);
+      ['الكل', `${tot.n}`, `${tot.wins}`, tot.done ? `${tot.best}` : '-', tot.done ? fmtTime(tot.alive) : '-', `${tot.rev}`]
+        .forEach((v, c) => text(v, cols[c], 482, 26, '#ffd27a', 'center', 'bold'));
+      text(`جولات أنهيتها: ${playLog.finished} · الساحات المفتوحة: ${arena.open + 1} من 3`, W / 2, 556, 26, '#c9c6f0', 'center');
+      ctx.fillStyle = 'rgba(255,255,255,0.07)'; rr(ctx, 60, 590, 600, 330, 18); ctx.fill();
+      text('آخر 12 جولة: طولك في النهاية', W / 2, 622, 26, '#fff', 'center', 'bold');
+      const last = playLog.recent.slice(-12), base = 836, top = 668, maxL = Math.max(tune.tier_goal_1, ...last.map(q => q.l), 1);
+      if (!last.length) text('لم تُنهِ أي جولة بعد', W / 2, 750, 28, '#c9c6f0', 'center');
+      else last.forEach((q, k) => {
+        const x = 612 - k * 46, hgt = Math.max(4, (base - top) * q.l / maxL), T = TIERS[q.a] || TIERS[0];
+        ctx.fillStyle = T.col; rr(ctx, x - 17, base - hgt, 34, hgt, 6); ctx.fill();
+        if (q.w) { ctx.fillStyle = PALS[0].base; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; circ(ctx, x, base - hgt - 13, 9); ctx.fill(); ctx.stroke(); }
+        text(`${q.r}`, x, base + 24, 24, '#c9c6f0', 'center', 'bold');
+      });
+      ctx.fillStyle = PALS[0].base; circ(ctx, 616, 895, 10); ctx.fill();
+      text('فوز', 598, 895, 24, '#fff', 'right');
+      text('لون العمود: الساحة · الرقم تحته: مركزك', 330, 895, 24, '#c9c6f0', 'center');
+      text(`عودة مجانية استعملتها: ${playLog.revives}`, W / 2, 970, 28, '#ffd27a', 'center', 'bold');
+      bigButton(BTN_BACK, 'رجوع', true);
+      bigButton(BTN_CLEAR, state.clearAsk && state.t < state.clearAsk ? 'اضغط مرة أخرى للمسح' : 'مسح السجل', false, 26);
+    },
+  },
+  revive: { // D3: one free revive, earned by length; the arena waits while you choose
+    update() {
+      if (pressed('Enter') || pressed('Space')) { doRevive(); return; }
+      if (pressed('Escape') || pressed('KeyR')) { endRound('out'); return; }
+      for (const p of tapList) {
+        if (inRect(p, BTN_REVIVE)) { doRevive(); return; }
+        if (inRect(p, BTN_GIVEUP)) { endRound('out'); return; }
+      }
+    },
+    draw() {
+      drawWorld(); drawHUD();
+      ctx.fillStyle = 'rgba(8,6,28,0.62)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(24,20,62,0.96)'; rr(ctx, 70, 320, 580, 610, 30); ctx.fill();
+      ctx.strokeStyle = PALS[0].base; ctx.lineWidth = 6; rr(ctx, 80, 330, 560, 590, 24); ctx.stroke();
+      text('عودة مجانية', W / 2, 392, 52, '#fff', 'center', 'bold');
+      text(state.why === 'storm' ? 'ابتلعتك العاصفة' : `اصطدم رأسك بجسد ${PALS[state.killer] ? PALS[state.killer].name : ''}`, W / 2, 450, 28, '#ffd9a8', 'center');
+      text(`تعود بنصف طولك: ${Math.max(tune.start_len, Math.floor(state.final / 2))}`, W / 2, 506, 32, PALS[0].light, 'center', 'bold');
+      text('مرة واحدة في كل جولة وبلا مقابل', W / 2, 554, 26, '#c9c6f0', 'center');
+      text('الساحة تنتظرك حتى تختار', W / 2, 596, 26, '#c9c6f0', 'center');
+      bigButton(BTN_REVIVE, 'عُد إلى الكثبان', true); bigButton(BTN_GIVEUP, 'إنهاء الجولة');
     },
   },
   play: {
@@ -836,7 +1083,13 @@ const scenes = {
       if (me.alive) playerControl(me);
       buildHashes();
       for (const s of snakes) {
-        if (!s.alive) { if (!s.isPlayer && T >= s.respawnT) respawn(s); continue; }
+        if (!s.alive) { // D1: the trickle: one arrival per spawn_gap, until the storm has closed far enough
+          if (!s.isPlayer && T >= s.respawnT) {
+            if (!canSpawn()) s.respawnT = Infinity;
+            else if (T >= state.nextSpawn) { respawn(s); state.nextSpawn = T + tune.spawn_gap; }
+          }
+          continue;
+        }
         if (!s.isPlayer) botThink(s, dt);
         moveSnake(s, dt);
       }
@@ -847,6 +1100,7 @@ const scenes = {
         if (!s.alive) continue;
         const hx = s.xs[0], hy = s.ys[0];
         if (hx * hx + hy * hy > state.safeR * state.safeR) { dying.push([s, null, 'storm']); continue; }
+        if (ghost(s)) continue; // D3: just revived
         const e = bodyHit(hx, hy, s.r * 0.7, s.id);
         if (e < 0) continue;
         const o = snakes[sOwn[e]];
@@ -895,7 +1149,16 @@ const scenes = {
       const left = tune.round_time - T;
       if (left < 10 && Math.ceil(left) !== state.lastTick) { state.lastTick = Math.ceil(left); sfx.tick(); }
       state.len = Math.floor(me.alive ? me.len : state.final); state.score = state.len;
-      if (!state.alive) { if (T >= state.endT) endRound('out'); return; }
+      if (me.alive) state.aliveT += dt;
+      // D2: reaching the goal in your highest open arena opens the next one
+      if (me.alive && state.tier === arena.open && arena.open < TIERS.length - 1 && me.len >= tierGoal(state.tier)) unlockNext();
+      if (!state.alive) {
+        if (T >= state.endT) {
+          if (canRevive()) { scene = 'revive'; events.push({ type: 'reviveoffer', len: Math.floor(state.final) }); } // D3: the arena waits
+          else endRound('out');
+        }
+        return;
+      }
       const botsLeft = snakes.some(s => !s.isPlayer && (s.alive || s.respawnT < Infinity));
       if (!botsLeft) { endRound('last'); return; }
       if (T >= tune.round_time) endRound('time');
@@ -944,14 +1207,16 @@ const scenes = {
       text(`طولك ${R.fin}`, W / 2, 344, 48, PALS[0].light, 'center', 'bold');
       text(R.newBest ? 'رقم شخصي جديد' : `أطول أفعى لك: ${state.best}`, W / 2, 402, 28, R.newBest ? '#ffe08a' : '#c9c6f0', 'center', 'bold');
       R.stand.forEach((s, k) => {
-        const y = 470 + k * 52, P = PALS[s.id];
-        if (s.id === 0) { ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(ctx, 100, y - 24, 520, 48, 12); ctx.fill(); }
+        const y = 462 + k * 48, P = PALS[s.id];
+        if (s.id === 0) { ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(ctx, 100, y - 22, 520, 44, 12); ctx.fill(); }
         text(`${k + 1}`, 596, y, 28, '#c9c6f0', 'center', 'bold');
         ctx.fillStyle = P.base; ctx.strokeStyle = P.dark; ctx.lineWidth = 3; circ(ctx, 556, y, 12); ctx.fill(); ctx.stroke();
         text(s.id === 0 ? 'أنت' : `${P.name} · ${KIND_AR[P.kind]}`, 534, y, 26, s.alive ? '#fff' : '#9a98b8', 'right', s.id === 0 ? 'bold' : '');
         text(s.alive ? `${Math.floor(s.len)}` : `خارج · ${Math.floor(s.len)}`, 120, y, 26, s.alive ? '#ffd27a' : '#9a98b8', 'left', 'bold');
       });
-      text(`أفاعٍ اصطدمت بك: ${state.kills}`, W / 2, 944, 28, '#c9c6f0', 'center');
+      text(`أفاعٍ اصطدمت بك: ${state.kills}`, W / 2, 900, 28, '#c9c6f0', 'center');
+      if (state.unlocked >= 0) text(`فتحت ${TIERS[state.unlocked].name}: تجدها في القائمة`, W / 2, 944, 28, TIERS[state.unlocked].col, 'center', 'bold');
+      else text(`${TIERS[state.tier].name}${state.revived ? ' · استعملت العودة المجانية' : ''}`, W / 2, 944, 26, TIERS[state.tier].col, 'center', 'bold');
       bigButton(BTN_AGAIN, 'العب مجددًا', true); bigButton(BTN_MENU, 'القائمة');
     },
   },

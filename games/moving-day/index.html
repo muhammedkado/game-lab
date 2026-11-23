@@ -148,6 +148,19 @@ try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && Array.isArr
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* no storage */ } }
 function totalStars() { return save.stars.reduce((a, b) => a + (b || 0), 0); }
 
+// ---- Local play log (S1): honest per-room numbers for the owner's playtests, on this device only --
+// An attempt counts from its first pick; firstTryWin is 1 when the very first attempt was won.
+const LOG_KEY = 'gamelab:moving-day:log';
+let playLog = { v: 1, levels: {} };
+try { const s = JSON.parse(localStorage.getItem(LOG_KEY)); if (s && s.levels && typeof s.levels === 'object') playLog = s; } catch (e) { /* no storage */ }
+function logRec(L) {
+  const k = String(L);
+  return playLog.levels[k] || (playLog.levels[k] = { attempts: 0, wins: 0, lost: 0, firstTryWin: null, bestTime: null, hints: 0, undos: 0, shuffles: 0 });
+}
+function logSave() { try { localStorage.setItem(LOG_KEY, JSON.stringify(playLog)); } catch (e) { /* no storage */ } }
+function logClear() { playLog = { v: 1, levels: {} }; logSave(); }
+function fmtTime(s) { const m = Math.floor(s / 60), r = Math.floor(s % 60); return m + ':' + (r < 10 ? '0' : '') + r; }
+
 // ---- Drawing helpers --------------------------------------------------------------------------
 const lerp = (a, b, u) => a + (b - a) * u;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -211,9 +224,30 @@ function drawIcon(kind, x, y, s, col) {
     ctx.beginPath(); ctx.moveTo(-s * 0.42, -s * 0.02); ctx.lineTo(0, -s * 0.4); ctx.lineTo(s * 0.42, -s * 0.02); ctx.stroke();
     rrect(-s * 0.28, -s * 0.06, s * 0.56, s * 0.42, s * 0.04); ctx.fill();
     ctx.fillStyle = '#5a3a24'; rrect(-s * 0.08, s * 0.1, s * 0.16, s * 0.26, s * 0.03); ctx.fill();
+  } else if (kind === 'chart') { // three bars on a base line: the play log
+    ctx.beginPath(); ctx.moveTo(-s * 0.44, s * 0.38); ctx.lineTo(s * 0.44, s * 0.38); ctx.stroke();
+    [[-0.3, 0.3], [0, 0.62], [0.3, 0.44]].forEach(([bx, bh]) => { rrect(s * (bx - 0.1), s * (0.3 - bh), s * 0.2, s * bh, s * 0.04); ctx.fill(); });
   }
   ctx.restore();
 }
+// The honest difficulty label (S2): a red pill with two drawn peaks and the word "صعبة".
+function hardPill(cx, cy, s = 1) {
+  const w = 108 * s, h = 36 * s;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; rrect(cx - w / 2 + 2, cy - h / 2 + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = '#b8321f'; rrect(cx - w / 2, cy - h / 2, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = '#ffe3b0'; ctx.lineWidth = 2.5; ctx.stroke();
+  const px = cx + w / 2 - 20 * s, py = cy + 8 * s;
+  ctx.fillStyle = '#ffe3b0'; ctx.beginPath();
+  ctx.moveTo(px - 13 * s, py); ctx.lineTo(px - 5 * s, py - 15 * s); ctx.lineTo(px, py - 8 * s);
+  ctx.lineTo(px + 4 * s, py - 12 * s); ctx.lineTo(px + 11 * s, py); ctx.closePath(); ctx.fill();
+  text('صعبة', cx - 17 * s, cy + 1, Math.max(24, Math.round(24 * s)), '#fff6e6');
+}
+function crossMark(x, y, s, c) {
+  ctx.strokeStyle = c; ctx.lineWidth = s * 0.2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x - s * 0.36, y - s * 0.36); ctx.lineTo(x + s * 0.36, y + s * 0.36);
+  ctx.moveTo(x + s * 0.36, y - s * 0.36); ctx.lineTo(x - s * 0.36, y + s * 0.36); ctx.stroke();
+}
+function dashMark(x, y, c) { ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x - 11, y); ctx.lineTo(x + 11, y); ctx.stroke(); }
 function woodButton(x, y, w, h, on = true) {
   ctx.fillStyle = 'rgba(0,0,0,0.25)'; rrect(x + 2, y + 4, w, h, 16); ctx.fill();
   const gr = ctx.createLinearGradient(0, y, 0, y + h);
@@ -402,7 +436,10 @@ const STRIP_Y = 717;
 const BOX_TOP = 800, BOX_FACE = 830, BOX_FACE_H = 124;
 const boxX = s => 130 + s * 230;
 const TABLE_BACK = 1012, TABLE_FRONT = 1112, SPOT_Y = 1062;
-const spotX = s => 104 + s * 128;
+// The side table's spots spread to fit how many there are (M1: six); items there shrink to fit.
+const spotGap = () => Math.min(128, 648 / tune.table_spots);
+const spotX = s => 360 + (s - (tune.table_spots - 1) / 2) * spotGap();
+const tableScale = () => Math.min(0.84, spotGap() * 0.0072);
 const BTN = { mute: [14, 12, 76, 72], menu: [98, 12, 76, 72], shuffle: [444, 12, 82, 72], undo: [534, 12, 82, 72], restart: [624, 12, 82, 72] };
 
 // ---- Rules: one pick, used by the game, the dealer and the solver -------------------------------
@@ -494,8 +531,12 @@ function levelSpec(L) {
   const boxes = n / 3;
   const kinds = Math.min(tune.kinds_max, 16, boxes, Math.max(4, Math.ceil(boxes * tune.kinds_ratio)));
   const layers = L === 1 ? 1 : Math.min(tune.layers_max, 1 + Math.ceil(L / 2));
-  return { L, n, boxes, kinds, layers, pPark: L === 1 ? 0 : tune.park_chance, tablePlan: L === 1 ? 0 : L === 2 ? Math.min(2, tune.table_plan) : tune.table_plan, similar: L >= tune.similar_from };
+  const hard = isHard(L); // S2: a hard room's own way through parks more, so the room asks for more buried kinds
+  const plan = L === 1 ? 0 : L === 2 ? Math.min(2, tune.table_plan) : hard ? tune.hard_table_plan : tune.table_plan;
+  return { L, n, boxes, kinds, layers, pPark: L === 1 ? 0 : hard ? tune.hard_park_chance : tune.park_chance, tablePlan: Math.min(plan, tune.table_spots), similar: L >= tune.similar_from, hard };
 }
+// S2: the rooms meant to be harder, said openly before they start (title tile, banner, HUD).
+function isHard(L) { return L >= tune.hard_from && (L - tune.hard_from) % tune.hard_every === 0; }
 function shuffleArr(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 // A heap: layers on two offset lattices, each upper item resting on items below, crowded to the middle.
 function layoutPile(n, layers) {
@@ -587,10 +628,15 @@ function dealLevel(L) {
       if (S.lost) { ok = false; break; }
     }
     if (!ok || !allPacked(S)) continue;
+    // M1: no decoys. Every item belongs to some box: each kind has exactly three items per label asking for it.
+    const need = {}, have = {};
+    labels.forEach(k => { need[k] = (need[k] || 0) + 3; });
+    lv.kinds.forEach(k => { have[k] = (have[k] || 0) + 1; });
+    if (lv.kinds.some(k => !need[k]) || Object.keys(need).some(k => have[k] !== need[k])) continue;
     const res = solvePile(lv, lv.kinds, initState(n, labels), tune.solver_nodes);
     if (!res.ok) continue;
-    lv.solution = res.path; lv.solverNodes = res.nodes; lv.attempts = attempt + 1;
-    events.push({ type: 'dealt', level: L, items: n, kinds: kindSet.length, layers: sp.layers, attempts: attempt + 1, solverNodes: res.nodes });
+    lv.solution = res.path; lv.solverNodes = res.nodes; lv.attempts = attempt + 1; lv.hard = sp.hard;
+    events.push({ type: 'dealt', level: L, items: n, kinds: kindSet.length, layers: sp.layers, attempts: attempt + 1, solverNodes: res.nodes, spots: tune.table_spots, decoys: 0, hard: sp.hard });
     return lv;
   }
   throw new Error('dealer found no solvable room ' + L);
@@ -610,6 +656,9 @@ function startLevel(L) {
     shuffles: tune.shuffles, shufflesUsed: 0, pending: '', lostItem: -1, stars: 0, prevBest: 0, winT: 0,
     iv: [], bv: {}, slotFree: [0, 0, 0], spotFree: [], busyUntil: 0, fx: [], parts: [],
     msg: '', msgT: -9, cursor: -1, kbd: false, tapped: false, shakeT: -9, shakeId: -1, shuffleT: -9, tableFlashT: -9,
+    autoHint: -1, autoHintT: -9, hintsLeft: tune.hints_per_room, hintsUsed: 0, lastActT: 0, // M2: idle hint
+    counted: false, firstTry: false, // S1: an attempt is logged from its first pick
+    coverers: lv.items.map((_, i) => { const o = []; for (let j = 0; j < lv.items.length; j++) if (j < 30 ? (lv.cov0[i] >> j & 1) : (lv.cov1[i] >> (j - 30) & 1)) o.push(j); return o; }),
   };
   settle();
   const glass = lv.items.map((_, i) => i).find(i => isFree(lv, state.S, i) && state.kinds[i] === lv.labels[0]);
@@ -639,7 +688,7 @@ function boxPose(b, t) {
 }
 function targetPos(to, t) {
   if (to.k === 'box') { const b = state.bv[to.label], p = boxPose(b, t); return [p.x + (to.pos - 1) * 60, BOX_TOP - 2 + p.dy, 0.66]; }
-  return [spotX(to.spot), SPOT_Y - 24, 0.84];
+  return [spotX(to.spot), SPOT_Y - 24, tableScale()];
 }
 function pileScale() { return tune.item_size; }
 function itemPose(i, t) { // where an item is drawn now
@@ -686,7 +735,7 @@ function schedule(evs) {
       const t0 = Math.max(nb.arriveT + 0.05 + jumpK * 0.1, last ? last.t1 + 0.05 : t);
       jumpK++;
       const t1 = t0 + JUMP;
-      v.segs.push({ t0, t1, from: [spotX(ev.spot), SPOT_Y - 24, 0.84], fromRot: 0, to: { k: 'box', label: ev.label, pos: ev.pos } });
+      v.segs.push({ t0, t1, from: [spotX(ev.spot), SPOT_Y - 24, tableScale()], fromRot: 0, to: { k: 'box', label: ev.label, pos: ev.pos } });
       state.spotFree[ev.spot] = t0 + 0.1;
       nb.lastLand = Math.max(nb.lastLand, t1);
       state.fx.push({ t: t0, k: 'jump' }, { t: t1, k: 'land', pos: ev.pos, id: ev.id });
@@ -695,11 +744,45 @@ function schedule(evs) {
   }
 }
 function toast(s) { state.msg = s; state.msgT = state.t; }
+// M3: an item stays covered (dimmed, not pickable) until every item that lay on it has fully
+// left: landed in its box or on the table. The rules (isFree) free it at once; the picture waits.
+function isFreeNow(i) {
+  if (!isFree(state.lv, state.S, i)) return false;
+  for (const j of state.coverers[i]) { const v = state.iv[j]; if (!v.gone && !(v.segs.length && state.t >= v.segs[0].t1)) return false; }
+  return true;
+}
+// M2: after hint_idle seconds with no pick, one uncovered item that an open box wants pulses
+// gently, at most hints_per_room times. It is a pick the solver checked keeps the room winnable
+// when it can find one; otherwise simply an item that fits an open box.
+function pickHint() {
+  const lv = state.lv, S = state.S, kinds = state.kinds, cand = [];
+  for (let i = 0; i < lv.items.length; i++) if (isFreeNow(i) && fits(S, kinds, i)) cand.push(i);
+  if (!cand.length) return -1;
+  const res = solvePile(lv, kinds, S, tune.hint_nodes), first = res.ok ? res.path.filter(i => cand.includes(i)) : [];
+  const order = first.concat(cand.filter(i => !first.includes(i)));
+  for (const i of order.slice(0, 4)) { const T = applyPick(S, i, kinds, lv.labels); if (!T.lost && (allPacked(T) || solvePile(lv, kinds, T, tune.hint_nodes).ok)) return i; }
+  return cand[0];
+}
+function maybeHint() {
+  if (state.autoHint >= 0 || state.hintsLeft <= 0 || state.pending || (state.hint >= 0 && !state.tapped)) return;
+  if (state.t - state.lastActT < tune.hint_idle || state.t < state.busyUntil) return;
+  state.lastActT = state.t; // no item to point at: try again after another idle stretch
+  const id = pickHint(); if (id < 0) return;
+  state.autoHint = id; state.autoHintT = state.t; state.hintsLeft--; state.hintsUsed++;
+  const r = logRec(state.level); r.hints++; logSave();
+  toast('تلميح: صندوق يطلب هذه القطعة'); events.push({ type: 'hint', id });
+}
+function acted() { state.lastActT = state.t; state.autoHint = -1; }
 function doPick(id) {
   const lv = state.lv, S = state.S;
   if (state.pending || S.loc[id] !== 0) return;
   state.tapped = true; state.hint = -1;
-  if (!isFree(lv, S, id)) { state.shakeT = state.t; state.shakeId = id; toast('مغطّاة: ارفع ما فوقها أولاً'); sfx.covered(); return; }
+  if (!isFreeNow(id)) { state.shakeT = state.t; state.shakeId = id; if (!isFree(lv, S, id)) toast('مغطّاة: ارفع ما فوقها أولاً'); sfx.covered(); return; }
+  if (!state.counted) { // S1: the first pick makes this an attempt
+    const r = logRec(state.level); state.counted = true; state.firstTry = r.attempts === 0;
+    r.attempts++; if (state.firstTry) r.firstTryWin = 0; logSave();
+  }
+  acted();
   const evs = [];
   const T = applyPick(S, id, state.kinds, lv.labels, evs);
   if (T.lost) { // the table has no spot and no box wants it
@@ -716,7 +799,8 @@ function doUndo() {
   if (!state.hist.length) { toast('لا شيء للتراجع'); return false; }
   if (state.undos <= 0) { toast('انتهت مرات التراجع'); return false; }
   const h = JSON.parse(state.hist.pop());
-  state.S = h.S; state.kinds = h.kinds; state.undos--; state.undosUsed++;
+  state.S = h.S; state.kinds = h.kinds; state.undos--; state.undosUsed++; acted();
+  { const r = logRec(state.level); r.undos++; logSave(); }
   state.pending = ''; state.lostItem = -1; state.parts = []; settle(); sfx.undo(); events.push({ type: 'undo' });
   scene = 'play'; return true;
 }
@@ -732,7 +816,8 @@ function doShuffle() {
     ids.forEach((id, j) => { kinds2[id] = perm[j]; });
     if (solvePile(lv, kinds2, S, 6000).ok) {
       state.hist.push(JSON.stringify({ S, kinds: state.kinds }));
-      state.kinds = kinds2; state.shuffles--; state.shufflesUsed++; state.shuffleT = state.t; state.tapped = true; state.hint = -1;
+      state.kinds = kinds2; state.shuffles--; state.shufflesUsed++; state.shuffleT = state.t; state.tapped = true; state.hint = -1; acted();
+      { const r = logRec(state.level); r.shuffles++; logSave(); }
       sfx.shuffle(); events.push({ type: 'shuffle' }); toast('خُلطت الكومة: لها حل مؤكد');
       return;
     }
@@ -748,6 +833,8 @@ function finishLevel() {
   save.unlocked = Math.max(save.unlocked || 1, Math.min(tune.levels, L + 1));
   persist();
   state.score = totalStars(); state.gained = `الغرفة ${L}: ${stars} نجوم`;
+  { const r = logRec(L); r.wins++; if (state.firstTry) r.firstTryWin = 1;
+    const secs = Math.round(state.t * 10) / 10; if (r.bestTime == null || secs < r.bestTime) r.bestTime = secs; logSave(); }
   scene = 'results'; state.winT = state.t; sfx.win();
   const cols = ['#e2453a', '#f3c11d', '#2f7dd0', '#4aa05a', '#ea7aa2'];
   for (let k = 0; k < 44; k++) state.parts.push({ x: W / 2, y: 470, vx: (rng() - 0.5) * 700, vy: -rng() * 600 - 100, r: 5 + rng() * 6, life: 1.6, max: 1.6, col: cols[k % 5], g: 700 });
@@ -807,12 +894,13 @@ function paintBackground() {
   ctx.strokeStyle = 'rgba(110,60,25,0.35)'; ctx.lineWidth = 1.5;
   for (let k = 0; k < 7; k++) { const y = TABLE_BACK + 12 + k * 13; ctx.beginPath(); ctx.moveTo(40 - k * 3, y); ctx.bezierCurveTo(240, y + 4, 480, y - 4, 680 + k * 3, y); ctx.stroke(); }
   ctx.fillStyle = '#7a4524'; ctx.fillRect(18, TABLE_FRONT, 684, 22); ctx.strokeStyle = '#4e2a12'; ctx.lineWidth = 2; ctx.strokeRect(18, TABLE_FRONT, 684, 22);
+  const R = Math.min(52, spotGap() * 0.43); // lace doilies, one per spot, sized to the spacing
   for (let s = 0; s < tune.table_spots; s++) {
     const x = spotX(s);
     ctx.fillStyle = '#fbf3e2';
-    for (let a = 0; a < 18; a++) { const an = a / 18 * Math.PI * 2; ell(x + Math.cos(an) * 52, SPOT_Y + Math.sin(an) * 25, 7, 4.5); ctx.fill(); }
-    ell(x, SPOT_Y, 52, 25); ctx.fill();
-    ctx.strokeStyle = '#e4d2b0'; ctx.lineWidth = 1.5; ell(x, SPOT_Y, 38, 17); ctx.stroke(); ell(x, SPOT_Y, 20, 9); ctx.stroke();
+    for (let a = 0; a < 18; a++) { const an = a / 18 * Math.PI * 2; ell(x + Math.cos(an) * R, SPOT_Y + Math.sin(an) * R * 0.48, 7, 4.5); ctx.fill(); }
+    ell(x, SPOT_Y, R, R * 0.48); ctx.fill();
+    ctx.strokeStyle = '#e4d2b0'; ctx.lineWidth = 1.5; ell(x, SPOT_Y, R * 0.73, R * 0.33); ctx.stroke(); ell(x, SPOT_Y, R * 0.38, R * 0.17); ctx.stroke();
   }
 }
 function drawBackground(key) {
@@ -873,10 +961,10 @@ function drawBoxFront(b, bx, dy, p, t) {
 }
 
 // ---- Drawing play --------------------------------------------------------------------------
-function freeList() { const lv = state.lv, out = []; for (let i = 0; i < lv.items.length; i++) if (isFree(lv, state.S, i)) out.push(i); return out; }
+function freeList() { const lv = state.lv, out = []; for (let i = 0; i < lv.items.length; i++) if (isFreeNow(i)) out.push(i); return out; }
 function drawPlay() {
   const lv = state.lv, S = state.S, t = state.t;
-  drawBackground('room');
+  drawBackground('room' + tune.table_spots);
   // table glow when nearly full
   const used = S.table.filter(x => x >= 0).length, spots = tune.table_spots;
   const pulse = 0.5 + 0.5 * Math.sin(t * 6);
@@ -892,7 +980,14 @@ function drawPlay() {
     let s = p.s, rot = p.rot, dx = 0;
     if (state.shakeId === i && t - state.shakeT < 0.4) dx = Math.sin((t - state.shakeT) * 50) * 6 * (1 - (t - state.shakeT) / 0.4);
     if (sh >= 0) { s *= 1 - Math.sin(sh * Math.PI) * 0.25; rot += Math.sin(sh * Math.PI) * 1.2; }
-    const free = isFree(lv, S, i);
+    const free = isFreeNow(i);
+    if (i === state.autoHint) { // M2: a gentle golden glow under the hinted item, breathing (no outline, unlike the key cursor)
+      const a = clamp((t - state.autoHintT) / 0.5, 0, 1), k = 0.5 + 0.5 * Math.sin((t - state.autoHintT) * 4.5), r = 70 + 10 * k;
+      const g = ctx.createRadialGradient(p.x, p.y + 4, 8, p.x, p.y + 4, r);
+      g.addColorStop(0, `rgba(255,205,60,${a * (0.55 + 0.25 * k)})`); g.addColorStop(0.6, `rgba(255,190,40,${a * (0.3 + 0.15 * k)})`); g.addColorStop(1, 'rgba(255,190,40,0)');
+      ctx.fillStyle = g; ell(p.x, p.y + 4, r, r); ctx.fill();
+      s *= 1 + 0.07 * k * a;
+    }
     if (state.kbd && state.cursor === i) { ctx.fillStyle = `rgba(255,248,210,${0.55 + 0.3 * pulse})`; ell(p.x, p.y + 4, 56, 54); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.stroke(); }
     drawItem(state.kinds[i], p.x + dx, p.y, s, rot, !free);
   }
@@ -950,7 +1045,7 @@ const TIPS = {
   3: 'ثلاث طبقات: الصناديق تطلب قطعاً مدفونة',
   4: 'انظر إلى الصندوقين التاليين وخطّط',
   5: 'قطع متشابهة: دقّق في الشكل',
-  6: 'خمس بقع فقط على الطاولة',
+  6: 'لا تملأ بقع الطاولة مبكراً',
   7: 'غرفة مزدحمة: استعمل الطاولة بحكمة',
   8: 'الغرفة الأخيرة',
 };
@@ -960,6 +1055,7 @@ function drawBanner() {
   text(TIPS[state.level] || 'خطّط قبل أن تلتقط', W / 2, 1032, 30, '#fff2d6');
   text('غرفة مفحوصة: لها حل مؤكد', W / 2 - 20, 1078, 26, '#bfe8a8');
   checkMark(W / 2 + 178, 1078, 26, '#8fd67a');
+  if (state.lv.hard) hardPill(W / 2, 994, 1.1); // S2: said before the room starts
 }
 function drawHud() {
   const b = BTN, lv = state.lv;
@@ -971,8 +1067,10 @@ function drawHud() {
   const canUndo = state.undos > 0 && state.hist.length > 0;
   woodButton(...b.undo, canUndo); drawIcon('undo', b.undo[0] + 36, b.undo[1] + 36, 46, canUndo ? '#fff2d6' : '#a8957c'); badge(b.undo[0] + 70, b.undo[1] + 14, state.undos);
   woodButton(...b.restart); drawIcon('restart', b.restart[0] + 41, b.restart[1] + 36, 46, '#fff2d6');
-  text(`الغرفة ${lv.L}`, 309, 36, 34, '#fff2d6');
-  text(`من ${tune.levels}`, 309, 74, 24, '#e8cc9a', 'center', 600);
+  const hx = lv.hard ? 366 : 309;
+  text(`الغرفة ${lv.L}`, hx, 36, 34, '#fff2d6');
+  text(`من ${tune.levels}`, hx, 74, 24, '#e8cc9a', 'center', 600);
+  if (lv.hard) hardPill(232, 36, 0.9);
 }
 
 // ---- Overlays ---------------------------------------------------------------------------------
@@ -1016,16 +1114,17 @@ function drawResults() {
   }
   const best = save.stars[L - 1] || 0;
   text(state.stars > state.prevBest ? 'أفضل نتيجة جديدة!' : `أفضل نتيجة: ${best} من 3`, W / 2, 680, 30, '#8a4a10');
-  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : `تراجع: ${state.undosUsed} · خلط: ${state.shufflesUsed}`, W / 2, 736, 28, '#4a2c14', 'center', 600);
+  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : `تراجع: ${state.undosUsed} · خلط: ${state.shufflesUsed} · تلميح: ${state.hintsUsed}`, W / 2, 736, 28, '#4a2c14', 'center', 600);
   bigButton(...RES_BTNS.next, last ? 'القائمة' : 'الغرفة التالية', '#3f8f4e');
+  if (!last && isHard(L + 1)) hardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 64, RES_BTNS.next[1], 1); // S2: the next one is hard
   bigButton(...RES_BTNS.again, 'أعد هذه الغرفة', '#8a5a2a');
 }
 
 // ---- Title and figures -------------------------------------------------------------------------
-const TITLE_BTNS = { start: [150, 560, 420, 116], home: [14, 12, 76, 72], mute: [630, 12, 76, 72] };
+const TITLE_BTNS = { start: [150, 560, 420, 116], home: [14, 12, 76, 72], mute: [630, 12, 76, 72], stats: [438, 12, 182, 72] };
 const levelBtn = i => [70 + (i % 4) * 150, 740 + Math.floor(i / 4) * 116, 130, 100];
 function drawTitle() {
-  drawBackground('room');
+  drawBackground('room' + tune.table_spots);
   const deco = [[0, 150, 420, -0.2], [10, 270, 440, 0.1], [14, 400, 425, -0.1], [12, 530, 430, 0.05], [5, 600, 470, 0.3], [3, 210, 500, 0.15], [9, 360, 505, 0], [1, 480, 500, -0.1]];
   for (const [k, x, y, r] of deco) drawItem(k, x, y, 0.95, r);
   ctx.fillStyle = 'rgba(40,22,10,0.62)'; rrect(40, 150, 640, 220, 30); ctx.fill();
@@ -1036,14 +1135,70 @@ function drawTitle() {
   for (let i = 0; i < tune.levels; i++) {
     const [x, y, w, h] = levelBtn(i), open = i + 1 <= (save.unlocked || 1);
     woodButton(x, y, w, h, open);
-    text(String(i + 1), x + w / 2, y + 38, 36, open ? '#fff2d6' : '#9c8a72');
-    for (let k = 0; k < 3; k++) drawStar(x + w / 2 + (k - 1) * 28, y + 76, 12, k < (save.stars[i] || 0));
+    text(String(i + 1), x + w / 2, y + 40, 36, open ? '#fff2d6' : '#9c8a72');
+    for (let k = 0; k < 3; k++) drawStar(x + w / 2 + (k - 1) * 28, y + 77, 12, k < (save.stars[i] || 0));
+    if (isHard(i + 1)) hardPill(x + w / 2, y + 3, 0.9); // S2: hard rooms say so on their tile
   }
   ctx.fillStyle = 'rgba(40,22,10,0.7)'; rrect(30, 990, 660, 210, 24); ctx.fill();
   CONTROLS.forEach((c, i) => text(c, W / 2, 1026 + i * 46, i < 2 ? 28 : 26, i < 2 ? '#fff2d6' : '#e8cc9a', 'center', i < 2 ? 700 : 600));
   text(`نجومك: ${totalStars()} من ${tune.levels * 3}`, W / 2, 1236, 26, '#fff2d6', 'center', 600);
   if (location.protocol.startsWith('http')) { woodButton(...TITLE_BTNS.home); drawIcon('home', TITLE_BTNS.home[0] + 38, TITLE_BTNS.home[1] + 36, 46, '#fff2d6'); }
   woodButton(...TITLE_BTNS.mute); drawIcon(muted ? 'mute' : 'sound', TITLE_BTNS.mute[0] + 38, TITLE_BTNS.mute[1] + 36, 44, '#fff2d6');
+  const sb = TITLE_BTNS.stats; // S1: the play log
+  woodButton(...sb); drawIcon('chart', sb[0] + sb[2] - 30, sb[1] + 36, 38, '#fff2d6');
+  text('إحصائياتي', sb[0] + 64, sb[1] + 38, 26, '#fff2d6');
+}
+// ---- S1: the play log panel, "إحصائياتي" -------------------------------------------------------
+const STATS_BTNS = { back: [372, 1060, 300, 96], clear: [48, 1060, 300, 96] };
+let statsClearT = -9, gt = 0; // gt: time on the title and log screens; a second tap on "clear" within 3 s wipes the log
+function drawStats() {
+  drawBackground('room' + tune.table_spots);
+  ctx.fillStyle = 'rgba(20,10,4,0.6)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(28, 112, 672, 1080, 30); ctx.fill();
+  const gr = ctx.createLinearGradient(0, 104, 0, 1184); gr.addColorStop(0, '#fbf0d8'); gr.addColorStop(1, '#efd9ae');
+  ctx.fillStyle = gr; rrect(24, 104, 672, 1080, 30); ctx.fill();
+  ctx.strokeStyle = '#8a5a2a'; ctx.lineWidth = 5; ctx.stroke();
+  ctx.strokeStyle = '#c89a5a'; ctx.lineWidth = 2; rrect(38, 118, 644, 1052, 22); ctx.stroke();
+  drawIcon('chart', W / 2 + 128, 166, 44, '#8a5a2a');
+  text('إحصائياتي', W / 2 - 20, 168, 48, '#4a2c14');
+  text('سجل على هذا الجهاز فقط، لا يُرسل إلى أي مكان', W / 2, 218, 24, '#6a4a2a', 'center', 600);
+  const recs = []; let A = 0, Wn = 0, Lo = 0, F = 0, Fp = 0;
+  for (let L = 1; L <= tune.levels; L++) {
+    const r = playLog.levels[String(L)] || null; recs.push(r);
+    if (!r) continue;
+    A += r.attempts; Wn += r.wins; Lo += r.lost;
+    if (r.firstTryWin != null) { Fp++; if (r.firstTryWin === 1) F++; }
+  }
+  text(`محاولات: ${A} · فوز: ${Wn} · امتلأت الطاولة: ${Lo}`, W / 2, 262, 28, '#4a2c14');
+  text(`فوز من أول محاولة: ${F} من ${Fp}`, W / 2, 302, 28, '#4a2c14');
+  // the table, right to left: room, attempts, wins, first attempt, best time, hints, undos, shuffles
+  const heads = [['غرفة'], ['محاولات'], ['فوز'], ['أول', 'محاولة'], ['أفضل', 'وقت'], ['تلميح'], ['تراجع'], ['خلط']];
+  const cw = 632 / heads.length, cx = k => 676 - cw * (k + 0.5);
+  ctx.fillStyle = 'rgba(138,90,42,0.18)'; rrect(44, 330, 632, 70, 12); ctx.fill();
+  heads.forEach((h, k) => h.forEach((w, j) => text(w, cx(k), h.length === 1 ? 366 : 350 + j * 30, 24, '#5a3416')));
+  const RH = 64, y0 = 436;
+  recs.forEach((r, i) => {
+    const y = y0 + i * RH, L = i + 1;
+    if (i % 2) { ctx.fillStyle = 'rgba(150,100,50,0.1)'; rrect(44, y - RH / 2, 632, RH, 8); ctx.fill(); }
+    if (isHard(L)) { ctx.fillStyle = '#b8321f'; rrect(cx(0) - 24, y - 18, 48, 36, 18); ctx.fill(); text(String(L), cx(0), y + 1, 28, '#fff6e6'); }
+    else text(String(L), cx(0), y + 1, 28, '#4a2c14');
+    if (!r || !r.attempts) { for (let k = 1; k < heads.length; k++) dashMark(cx(k), y, 'rgba(90,52,22,0.45)'); return; }
+    text(String(r.attempts), cx(1), y + 1, 28, '#4a2c14');
+    text(String(r.wins), cx(2), y + 1, 28, '#4a2c14');
+    if (r.firstTryWin === 1) checkMark(cx(3), y, 26, '#3f8f4e');
+    else if (r.firstTryWin === 0) crossMark(cx(3), y, 24, '#a8402c');
+    else dashMark(cx(3), y, 'rgba(90,52,22,0.45)');
+    if (r.bestTime != null) text(fmtTime(r.bestTime), cx(4), y + 1, 28, '#4a2c14'); else dashMark(cx(4), y, 'rgba(90,52,22,0.45)');
+    text(String(r.hints), cx(5), y + 1, 28, '#4a2c14');
+    text(String(r.undos), cx(6), y + 1, 28, '#4a2c14');
+    text(String(r.shuffles), cx(7), y + 1, 28, '#4a2c14');
+  });
+  const ly = y0 + recs.length * RH + 10;
+  ctx.fillStyle = '#b8321f'; rrect(W / 2 + 84, ly - 16, 44, 32, 16); ctx.fill(); text('3', W / 2 + 106, ly + 1, 24, '#fff6e6');
+  text('غرفة صعبة', W / 2 - 4, ly + 1, 24, '#5a3416');
+  bigButton(...STATS_BTNS.back, 'رجوع', '#3f8f4e');
+  const armed = gt - statsClearT < 3;
+  bigButton(...STATS_BTNS.clear, armed ? 'اضغط للتأكيد' : 'مسح السجل', armed ? '#a8402c' : '#8a5a2a');
 }
 function drawFigures() {
   ctx.fillStyle = '#f2dcb4'; ctx.fillRect(0, 0, W, H);
@@ -1061,6 +1216,7 @@ function drawFigures() {
   drawBoxFront(b, 470, 0, { flap: 0, tape: 0 }, 0);
   ctx.restore();
   text('صندوق بملصق مرسوم', 470, 1250, 24, '#4a2c14');
+  hardPill(150, 1180, 1); text('وسم صعبة', 150, 1230, 24, '#4a2c14');
 }
 
 // ---- Scenes ---------------------------------------------------------------------------------
@@ -1109,8 +1265,8 @@ function playInput() {
   if (pressed('ArrowRight') || pressed('ArrowDown')) moveCursor(1);
   if (pressed('ArrowLeft') || pressed('ArrowUp')) moveCursor(-1);
   if (pressed('Space') || pressed('Enter')) {
-    if (state.cursor < 0 || !isFree(state.lv, state.S, state.cursor)) moveCursor(0);
-    if (state.cursor >= 0) { const c = state.cursor; doPick(c); if (!isFree(state.lv, state.S, state.cursor)) moveCursor(0); }
+    if (state.cursor < 0 || !isFreeNow(state.cursor)) moveCursor(0);
+    if (state.cursor >= 0) { const c = state.cursor; doPick(c); if (!isFreeNow(state.cursor)) moveCursor(0); }
   }
   let p;
   while ((p = takeTap())) {
@@ -1129,15 +1285,31 @@ const scenes = {
     update() {
       const L = Math.min(save.unlocked || 1, tune.levels);
       if (pressed('Enter') || pressed('Space')) { startLevel(L); scene = 'play'; sfx.ui(); return; }
+      if (pressed('KeyL')) { scene = 'stats'; statsClearT = -9; sfx.ui(); return; }
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...TITLE_BTNS.mute)) { setMuted(!muted); continue; }
         if (location.protocol.startsWith('http') && inRect(p, ...TITLE_BTNS.home)) { location.href = '../../'; return; }
+        if (inRect(p, ...TITLE_BTNS.stats)) { scene = 'stats'; statsClearT = -9; sfx.ui(); return; }
         if (inRect(p, ...TITLE_BTNS.start)) { startLevel(L); scene = 'play'; sfx.ui(); return; }
         for (let i = 0; i < tune.levels; i++) if (inRect(p, ...levelBtn(i)) && i + 1 <= (save.unlocked || 1)) { startLevel(i + 1); scene = 'play'; sfx.ui(); return; }
       }
     },
     draw() { drawTitle(); },
+  },
+  stats: {
+    update() {
+      if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyL') || pressed('Backspace')) { scene = 'title'; sfx.ui(); return; }
+      let p;
+      while ((p = takeTap())) {
+        if (inRect(p, ...STATS_BTNS.back)) { scene = 'title'; sfx.ui(); return; }
+        if (inRect(p, ...STATS_BTNS.clear)) {
+          if (gt - statsClearT < 3) { logClear(); statsClearT = -9; sfx.undo(); events.push({ type: 'log-cleared' }); }
+          else { statsClearT = gt; sfx.ui(); }
+        }
+      }
+    },
+    draw() { drawStats(); },
   },
   play: {
     update(dt) {
@@ -1145,9 +1317,13 @@ const scenes = {
       playInput();
       if (scene !== 'play') return;
       updateWorld(dt);
+      maybeHint();
       if (state.pending && state.t >= state.busyUntil + 0.3) {
         if (state.pending === 'win') finishLevel();
-        else { scene = 'over'; sfx.lose(); state.gained = 'الطاولة امتلأت'; events.push({ type: 'over', level: state.level }); }
+        else {
+          scene = 'over'; sfx.lose(); state.gained = 'الطاولة امتلأت'; events.push({ type: 'over', level: state.level });
+          const r = logRec(state.level); r.lost++; logSave();
+        }
       }
     },
     draw() { drawPlay(); },
@@ -1187,6 +1363,7 @@ const scenes = {
 function step() {
   if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
   taps = tapQueue.splice(0);
+  gt += STEP;
   scenes[scene].update(STEP); hit.clear(); taps = [];
 }
 let last, acc = 0, ALPHA = 1;

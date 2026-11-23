@@ -142,6 +142,8 @@ const sfx = {
   select() { tone(660, 0.05, 'triangle', 0.15); },
   win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.2, 'triangle', 0.22, i * 0.11)); },
   star(i) { tone(880 + i * 220, 0.15, 'triangle', 0.2); },
+  split() { [0, 0.05, 0.1].forEach((d, i) => tone(520 + i * 140, 0.05, 'triangle', 0.1, 0.13 + d)); },
+  pulse(i) { tone(980 + i * 60, 0.08, 'sine', 0.08); },
   lose() { [392, 330, 262].forEach((f, i) => tone(f, 0.25, 'triangle', 0.2, i * 0.15)); },
 };
 
@@ -158,9 +160,28 @@ function rrect(x, y, w, h, r) {
   ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
   ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
 }
-let saved = { stars: [0, 0, 0, 0, 0] };
+let saved = { stars: [0, 0, 0, 0, 0, 0] };
 try { const s = JSON.parse(localStorage.getItem('mangonel.v1')); if (s && Array.isArray(s.stars)) saved = s; } catch (_) { /* fine */ }
 function save() { try { localStorage.setItem('mangonel.v1', JSON.stringify(saved)); } catch (_) { /* fine */ } }
+// The local play log (gamelab:mangonel:log): per level, attempts (a run with at least one throw),
+// wins, losses (out of ammo), best time to the last jar, and hints (this game has none: always 0).
+// It never leaves this device; the stats panel on the title shows it as it is.
+const LOG_KEY = 'gamelab:mangonel:log';
+let playLog = { v: 1, levels: {} };
+try { const s = JSON.parse(localStorage.getItem(LOG_KEY)); if (s && s.levels && typeof s.levels === 'object') playLog = s; } catch (_) { /* fine */ }
+function logRow(i) {
+  const k = String(i + 1);
+  return playLog.levels[k] || (playLog.levels[k] = { attempts: 0, wins: 0, losses: 0, bestTime: 0, hints: 0 });
+}
+/** Notes one thing in the play log: 'attempt', 'win' (with its time in seconds) or 'loss'. */
+function logNote(i, what, t) {
+  const r = logRow(i);
+  if (what === 'attempt') r.attempts++;
+  else if (what === 'loss') r.losses++;
+  else if (what === 'win') { r.wins++; const s = Math.round(t * 10) / 10; if (!r.bestTime || s < r.bestTime) r.bestTime = s; }
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(playLog)); } catch (_) { /* fine: the game plays without it */ }
+  events.push({ type: 'log', level: i + 1, what });
+}
 
 // =========================================================================================
 // ---- Physics world: boxes and circles, Box2D-lite style ---------------------------------
@@ -171,7 +192,7 @@ function addBody(o) {
   const b = { id: PH.nextId++, x: 0, y: 0, a: 0, vx: 0, vy: 0, w: 0, shape: 'box', hw: 0.4, hh: 0.4, r: 0,
     fr: 0.6, rest: 0, m: 0, invM: 0, I: 0, invI: 0, isStatic: false, kind: 'block', mat: '', roll: 0,
     hit: 0, hitSpd: 0, hitter: null, hvx: 0, hvy: 0, hx: 0, hy: 0, touched: false, dead: false, inContact: false,
-    age: 0, slowT: 0, burn: -1, crack: 0, vx0: 0, vy0: 0 };
+    age: 0, slowT: 0, burn: -1, crack: 0, vx0: 0, vy0: 0, sleep: false, grp: 0 };
   Object.assign(b, o);
   if (!b.isStatic) {
     const d = o.density;
@@ -181,6 +202,35 @@ function addBody(o) {
   }
   b.px = b.x; b.py = b.y; b.pa = b.a;
   PH.bodies.push(b); return b;
+}
+// -- Sleep (settle on spawn): a structure is built asleep. A sleeping body is held still, as if
+// static, until a projectile or a moving body touches it, its support goes, or a burst reaches
+// it; then it wakes for good. So nothing ever topples on its own before the first throw.
+function sleepBody(b) {
+  if (b.isStatic || b.sleep) return;
+  b.sleep = true; b.invM = 0; b.invI = 0; b.vx = b.vy = b.w = 0;
+}
+function wake(b) {
+  if (!b.sleep || b.dead) return;
+  b.sleep = false; b.invM = 1 / b.m; b.invI = 1 / b.I;
+}
+const bodySpeed = b => Math.hypot(b.vx, b.vy) + Math.abs(b.w) * 0.4;
+/** Wakes every sleeping body touching b (or within a hair of it): b broke, burst or left. */
+function wakeAround(b) {
+  const [x0, y0, x1, y1] = aabb(b), m = 0.08;
+  for (const o of PH.bodies) {
+    if (!o.sleep || o === b) continue;
+    const q = aabb(o);
+    if (q[0] <= x1 + m && q[2] >= x0 - m && q[1] <= y1 + m && q[3] >= y0 - m) wake(o);
+  }
+}
+/** A contact pair ends: a sleeping body that just lost a moving neighbour wakes. */
+function endPair(key) {
+  const a = PH.arb.get(key);
+  if (!a) return;
+  if (a.b1.sleep && !a.b2.isStatic) wake(a.b1);
+  if (a.b2.sleep && !a.b1.isStatic) wake(a.b2);
+  PH.arb.delete(key);
 }
 function aabb(b) {
   if (b.shape === 'circle') return [b.x - b.r, b.y - b.r, b.x + b.r, b.y + b.r];
@@ -310,11 +360,16 @@ function broadphase() {
     for (let j = i + 1; j < n; j++) {
       const B = bs[j];
       if (!A.invM && !B.invM) continue;
+      if (A.grp && A.grp === B.grp) continue; // the pebbles of one split shot never meet
       const b1 = A.id < B.id ? A : B, b2 = A.id < B.id ? B : A;
       const key = b1.id * 8192 + b2.id, bb = boxes[j];
-      if (ba[0] > bb[2] || bb[0] > ba[2] || ba[1] > bb[3] || bb[1] > ba[3]) { PH.arb.delete(key); continue; }
+      if (ba[0] > bb[2] || bb[0] > ba[2] || ba[1] > bb[3] || bb[1] > ba[3]) { endPair(key); continue; }
       const cs = collide(b1, b2);
-      if (!cs) { PH.arb.delete(key); continue; }
+      if (!cs) { endPair(key); continue; }
+      if (b1.sleep || b2.sleep) { // a touch from a projectile or a moving body wakes a sleeper
+        const s = b1.sleep ? b1 : b2, o = s === b1 ? b2 : b1;
+        if (!o.isStatic && !o.sleep && (o.proj || bodySpeed(o) > tune.wakeSpeed)) wake(s);
+      }
       let arb = PH.arb.get(key);
       if (!arb) { arb = { b1, b2, cs, fr: Math.sqrt(b1.fr * b2.fr), e: Math.max(b1.rest, b2.rest) }; PH.arb.set(key, arb); }
       else {
@@ -400,7 +455,7 @@ function physicsStep() {
 function sweepDead() {
   if (!PH.bodies.some(b => b.dead)) return;
   PH.bodies = PH.bodies.filter(b => !b.dead);
-  for (const [k, a] of PH.arb) if (a.b1.dead || a.b2.dead) PH.arb.delete(k);
+  for (const [k, a] of PH.arb) if (a.b1.dead || a.b2.dead) { wake(a.b1); wake(a.b2); PH.arb.delete(k); }
 }
 
 // =========================================================================================
@@ -408,9 +463,9 @@ function sweepDead() {
 // =========================================================================================
 const MG = { x: 2.2, pivX: 2.0, pivY: 0.8, arm: 1.8, sling: 0.45, fire: 78, rest: 156 };
 const P0 = { x: MG.pivX + (MG.arm + MG.sling) * Math.cos(MG.fire * D2R), y: MG.pivY + (MG.arm + MG.sling) * Math.sin(MG.fire * D2R) };
-const AMMO = ['stone', 'boulder', 'fire'];
-const AMMO_NAME = { stone: 'حجر', boulder: 'صخرة', fire: 'قِدر نار' };
-const AMMO_R = { stone: 0.28, boulder: 0.42, fire: 0.3 };
+const AMMO = ['stone', 'boulder', 'fire', 'split'];
+const AMMO_NAME = { stone: 'حجر', boulder: 'صخرة', fire: 'قِدر نار', split: 'رشقة' };
+const AMMO_R = { stone: 0.28, boulder: 0.42, fire: 0.3, split: 0.2, pebble: 0.2 }; // split: three pebbles of 0.2 m
 const AMIN = 5, AMAX = 85;
 function launchSpeed(pow, kind) {
   return (tune.minSpeed + pow * (tune.maxSpeed - tune.minSpeed)) * (kind === 'boulder' ? tune.boulderSpeed : 1);
@@ -440,6 +495,8 @@ function buildGround(width, pits) {
   }
 }
 
+// Level 6's pillars: [centre x, top] in metres. Each jar sits where one pebble of a fan passes.
+const L6_PILLARS = [[7.2, 3.42], [8.1, 4.38], [9.0, 5.62], [10.2, 6.74], [11.1, 8.58], [12.0, 10.04]];
 const LEVELS = [
   { name: 'البرج الصغير', tip: 'اسحب إلى الخلف ثم اترك', width: 13, pits: [],
     ammo: () => ({ stone: tune.l1Stone, boulder: 0, fire: 0 }),
@@ -468,7 +525,7 @@ const LEVELS = [
       rock(10.0, 0, 10.8, 3.4); rock(10.8, 2.5, 14.4, 3.4); rock(13.6, 0, 14.4, 2.5);
       jar(11.3, 0); jar(12.3, 0);
     } },
-  { name: 'الحصن', tip: 'ذخيرة قليلة: خطّط لكل رمية', width: 16, pits: [{ x0: 9.6, x1: 11.2, depth: 1.2 }],
+  { name: 'الحصن', tip: 'ذخيرة قليلة: خطّط لكل رمية', width: 16, pits: [{ x0: 9.6, x1: 11.2, depth: 1.2 }], hard: true,
     ammo: () => ({ stone: tune.l5Stone, boulder: tune.l5Boulder, fire: tune.l5Fire }),
     build() {
       for (let i = 0; i < 4; i++) { block('sand', 7.2, i * 0.8, 0.8, 0.8); block('sand', 8.0, i * 0.8, 0.8, 0.8); }
@@ -478,6 +535,13 @@ const LEVELS = [
       jar(13.6, 0);
       block('wood', 13.3, 2.6, 0.25, 1.3); block('wood', 14.5, 2.6, 0.25, 1.3); block('wood', 13.9, 3.9, 1.6, 0.22);
       jar(13.9, 4.12);
+    } },
+  // Level 6: six jars on rock pillars in two stepped rows; the split shot's fan of three lines up
+  // with one row at a time. Intended: one fan per row; the stone is the spare.
+  { name: 'أعمدة الصخر', tip: 'الرشقة ثلاث حصيات: صفّها على الجرار', width: 14, pits: [], hard: true, first: 'split',
+    ammo: () => ({ stone: tune.l6Stone, boulder: 0, fire: 0, split: tune.l6Split }),
+    build() {
+      for (const [x, top] of L6_PILLARS) { rock(x - 0.28, 0, x + 0.28, top); jar(x, top); }
     } },
 ];
 
@@ -490,41 +554,64 @@ function reset() {
   seed = Number(params.get('seed')) || CONFIG.seed;
   state = { t: 0, score: 0, gained: '', level: 0 };
 }
-function nextLevelIndex() { for (let i = 0; i < 5; i++) if (!saved.stars[i]) return i; return 0; }
+function nextLevelIndex() { for (let i = 0; i < LEVELS.length; i++) if (!saved.stars[i]) return i; return 0; }
 function unlocked(i) { return i === 0 || saved.stars[i - 1] > 0; }
-/** Builds level i from scratch: the same level, the same start, every time. */
-function startLevel(i) {
+/** Builds level i from scratch: the same level, the same start, every time. A new visit opens
+ *  on the level card (jars and ammo, each jar pulsing once); a retry (restart, try again)
+ *  skips the card, so trying again is instant. */
+function startLevel(i, retry = false) {
   seed = Number(params.get('seed')) || CONFIG.seed;
   const L = LEVELS[i];
   resetWorld(); S = W / L.width;
   buildGround(L.width, L.pits); L.build();
-  const a = L.ammo();
-  state = { t: 0, score: 0, gained: '', level: i, ammo: { stone: a.stone, boulder: a.boulder, fire: a.fire },
-    sel: 'stone', mode: 'aim', ang: 45, pow: 0.5, armA: MG.rest, slingA: -90, swingT: 0, recT: 0, armFrom: MG.rest,
-    drag: null, parts: [], shake: 0, shx: 0, shy: 0, settleT: 0, sinceThrow: 99, winT: 0, shots: 0,
-    jars: PH.bodies.filter(b => b.kind === 'jar').length, trail: [], lastTrail: [], rings: [],
-    banner: 3.2, tutorial: i === 0, sndCD: 0, thudCD: 0, result: null };
+  for (const b of PH.bodies) sleepBody(b); // settle on spawn: asleep until first touched
+  const a = L.ammo(), ammo = {};
+  for (const k of AMMO) ammo[k] = a[k] || 0;
+  const jars = PH.bodies.filter(b => b.kind === 'jar');
+  const intro = !retry && tune.introTime > 0;
+  state = { t: 0, score: 0, gained: '', level: i, ammo,
+    sel: 'stone', mode: intro ? 'intro' : 'aim', introT: 0, ang: 45, pow: 0.5, armA: MG.rest, slingA: -90, swingT: 0, recT: 0, armFrom: MG.rest,
+    drag: null, parts: [], shake: 0, shx: 0, shy: 0, settleT: 0, sinceThrow: 99, winT: 0, shots: 0, playT: 0, clearT: 0,
+    jars: jars.length, trail: [], lastTrail: [], trailId: 0, rings: [], asleep: 0,
+    pulses: jars.map((b, k) => ({ id: b.id, at: 0.15 + k * Math.min(0.18, tune.introTime * 0.6 / jars.length) })),
+    banner: intro ? 0 : 3.2, tutorial: i === 0, sndCD: 0, thudCD: 0, result: null };
   for (const k of AMMO) if (state.ammo[k] > 0) { state.sel = k; break; }
+  if (L.first && state.ammo[L.first] > 0) state.sel = L.first; // a level that brings new ammo opens with it in hand
   scene = 'play';
-  events.push({ type: 'level', level: i + 1 });
+  events.push({ type: 'level', level: i + 1, intro });
 }
-function ammoLeft() { return state.ammo.stone + state.ammo.boulder + state.ammo.fire; }
+function endIntro() {
+  if (state.mode !== 'intro') return;
+  state.mode = 'aim'; state.banner = 3.2;
+  events.push({ type: 'control', level: state.level + 1, t: state.t });
+}
+function ammoLeft() { let n = 0; for (const k of AMMO) n += state.ammo[k]; return n; }
 function selectAmmo(k) {
   if (state.ammo[k] > 0 && state.sel !== k) { state.sel = k; sfx.select(); }
 }
 function throwNow() {
   if (state.mode !== 'aim' || state.ammo[state.sel] <= 0) return;
+  if (state.shots === 0) logNote(state.level, 'attempt');
   state.ammo[state.sel]--; state.mode = 'swing'; state.swingT = 0; state.armFrom = state.armA;
   state.throwKind = state.sel; state.throwAng = state.ang; state.throwPow = state.pow;
   state.shots++; state.tutorial = false; state.banner = Math.min(state.banner, 0.4);
-  sfx.throw(); events.push({ type: 'throw', kind: state.sel, ang: state.ang, pow: state.pow });
+  sfx.throw(); if (state.sel === 'split') sfx.split();
+  events.push({ type: 'throw', kind: state.sel, ang: state.ang, pow: state.pow });
 }
+/** The angles a throw leaves at: one, or the split shot's fan of three around the aim. */
+function fanAngles(kind, ang) { return kind === 'split' ? [ang - tune.splitSpread, ang, ang + tune.splitSpread] : [ang]; }
 function spawnProjectile() {
-  const k = state.throwKind, sp = launchSpeed(state.throwPow, k), a = state.throwAng * D2R;
-  const dens = k === 'stone' ? tune.stoneDensity : k === 'boulder' ? tune.boulderDensity : tune.fireDensity;
-  addBody({ kind: k, shape: 'circle', r: AMMO_R[k], x: P0.x, y: P0.y, vx: sp * Math.cos(a), vy: sp * Math.sin(a), w: -4,
-    density: dens, fr: k === 'boulder' ? 0.9 : 0.55, rest: k === 'stone' ? 0.22 : 0.06,
-    roll: k === 'boulder' ? tune.boulderRoll : tune.stoneRoll, proj: true });
+  const k = state.throwKind, sp = launchSpeed(state.throwPow, k);
+  const kind = k === 'split' ? 'pebble' : k, grp = k === 'split' ? PH.nextId : 0;
+  const dens = k === 'stone' ? tune.stoneDensity : k === 'boulder' ? tune.boulderDensity : k === 'fire' ? tune.fireDensity : tune.splitDensity;
+  const angs = fanAngles(k, state.throwAng);
+  angs.forEach((deg, n) => {
+    const a = deg * D2R;
+    const b = addBody({ kind, shape: 'circle', r: AMMO_R[kind], x: P0.x, y: P0.y, vx: sp * Math.cos(a), vy: sp * Math.sin(a), w: -4,
+      density: dens, fr: k === 'boulder' ? 0.9 : 0.55, rest: k === 'stone' || k === 'split' ? 0.22 : 0.06,
+      roll: k === 'boulder' ? tune.boulderRoll : tune.stoneRoll, proj: true, grp });
+    if (n === (angs.length >> 1)) state.trailId = b.id; // the trail follows the middle one
+  });
   state.lastTrail = state.trail; state.trail = [P0.x, P0.y]; state.sinceThrow = 0; state.settleT = 0;
 }
 /** The honest arc: the very integrator the world uses, from the very release point. */
@@ -562,13 +649,14 @@ function shards(b, n, cols) {
 function addShake(k) { state.shake = Math.min(26, state.shake + k * tune.shake); }
 function breakJar(b) {
   if (b.dead) return;
-  b.dead = true; state.jars--;
+  b.dead = true; state.jars--; wakeAround(b);
+  if (state.jars === 0) state.clearT = state.playT;
   shards(b, 16, ['#c8643c', '#a94a26', '#2f6fae', '#e08a5a']); puff(b.x, b.y, 7, '#e9c9a0', 0.35, 1.4);
   sfx.jar(); addShake(5); events.push({ type: 'jar', left: state.jars });
 }
 function breakBlock(b) {
   if (b.dead) return;
-  b.dead = true;
+  b.dead = true; wakeAround(b);
   const wood = b.mat === 'wood';
   shards(b, wood ? 12 : 16, wood ? ['#a8743f', '#7a4f28', '#c99a5e'] : ['#e2b27a', '#c48a52', '#f0cc98']);
   puff(b.x, b.y, 10, wood ? '#d9b58a' : '#efd2a4', 0.5, 1.6); sfx.crack(wood); addShake(wood ? 6 : 10);
@@ -582,9 +670,10 @@ function burst(p) {
   p.dead = true;
   const R = tune.burstRadius;
   for (const b of PH.bodies) {
-    if (!b.invM || b.dead || b === p) continue;
+    if (b.isStatic || b.dead || b === p) continue;
     const d = Math.hypot(b.x - p.x, b.y - p.y);
     if (d > R) continue;
+    wake(b); // a burst wakes everything it reaches
     if (b.kind === 'jar') { breakJar(b); continue; }
     if (b.mat === 'wood' && b.burn < 0) b.burn = 0;
     const f = 1 - d / R, dv = Math.min(tune.burstPush, tune.burstPush * 1.3 / b.m) * f;
@@ -653,10 +742,11 @@ function updateParticles(dt) {
 // ---- Buttons (logical px) -------------------------------------------------------------------
 const BTN = {
   pause: { x: 56, y: 58, r: 42 }, restart: { x: 152, y: 58, r: 42 }, mute: { x: 664, y: 58, r: 42 },
-  home: { x: 56, y: 58, r: 42 },
+  home: { x: 56, y: 58, r: 42 }, stats: { x: 568, y: 58, r: 42 },
 };
-const TRAY = { stone: { x: 590, y: 1192 }, boulder: { x: 360, y: 1192 }, fire: { x: 130, y: 1192 } };
-const TRAY_W = 196, TRAY_H = 150;
+const TRAY = { stone: { x: 619, y: 1192 }, boulder: { x: 447, y: 1192 }, fire: { x: 275, y: 1192 }, split: { x: 103, y: 1192 } };
+const TRAY_W = 164, TRAY_H = 150;
+const STATS_BACK = { x: 160, y: 1044, w: 400, h: 96 };
 const inCircle = (p, b) => Math.hypot(p.x - b.x, p.y - b.y) <= b.r + 8;
 const inRect = (p, x, y, w, h) => p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h;
 const onHttp = () => location.protocol.startsWith('http');
@@ -668,8 +758,9 @@ function playPointer(e) {
   if (e.t === 'down') {
     if (state.drag) return;
     if (inCircle(e, BTN.pause)) { scene = 'pause'; return; }
-    if (inCircle(e, BTN.restart)) { startLevel(state.level); return; }
+    if (inCircle(e, BTN.restart)) { startLevel(state.level, true); return; }
     if (inCircle(e, BTN.mute)) { setMuted(!muted); return; }
+    if (state.mode === 'intro') { endIntro(); return; } // a tap skips the level card
     if (e.y > GY + 70) {
       for (const k of AMMO) { const t = TRAY[k]; if (inRect(e, t.x - TRAY_W / 2, t.y - TRAY_H / 2, TRAY_W, TRAY_H)) selectAmmo(k); }
       return;
@@ -705,28 +796,39 @@ const scenes = {
       if (e.t !== 'down') return;
       if (onHttp() && inCircle(e, BTN.home)) { location.href = '../../'; return; }
       if (inCircle(e, BTN.mute)) { setMuted(!muted); return; }
-      for (let i = 0; i < 5; i++) {
+      if (inCircle(e, BTN.stats)) { scene = 'stats'; return; }
+      for (let i = 0; i < LEVELS.length; i++) {
         const b = levelTile(i);
-        if (inRect(e, b.x, b.y, b.w, b.h)) { if (unlocked(i)) startLevel(i); return; }
+        if (inRect(e, b.x, b.y - 20, b.w, b.h + 20)) { if (unlocked(i)) startLevel(i); return; }
       }
       startLevel(nextLevelIndex());
     },
     update(dt) {
       state.t += dt;
+      if (pressed('KeyS')) { scene = 'stats'; return; }
       if (pressed('Enter') || pressed('Space')) startLevel(nextLevelIndex());
-      for (let i = 0; i < 5; i++) if (pressed('Digit' + (i + 1)) && unlocked(i)) startLevel(i);
+      for (let i = 0; i < LEVELS.length; i++) if (pressed('Digit' + (i + 1)) && unlocked(i)) startLevel(i);
     },
     draw() { drawTitle(); },
+  },
+  stats: { // إحصائياتي: the local play log, as it is
+    pointer(e) { if (e.t === 'down' && inRect(e, STATS_BACK.x, STATS_BACK.y, STATS_BACK.w, STATS_BACK.h)) scene = 'title'; },
+    update(dt) { state.t += dt; if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyS')) scene = 'title'; },
+    draw() { drawTitle(); drawStats(); },
   },
   play: {
     pointer: playPointer,
     update(dt) {
       if (pressed('KeyP') || pressed('Escape')) { scene = 'pause'; state.drag = null; return; }
-      if (pressed('KeyR')) { startLevel(state.level); return; }
+      if (pressed('KeyR')) { startLevel(state.level, true); return; }
       state.t += dt; state.banner -= dt; state.thudCD--;
-      if (pressed('Digit1')) selectAmmo('stone');
-      if (pressed('Digit2')) selectAmmo('boulder');
-      if (pressed('Digit3')) selectAmmo('fire');
+      if (state.mode === 'intro') { // the level card: control comes after it, or at once on a key
+        state.introT += dt;
+        if (pressed('Space') || pressed('Enter') || state.introT >= tune.introTime) endIntro();
+        hit.delete('Space'); // the key that skips the card never also throws
+      } else state.playT += dt;
+      for (let k = 0; k < state.pulses.length; k++) { const p = state.pulses[k]; if (!p.rung && state.t >= p.at) { p.rung = true; sfx.pulse(k); } }
+      AMMO.forEach((k, n) => { if (pressed('Digit' + (n + 1))) selectAmmo(k); });
       if (state.mode === 'aim' && !state.drag) {
         const ua = (down.has('ArrowUp') ? 1 : 0) - (down.has('ArrowDown') ? 1 : 0);
         const up = (down.has('ArrowRight') ? 1 : 0) - (down.has('ArrowLeft') ? 1 : 0);
@@ -735,7 +837,7 @@ const scenes = {
         if (pressed('Space')) throwNow();
       }
       // the arm
-      if (state.mode === 'aim') {
+      if (state.mode === 'aim' || state.mode === 'intro') {
         const target = MG.rest + 14 * state.pow;
         state.armA += (target - state.armA) * 0.25; state.slingA += (-90 - state.slingA) * 0.3;
         if (state.ammo[state.sel] <= 0) for (const k of AMMO) if (state.ammo[k] > 0) { state.sel = k; break; }
@@ -755,8 +857,10 @@ const scenes = {
       physicsStep();
       postStep(dt);
       updateParticles(dt);
-      for (const b of PH.bodies) if (b.proj && !b.dead && b.age < 4) { state.trail.push(b.x, b.y); break; }
+      for (const b of PH.bodies) if (b.proj && b.id === state.trailId && !b.dead && b.age < 4) { state.trail.push(b.x, b.y); break; }
       if (state.trail.length > 600) state.trail.splice(0, 2);
+      let asleep = 0; for (const b of PH.bodies) if (b.sleep) asleep++;
+      state.asleep = asleep; // window.game.state.asleep: bodies still asleep (settle on spawn)
       // shake
       state.shake *= 0.86; if (state.shake < 0.2) state.shake = 0;
       state.shx = (rng() - 0.5) * state.shake; state.shy = (rng() - 0.5) * state.shake;
@@ -775,6 +879,7 @@ const scenes = {
         if (state.winT >= tune.winDelay && (settled || state.winT > 3)) winLevel();
       } else if (ammoLeft() === 0 && state.mode === 'aim' && settled && !PH.bodies.some(b => b.proj)) {
         state.result = { jars: state.jars }; scene = 'over'; sfx.lose(); events.push({ type: 'lose' });
+        logNote(state.level, 'loss');
       }
     },
     draw() { drawPlay(); },
@@ -784,22 +889,22 @@ const scenes = {
       if (e.t !== 'down') return;
       const bs = overlayButtons();
       if (inRect(e, bs[0].x, bs[0].y, bs[0].w, bs[0].h)) scene = 'play';
-      else if (inRect(e, bs[1].x, bs[1].y, bs[1].w, bs[1].h)) startLevel(state.level);
+      else if (inRect(e, bs[1].x, bs[1].y, bs[1].w, bs[1].h)) startLevel(state.level, true);
       else if (inRect(e, bs[2].x, bs[2].y, bs[2].w, bs[2].h)) { reset(); scene = 'title'; }
     },
-    update() { if (pressed('KeyP') || pressed('Escape') || pressed('Enter') || pressed('Space')) scene = 'play'; if (pressed('KeyR')) startLevel(state.level); },
+    update() { if (pressed('KeyP') || pressed('Escape') || pressed('Enter') || pressed('Space')) scene = 'play'; if (pressed('KeyR')) startLevel(state.level, true); },
     draw() { drawPlay(); drawOverlay('توقّف مؤقت', null, ['متابعة', 'إعادة المرحلة', 'القائمة']); },
   },
   over: {
     pointer(e) {
       if (e.t !== 'down') return;
       const bs = overlayButtons();
-      if (inRect(e, bs[0].x, bs[0].y, bs[0].w, bs[0].h)) startLevel(state.level);
+      if (inRect(e, bs[0].x, bs[0].y, bs[0].w, bs[0].h)) startLevel(state.level, true);
       else if (inRect(e, bs[1].x, bs[1].y, bs[1].w, bs[1].h)) { reset(); scene = 'title'; }
     },
     update(dt) {
       state.t += dt; updateParticles(dt);
-      if (pressed('KeyR') || pressed('Enter') || pressed('Space')) startLevel(state.level);
+      if (pressed('KeyR') || pressed('Enter') || pressed('Space')) startLevel(state.level, true);
       if (pressed('Escape')) { reset(); scene = 'title'; }
     },
     draw() {
@@ -811,17 +916,17 @@ const scenes = {
     pointer(e) {
       if (e.t !== 'down') return;
       const bs = overlayButtons();
-      const last = state.level === 4;
+      const last = state.level === LEVELS.length - 1;
       if (inRect(e, bs[0].x, bs[0].y, bs[0].w, bs[0].h)) { if (last) { reset(); scene = 'title'; } else startLevel(state.level + 1); }
-      else if (inRect(e, bs[1].x, bs[1].y, bs[1].w, bs[1].h)) startLevel(state.level);
+      else if (inRect(e, bs[1].x, bs[1].y, bs[1].w, bs[1].h)) startLevel(state.level, true);
       else if (inRect(e, bs[2].x, bs[2].y, bs[2].w, bs[2].h)) { reset(); scene = 'title'; }
     },
     update(dt) {
       state.t += dt; state.result.t += dt; updateParticles(dt);
       const r = state.result;
       for (let i = 0; i < 3; i++) if (!r.rung[i] && i < r.stars && r.t > 0.35 + i * 0.3) { r.rung[i] = true; sfx.star(i); }
-      if (pressed('Enter') || pressed('Space')) { if (state.level === 4) { reset(); scene = 'title'; } else startLevel(state.level + 1); }
-      else if (pressed('KeyR')) startLevel(state.level);
+      if (pressed('Enter') || pressed('Space')) { if (state.level === LEVELS.length - 1) { reset(); scene = 'title'; } else startLevel(state.level + 1); }
+      else if (pressed('KeyR')) startLevel(state.level, true);
       else if (pressed('Escape')) { reset(); scene = 'title'; }
     },
     draw() { drawPlay(); drawResults(); },
@@ -830,14 +935,61 @@ const scenes = {
 function winLevel() {
   const left = ammoLeft(), stars = Math.min(3, 1 + left);
   saved.stars[state.level] = Math.max(saved.stars[state.level] || 0, stars); save();
-  state.result = { stars, left, t: 0, rung: [false, false, false], total: saved.stars.reduce((a, b) => a + b, 0) };
+  state.result = { stars, left, t: 0, rung: [false, false, false], total: saved.stars.reduce((a, b) => a + (b || 0), 0) };
+  logNote(state.level, 'win', state.clearT || state.playT);
   scene = 'results'; sfx.win(); events.push({ type: 'win', level: state.level + 1, stars });
 }
 
 // =========================================================================================
 // ---- Drawing --------------------------------------------------------------------------------
 // =========================================================================================
-function drawSky(groundY) {
+/** The hard levels' sky: a sandstorm rolling in over the dusk, so a hard level looks hard. */
+function drawStormSky(groundY) {
+  const g = ctx.createLinearGradient(0, 0, 0, groundY);
+  g.addColorStop(0, '#1c1f2e'); g.addColorStop(0.32, '#33304a'); g.addColorStop(0.62, '#5c4659');
+  g.addColorStop(0.86, '#9a6650'); g.addColorStop(1, '#c48a5c');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY + 2);
+  const t = state.t || 0;
+  // the sun, dimmed behind the dust
+  const sxp = 560, syp = groundY - 230;
+  const sg = ctx.createRadialGradient(sxp, syp, 10, sxp, syp, 220);
+  sg.addColorStop(0, 'rgba(255,196,130,0.4)'); sg.addColorStop(1, 'rgba(255,170,120,0)');
+  ctx.fillStyle = sg; ctx.fillRect(0, groundY - 460, W, 460);
+  ctx.fillStyle = 'rgba(240,180,120,0.35)'; ctx.beginPath(); ctx.arc(sxp, syp, 56, 0, 7); ctx.fill();
+  // heavy clouds, drifting slowly
+  for (let i = 0; i < 7; i++) {
+    const w = 260 + hash(i + 300) * 220, y = 150 + hash(i + 310) * 360, sp = 6 + hash(i + 320) * 10;
+    const x = ((hash(i + 330) * (W + w) + t * sp) % (W + w)) - w / 2;
+    ctx.fillStyle = 'rgba(24,22,38,0.55)';
+    ctx.beginPath(); ctx.ellipse(x, y, w / 2, 34 + hash(i + 340) * 20, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x - w * 0.18, y - 22, w * 0.24, 30, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + w * 0.16, y - 16, w * 0.2, 26, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(160,130,150,0.22)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(x - w * 0.18, y - 22, w * 0.24, 30, 0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+  }
+  // far dunes in the storm's colours
+  const dune = (base, amp, col, ph) => {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, groundY + 2);
+    for (let x = 0; x <= W; x += 12) ctx.lineTo(x, base - amp * (0.55 * Math.sin(x / 140 + ph) + 0.3 * Math.sin(x / 61 + ph * 2) + 0.15 * Math.sin(x / 23 + ph)));
+    ctx.lineTo(W, groundY + 2); ctx.closePath(); ctx.fill();
+  };
+  dune(groundY - 150, 40, 'rgba(72,54,78,0.8)', 1.3);
+  dune(groundY - 80, 34, 'rgba(104,70,80,0.9)', 4.1);
+  dune(groundY - 30, 22, '#93604a', 2.2);
+  // dust haze and sand blowing across
+  const hz = ctx.createLinearGradient(0, groundY - 420, 0, groundY);
+  hz.addColorStop(0, 'rgba(210,150,100,0)'); hz.addColorStop(1, 'rgba(210,150,100,0.28)');
+  ctx.fillStyle = hz; ctx.fillRect(0, groundY - 420, W, 422);
+  ctx.strokeStyle = 'rgba(245,205,155,0.28)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();
+  for (let i = 0; i < 22; i++) {
+    const y = groundY - 20 - hash(i + 400) * 460, len = 40 + hash(i + 410) * 70, sp = 180 + hash(i + 420) * 160;
+    const x = ((hash(i + 430) * (W + 200) + t * sp) % (W + 200)) - 100;
+    ctx.moveTo(x, y); ctx.lineTo(x + len, y - len * 0.06);
+  }
+  ctx.stroke();
+}
+function drawSky(groundY, storm) {
+  if (storm) { drawStormSky(groundY); return; }
   const g = ctx.createLinearGradient(0, 0, 0, groundY);
   g.addColorStop(0, '#2e2350'); g.addColorStop(0.35, '#5d3b72'); g.addColorStop(0.68, '#b3627a');
   g.addColorStop(0.88, '#f09a6c'); g.addColorStop(1, '#ffc58a');
@@ -1036,7 +1188,22 @@ function drawFirePot(r, t) {
   ctx.quadraticCurveTo(r * 0.3, r * 1.45, r * 0.22, r * 1.15); ctx.closePath(); ctx.fill();
   ctx.fillStyle = '#ffe27a'; ctx.beginPath(); ctx.moveTo(-r * 0.1, r * 1.18); ctx.quadraticCurveTo(-r * 0.08, r * 1.45, r * 0.05, r * (1.5 + 0.2 * f)); ctx.quadraticCurveTo(r * 0.15, r * 1.35, r * 0.1, r * 1.18); ctx.closePath(); ctx.fill();
 }
-function drawAmmo(kind, r, t) { if (kind === 'stone') drawStone(r); else if (kind === 'boulder') drawBoulder(r); else drawFirePot(r, t); }
+function drawPebble(r) { // one pebble of the split shot: smaller and paler than a stone
+  rockPoly(r * 1.05, 9, 61, 0.16);
+  const g = ctx.createRadialGradient(-r * 0.35, r * 0.35, r * 0.1, 0, 0, r * 1.1);
+  g.addColorStop(0, '#e6dccb'); g.addColorStop(0.6, '#b2a58f'); g.addColorStop(1, '#7c705f');
+  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#4a4136'; ctx.lineWidth = r * 0.1; ctx.stroke();
+}
+function drawSplit(r) { // three pebbles bundled for the sling, the tray and the card
+  for (const [x, y] of [[-r * 0.95, -r * 0.55], [r * 0.95, -r * 0.55], [0, r * 0.85]]) {
+    ctx.save(); ctx.translate(x, y); drawPebble(r); ctx.restore();
+  }
+  ctx.strokeStyle = '#c9a86a'; ctx.lineWidth = r * 0.14; ctx.beginPath(); ctx.arc(0, 0, r * 1.9, 0.5, 2.6); ctx.stroke();
+}
+function drawAmmo(kind, r, t) {
+  if (kind === 'stone') drawStone(r); else if (kind === 'boulder') drawBoulder(r);
+  else if (kind === 'pebble') drawPebble(r); else if (kind === 'split') drawSplit(r); else drawFirePot(r, t);
+}
 function drawRockBox(b) { // static desert rock, strata continuous in world y
   const x0 = b.x - b.hw, x1 = b.x + b.hw, y0 = b.y - b.hh, y1 = b.y + b.hh;
   ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
@@ -1118,7 +1285,11 @@ function withWorld(fn) { // world units, y up, with the shake
 function drawBody(b, al) {
   const x = lerp(b.px, b.x, al), y = lerp(b.py, b.y, al), a = lerp(b.pa, b.a, al);
   ctx.save(); ctx.translate(x, y); ctx.rotate(a);
-  if (b.kind === 'jar') drawJar();
+  if (b.kind === 'jar') {
+    const p = state.pulses && state.pulses.find(q => q.id === b.id), k = p ? (state.t - p.at) / 0.5 : -1;
+    if (k > 0 && k < 1) { const s = 1 + 0.14 * Math.sin(k * Math.PI); ctx.translate(0, -0.36); ctx.scale(s, s); ctx.translate(0, 0.36); }
+    drawJar();
+  }
   else if (b.kind === 'block') b.mat === 'wood' ? drawWood(b) : drawSand(b);
   else if (b.proj) drawAmmo(b.kind, b.r, state.t);
   ctx.restore();
@@ -1133,7 +1304,7 @@ function dotted(pts, col, r0, fade) {
 }
 function drawPlay() {
   const L = LEVELS[state.level];
-  drawSky(GY);
+  drawSky(GY, !!L.hard);
   drawGroundBand(L.pits);
   withWorld(() => {
     for (const b of PH.bodies) if (b.kind === 'rock') drawRockBox(b);
@@ -1149,16 +1320,26 @@ function drawPlay() {
       for (let i = 2; i < state.trail.length; i += 2) ctx.lineTo(state.trail[i], state.trail[i + 1]);
       ctx.stroke();
     }
-    const pull = state.mode === 'aim' ? state.pow : 0;
-    const loaded = (state.mode === 'aim' && state.ammo[state.sel] > 0) ? state.sel : state.mode === 'swing' ? state.throwKind : null;
+    const pull = state.mode === 'aim' || state.mode === 'intro' ? state.pow : 0;
+    const loaded = ((state.mode === 'aim' || state.mode === 'intro') && state.ammo[state.sel] > 0) ? state.sel : state.mode === 'swing' ? state.throwKind : null;
     drawMangonel(state.armA, state.slingA, loaded, state.t, pull);
-    for (const b of PH.bodies) if (b.invM) drawBody(b, ALPHA);
-    // the honest arc
+    for (const b of PH.bodies) if (!b.isStatic) drawBody(b, ALPHA);
+    // the target preview: each jar pulses once with a ring at the level's start
+    for (const p of state.pulses) {
+      const k = (state.t - p.at) / 0.6, b = PH.bodies.find(q => q.id === p.id);
+      if (!b || k <= 0 || k >= 1) continue;
+      ctx.strokeStyle = `rgba(255,232,160,${(1 - k) * 0.95})`; ctx.lineWidth = LW * (7 - 4 * k);
+      ctx.beginPath(); ctx.arc(b.x, b.y, 0.42 + k * 0.9, 0, 7); ctx.stroke();
+      ctx.fillStyle = `rgba(255,214,120,${(1 - k) * 0.18})`; ctx.fill();
+    }
+    // the honest arc (the split shot shows all three of its arcs)
     if (state.mode === 'aim' && state.ammo[state.sel] > 0 && (scene === 'play' || scene === 'pause')) {
-      const pts = previewPts(state.ang, state.pow, state.sel);
-      ctx.fillStyle = 'rgba(60,30,40,0.35)';
-      dotted(pts.map((v, i) => i % 2 ? v - LW * 2 : v + LW * 2), 'rgba(60,30,40,0.35)', LW * 6, true);
-      dotted(pts, '#fff6e0', LW * 6, true);
+      const angs = fanAngles(state.sel, state.ang), mid = angs.length >> 1;
+      angs.forEach((ang, n) => {
+        const pts = previewPts(ang, state.pow, state.sel), side = n !== mid;
+        dotted(pts.map((v, i) => i % 2 ? v - LW * 2 : v + LW * 2), 'rgba(60,30,40,0.35)', LW * (side ? 5 : 6), true);
+        dotted(pts, side ? '#ffe7c2' : '#fff6e0', LW * (side ? 5 : 6), true);
+      });
     }
     // particles
     for (const p of state.parts) {
@@ -1194,6 +1375,7 @@ function drawHUD() {
   iconButton(BTN.pause, 'pause'); iconButton(BTN.restart, 'restart'); iconButton(BTN.mute, muted ? 'muted' : 'sound');
   text(`المرحلة ${state.level + 1}`, 400, 40, 28, '#ffe9c7', 'center', '700');
   text(L.name, 400, 80, 24, '#f3c9a0', 'center', '500');
+  if (L.hard) hardBadge(255, 58);
   // jars left
   ctx.save(); ctx.translate(560, 58); ctx.scale(70, -70); LW = 1 / 70; drawJar(); ctx.restore();
   textOutlined(`${state.jars}`, 590, 76, 30, '#fff', '#3a2440', 'left');
@@ -1219,6 +1401,7 @@ function drawHUD() {
     ctx.strokeStyle = '#ffe9c7'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(d.x, d.y, 26, 0, 7); ctx.stroke();
   }
   if (state.tutorial && state.mode === 'aim') drawHandHint();
+  if (state.mode === 'intro') drawLevelCard(L);
   // ammo tray
   rrect(10, GY + 80, W - 20, H - GY - 90, 26);
   const tg = ctx.createLinearGradient(0, GY + 80, 0, H); tg.addColorStop(0, 'rgba(92,52,26,0.92)'); tg.addColorStop(1, 'rgba(60,32,16,0.95)');
@@ -1229,11 +1412,48 @@ function drawHUD() {
     rrect(t.x - TRAY_W / 2 + 6, t.y - TRAY_H / 2 + 6, TRAY_W - 12, TRAY_H - 12, 20);
     ctx.fillStyle = sel ? 'rgba(255,214,150,0.32)' : 'rgba(255,230,200,0.08)'; ctx.fill();
     ctx.strokeStyle = sel ? '#ffd48a' : 'rgba(255,220,180,0.35)'; ctx.lineWidth = sel ? 5 : 2; ctx.stroke();
-    ctx.save(); ctx.translate(t.x + 34, t.y - (k === 'fire' ? 4 : 16)); ctx.scale(92, -92); LW = 1 / 92; drawAmmo(k, AMMO_R[k] * (k === 'boulder' ? 0.95 : k === 'fire' ? 0.95 : 1.25), state.t); ctx.restore();
+    ctx.save(); ctx.translate(t.x + 30, t.y - (k === 'fire' ? 4 : 16)); ctx.scale(92, -92); LW = 1 / 92; drawAmmo(k, AMMO_R[k] * TRAY_K[k], state.t); ctx.restore();
     ctx.globalAlpha = 1;
-    textOutlined(`${n}`, t.x - 50, t.y - 16, 40, n > 0 ? '#fff' : '#d9c3a8', '#2f190b');
+    textOutlined(`${n}`, t.x - 42, t.y - 16, 40, n > 0 ? '#fff' : '#d9c3a8', '#2f190b');
     text(AMMO_NAME[k], t.x, t.y + 44, 26, n > 0 ? '#ffe9c7' : '#d2b796', 'center', '700');
   }
+}
+const TRAY_K = { stone: 1.25, boulder: 0.95, fire: 0.95, split: 0.85 }; // icon sizes in the tray and on the card
+/** The honest difficulty label: a small dark-red ribbon that says hard. */
+function hardBadge(cx, cy) {
+  ctx.font = `800 24px ${FONT}`; const w = ctx.measureText('صعبة').width + 34;
+  rrect(cx - w / 2, cy - 20, w, 40, 14); ctx.fillStyle = '#8c2f39'; ctx.fill();
+  ctx.strokeStyle = '#ffd9b0'; ctx.lineWidth = 3; ctx.stroke();
+  text('صعبة', cx, cy + 1, 24, '#fff3e0', 'center', '800');
+}
+/** The level card (target preview): name, the hard label, how many jars, how much ammo. */
+function drawLevelCard(L) {
+  const T = Math.max(0.01, tune.introTime), u = state.introT;
+  const a = clamp(Math.min(u / 0.15, (T - u) / 0.2), 0, 1);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(25,14,32,0.35)'; ctx.fillRect(0, 0, W, H);
+  rrect(80, 280, 560, 364, 30);
+  const g = ctx.createLinearGradient(0, 280, 0, 644); g.addColorStop(0, '#fbe6c4'); g.addColorStop(1, '#eac595');
+  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#7c4523'; ctx.lineWidth = 5; ctx.stroke();
+  text(`المرحلة ${state.level + 1}`, W / 2, 324, 26, '#7a4a2a', 'center', '700');
+  text(L.name, W / 2, 374, 46, '#5a2f17', 'center', '800');
+  if (L.hard) hardBadge(W / 2, 428);
+  ctx.strokeStyle = 'rgba(124,69,35,0.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(130, 458); ctx.lineTo(590, 458); ctx.stroke();
+  const items = [{ k: 'jar', n: state.jars }];
+  for (const k of AMMO) if (state.ammo[k] > 0) items.push({ k, n: state.ammo[k] });
+  items.forEach((it, i) => {
+    const x = W / 2 + ((items.length - 1) / 2 - i) * 110;
+    ctx.save(); ctx.translate(x, it.k === 'fire' ? 512 : 504);
+    if (it.k === 'jar') { ctx.scale(80, -80); LW = 1 / 80; drawJar(); }
+    else { ctx.scale(92, -92); LW = 1 / 92; drawAmmo(it.k, AMMO_R[it.k] * TRAY_K[it.k], state.t); }
+    ctx.restore();
+    textOutlined(`${it.n}`, x, 562, 34, '#fff', '#5a2f17');
+    text(it.k === 'jar' ? (it.n === 1 ? 'جرّة' : 'جرار') : AMMO_NAME[it.k], x, 598, 24, '#7a4a2a', 'center', '700');
+  });
+  rrect(130, 622, 460, 8, 4); ctx.fillStyle = 'rgba(124,69,35,0.2)'; ctx.fill();
+  const bw = 460 * clamp(1 - u / T, 0, 1);
+  if (bw > 8) { rrect(130, 622, bw, 8, 4); ctx.fillStyle = '#c8643c'; ctx.fill(); }
+  ctx.globalAlpha = 1;
 }
 function drawHandHint() { // a drawn hand pulls back from the mangonel
   const ph = (state.t % 2.2) / 2.2, u = clamp((ph - 0.15) / 0.55, 0, 1), e = u * u * (3 - 2 * u);
@@ -1269,6 +1489,9 @@ function drawIcon(kind, col) {
     ctx.beginPath(); ctx.moveTo(-18, -7); ctx.lineTo(-9, -7); ctx.lineTo(2, -16); ctx.lineTo(2, 16); ctx.lineTo(-9, 7); ctx.lineTo(-18, 7); ctx.closePath(); ctx.fill();
     if (kind === 'sound') { ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(4, 0, 9, -0.9, 0.9); ctx.stroke(); ctx.beginPath(); ctx.arc(4, 0, 16, -0.9, 0.9); ctx.stroke(); }
     else { ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(9, -8); ctx.lineTo(21, 8); ctx.moveTo(21, -8); ctx.lineTo(9, 8); ctx.stroke(); }
+  } else if (kind === 'chart') { // the stats button: three bars on a baseline
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-18, 16); ctx.lineTo(18, 16); ctx.stroke();
+    ctx.fillRect(-15, 1, 8, 12); ctx.fillRect(-4, -8, 8, 21); ctx.fillRect(7, -16, 8, 29);
   } else if (kind === 'home') {
     ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(0, -17); ctx.lineTo(18, 0); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(-12, -3); ctx.lineTo(-12, 16); ctx.lineTo(-3, 16); ctx.lineTo(-3, 6); ctx.lineTo(3, 6); ctx.lineTo(3, 16); ctx.lineTo(12, 16); ctx.lineTo(12, -3); ctx.stroke();
@@ -1304,21 +1527,21 @@ function drawOverlay(title, sub, labels) {
   labels.forEach((l, i) => wideButton(bs[i], l, i === 0));
 }
 function drawResults() {
-  const r = state.result, last = state.level === 4;
+  const r = state.result, last = state.level === LEVELS.length - 1;
   panel(400, 730);
-  text(last ? 'سقط الحصن كله!' : 'أحسنت!', W / 2, 480, 50, '#5a2f17', 'center', '800');
+  text(last ? 'أنهيت كل المراحل!' : 'أحسنت!', W / 2, 480, 50, '#5a2f17', 'center', '800');
   for (let i = 0; i < 3; i++) {
     const on = i < r.stars && r.t > 0.35 + i * 0.3, age = r.t - (0.35 + i * 0.3);
     const pop = on ? 1 + Math.max(0, 0.35 - age) * 1.2 : 1;
     drawStar(W / 2 + (i - 1) * 140, 600 - (i === 1 ? 20 : 0), 56, on, pop);
   }
-  text(last ? `مجموع النجوم ${r.total} من 15` : `بقي معك ${r.left} من الذخيرة`, W / 2, 700, 28, '#7a4a2a', 'center', '600');
+  text(last ? `مجموع النجوم ${r.total} من ${LEVELS.length * 3}` : `بقي معك ${r.left} من الذخيرة`, W / 2, 700, 28, '#7a4a2a', 'center', '600');
   const bs = overlayButtons();
   wideButton(bs[0], last ? 'القائمة' : 'المرحلة التالية', true);
   wideButton(bs[1], 'أعد المرحلة', false);
   if (!last) wideButton(bs[2], 'القائمة', false);
 }
-function levelTile(i) { return { x: 40 + (4 - i) * 132, y: 580, w: 112, h: 128 }; }
+function levelTile(i) { return { x: 34 + (LEVELS.length - 1 - i) * 110, y: 580, w: 98, h: 128 }; }
 function drawTitle() {
   S = 55; state.shx = state.shy = 0;
   drawSky(GY); drawGroundBand([]);
@@ -1336,22 +1559,51 @@ function drawTitle() {
   text('اهدم الأبراج واكسر كل الجرار', W / 2, by + 160, 30, '#fff0dc', 'center', '600');
   if (onHttp()) iconButton(BTN.home, 'home');
   iconButton(BTN.mute, muted ? 'muted' : 'sound');
-  // level tiles
-  for (let i = 0; i < 5; i++) {
-    const b = levelTile(i), open = unlocked(i), st = saved.stars[i] || 0;
+  iconButton(BTN.stats, 'chart');
+  // level tiles; the hard ones are storm-grey and carry the hard label
+  for (let i = 0; i < LEVELS.length; i++) {
+    const b = levelTile(i), open = unlocked(i), st = saved.stars[i] || 0, hard = !!LEVELS[i].hard;
     rrect(b.x, b.y, b.w, b.h, 18);
-    ctx.fillStyle = open ? 'rgba(255,236,206,0.92)' : 'rgba(70,45,60,0.7)'; ctx.fill();
-    ctx.strokeStyle = open ? '#7c4523' : 'rgba(255,230,200,0.3)'; ctx.lineWidth = 4; ctx.stroke();
-    text(`${i + 1}`, b.x + b.w / 2, b.y + 50, 44, open ? '#5a2f17' : 'rgba(255,230,200,0.45)', 'center', '800');
-    for (let s = 0; s < 3; s++) drawStar(b.x + b.w / 2 + (s - 1) * 30, b.y + 100, 13, s < st);
+    ctx.fillStyle = open ? (hard ? 'rgba(214,204,222,0.94)' : 'rgba(255,236,206,0.92)') : (hard ? 'rgba(40,36,58,0.78)' : 'rgba(70,45,60,0.7)'); ctx.fill();
+    ctx.strokeStyle = open ? (hard ? '#4a3a5c' : '#7c4523') : 'rgba(255,230,200,0.3)'; ctx.lineWidth = 4; ctx.stroke();
+    text(`${i + 1}`, b.x + b.w / 2, b.y + 54, 44, open ? (hard ? '#33284a' : '#5a2f17') : 'rgba(255,230,200,0.45)', 'center', '800');
+    for (let s = 0; s < 3; s++) drawStar(b.x + b.w / 2 + (s - 1) * 27, b.y + 102, 12, s < st);
+    if (hard) hardBadge(b.x + b.w / 2, b.y - 4);
   }
   // tray with controls
   rrect(10, GY + 30, W - 20, H - GY - 40, 26); ctx.fillStyle = 'rgba(60,32,16,0.88)'; ctx.fill();
   const pulse = 0.75 + 0.25 * Math.sin(state.t * 4);
   ctx.globalAlpha = pulse; text('اضغط للبدء', W / 2, GY + 78, 40, '#ffe3b0', 'center', '800'); ctx.globalAlpha = 1;
   text('اسحب إلى الخلف لتصوّب، واترك لترمي', W / 2, GY + 132, 26, '#f6dcc0');
-  text('اضغط على الذخيرة لتختارها: حجر · صخرة · قِدر نار', W / 2, GY + 172, 24, '#e9c9a6');
-  text('لوحة المفاتيح: الأسهم للزاوية والقوة · مسافة للرمي · 1 2 3 · R', W / 2, GY + 212, 24, '#e9c9a6');
+  text('اختر الذخيرة: حجر · صخرة · قِدر نار · رشقة', W / 2, GY + 172, 24, '#e9c9a6');
+  text('لوحة المفاتيح: الأسهم للتصويب · مسافة للرمي · 1-4 · R · S', W / 2, GY + 212, 24, '#e9c9a6');
+}
+/** إحصائياتي: the local play log per level, exactly as recorded on this device. */
+function drawStats() {
+  panel(110, 1060);
+  text('إحصائياتي', W / 2, 180, 46, '#5a2f17', 'center', '800');
+  text('ما سجّلته هذه اللعبة على جهازك', W / 2, 232, 24, '#7a4a2a', 'center', '600');
+  const COL = { lvl: 610, att: 400, win: 285, best: 160 };
+  text('المرحلة', COL.lvl, 290, 24, '#7a4a2a', 'right', '700');
+  text('محاولات', COL.att, 290, 24, '#7a4a2a', 'center', '700');
+  text('فوز', COL.win, 290, 24, '#7a4a2a', 'center', '700');
+  text('أفضل وقت', COL.best, 290, 24, '#7a4a2a', 'center', '700');
+  let att = 0, wins = 0;
+  LEVELS.forEach((L, i) => {
+    const r = playLog.levels[String(i + 1)] || { attempts: 0, wins: 0, bestTime: 0 }, y = 362 + i * 96;
+    att += r.attempts; wins += r.wins;
+    if (i % 2 === 0) { rrect(84, y - 44, 552, 88, 16); ctx.fillStyle = 'rgba(124,69,35,0.09)'; ctx.fill(); }
+    ctx.fillStyle = '#c8643c'; ctx.beginPath(); ctx.arc(COL.lvl - 8, y, 24, 0, 7); ctx.fill();
+    text(`${i + 1}`, COL.lvl - 8, y + 2, 28, '#fff3e0', 'center', '800');
+    text(L.name, COL.lvl - 46, L.hard ? y - 14 : y + 2, 24, '#5a2f17', 'right', '700');
+    if (L.hard) text('صعبة', COL.lvl - 46, y + 20, 24, '#8c2f39', 'right', '800');
+    text(`${r.attempts}`, COL.att, y + 2, 30, '#5a2f17', 'center', '800');
+    text(`${r.wins}`, COL.win, y + 2, 30, '#5a2f17', 'center', '800');
+    text(r.bestTime ? `${Math.max(1, Math.round(r.bestTime))} ث` : '—', COL.best, y + 2, 28, '#5a2f17', 'center', '700');
+  });
+  text(`المجموع: ${att} محاولة · ${wins} فوز`, W / 2, 958, 28, '#5a2f17', 'center', '700');
+  text('المحاولة تُحسب عند أول رمية · لا يُرسل شيء', W / 2, 1000, 24, '#7a4a2a', 'center', '600');
+  wideButton(STATS_BACK, 'رجوع', true);
 }
 function drawFigures() {
   S = 55; LW = 1 / 90;
@@ -1382,6 +1634,7 @@ function drawFigures() {
     at(0, 0.51, () => drawWood({ id: 12, hw: 1.0, hh: 0.11, burn: -1 }));
   });
   cell(360, 770, 80, 'صخر', () => drawRockBox({ id: 12, x: 0, y: 0, hw: 1.1, hh: 0.8 }));
+  cell(590, 770, 170, 'رشقة', () => drawSplit(0.2));
 }
 
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------
@@ -1417,7 +1670,7 @@ window.game = {
 
 reset();
 scene = params.get('scene') || 'title';
-if (scene === 'play') startLevel(clamp((Number(params.get('level')) || 1) - 1, 0, 4));
+if (scene === 'play') startLevel(clamp((Number(params.get('level')) || 1) - 1, 0, LEVELS.length - 1));
 last = clock.now();
 if (params.get('manual') === '1') drawFrame();
 else { requestAnimationFrame(frame); setInterval(timer, 50); }

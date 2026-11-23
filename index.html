@@ -110,6 +110,9 @@ ul.fix li{display:flex;gap:8px;align-items:flex-start}
 ul.fix li svg{flex:none;margin-top:5px}
 .actions{display:flex;gap:8px;margin-top:auto;padding-top:6px}
 .actions .btn{flex:1}
+.new{background:color-mix(in srgb,var(--accent2) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent2) 35%,transparent);border-radius:12px;padding:10px 12px;font-size:14px}
+.new b{display:block;color:var(--accent2);margin-bottom:4px}
+.new ul{margin:0;padding-inline-start:18px;display:grid;gap:2px}
 details.more{border-top:1px dashed var(--line);padding-top:8px;font-size:14px}
 details.more summary{cursor:pointer;color:var(--accent2);font-weight:600;list-style:none}
 details.more summary::-webkit-details-marker{display:none}
@@ -313,6 +316,7 @@ const BUILD = {easy:['سهلة نكملها','easy'], mid:['متوسطة','mid']
 const check = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="var(--accent2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const RE = window.RE_NOTES || {};
+const CH = window.RE_CHANGES || {};
 const num = s => esc(s).replace(/(\d[\d.,]*[MK]?\+?)/g, '<bdi dir="ltr">$1</bdi>');
 function card(g, i) {
   const b = BUILD[g.build];
@@ -324,6 +328,7 @@ function card(g, i) {
       <p class="insp">مستوحاة من <b dir="ltr">${esc(g.insp)}</b><br>${num(g.stats)}</p>
       ${g.quote ? `<p class="quote">«${esc(g.quote)}»<em>${esc(g.qsrc)}</em></p>` : ''}
       <ul class="fix">${g.fix.map(f => `<li>${check}<span>${esc(f)}</span></li>`).join('')}</ul>
+      ${CH[g.id] ? `<div class="new"><b>جديد بعد دراسة المنافسين</b><ul>${CH[g.id].map(f => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
       <details class="more"><summary>كيف بتنلعب؟</summary><p>${esc(g.how)}</p>${RE[g.id] ? `<p><b>من الهندسة العكسية:</b> ${esc(RE[g.id])}</p>` : ''}</details>
       <div class="actions"><a class="btn primary" href="games/${g.id}/">العب</a></div>
     </div>

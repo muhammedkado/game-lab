@@ -28,8 +28,14 @@ window.CONFIG = {
   narrow_every: { value: 3, min: 1, max: 6, step: 1 },     // narrow levels: narrow_from, then every this many levels
   capacity: { value: 4, min: 3, max: 6, step: 1 },         // layers in a flask
   narrow_capacity: { value: 3, min: 2, max: 5, step: 1 },  // layers in a narrow flask
-  // Stars against the solver's par
-  star2_extra: { value: 4, min: 0, max: 20, step: 1 },     // pours over par that still earn 2 stars
+  // Stars against the solver's par (round 2: gentler; was 3 stars at par, 2 stars at par+4)
+  star3_extra: { value: 2, min: 0, max: 10, step: 1 },     // pours over par that still earn 3 stars
+  star2_extra: { value: 6, min: 0, max: 20, step: 1 },     // pours over par that still earn 2 stars (keep it at or above star3_extra)
+  // Round 2 (research/re): honest labels, the free way out, the daily flask
+  hard_par: { value: 22, min: 5, max: 60, step: 1 },       // a level whose par is at least this many pours is labelled صعبة
+  extra_layers: { value: 2, min: 1, max: 3, step: 1 },     // layers in the free small flask offered once per attempt when no pour is left
+  daily_scents: { value: 7, min: 2, max: 9, step: 1 },     // scents in the daily flask (seeded by the local date)
+  daily_veil: { value: 1, min: 0, max: 1, step: 1 },       // 1: the daily flask has veiled layers
   // The solver
   solver_nodes: { value: 60000, min: 2000, max: 400000, step: 1000 }, // states the dealer's solver may open per deal
   hint_nodes: { value: 40000, min: 1000, max: 400000, step: 1000 },   // states the hint may open
