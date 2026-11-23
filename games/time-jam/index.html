@@ -148,40 +148,103 @@ function rush(dur, f0, f1, vol, delay = 0) {
   if (!audio || muted) return;
   try {
     const ac = audio.ac;
-    if (!noiseBuf) {
-      const n = Math.floor(ac.sampleRate * 1.2); noiseBuf = ac.createBuffer(1, n, ac.sampleRate);
-      const d = noiseBuf.getChannelData(0); for (let k = 0; k < n; k++) d[k] = hash(k, 77) * 2 - 1;
-    }
     const t = ac.currentTime + delay, src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
-    src.buffer = noiseBuf; f.type = 'bandpass'; f.Q.value = 1.1;
+    src.buffer = noise(); f.type = 'bandpass'; f.Q.value = 1.1;
     f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
     g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + dur * 0.3);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     src.connect(f).connect(g).connect(audio.out); src.start(t); src.stop(t + dur + 0.05);
   } catch (e) { /* a stand-in audio context may not make noise */ }
 }
+// Footfalls, made here: a filtered noise grain (sand crunch, hoof click) and a short pitched body
+// (the padded thud of a camel's foot, the hollow "tok" of a hoof on stone), panned to where the animal is.
+function noise() {
+  const ac = audio.ac;
+  if (!noiseBuf) {
+    const n = Math.floor(ac.sampleRate * 1.2); noiseBuf = ac.createBuffer(1, n, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0); for (let k = 0; k < n; k++) d[k] = hash(k, 77) * 2 - 1;
+  }
+  return noiseBuf;
+}
+function outAt(t, pan) { // a voice's way out: through a stereo panner when the browser has one
+  if (pan && audio.ac.createStereoPanner) { const p = audio.ac.createStereoPanner(); p.pan.setValueAtTime(clamp(pan, -1, 1), t); p.connect(audio.out); return p; }
+  return audio.out;
+}
+function grain(t, dur, type, freq, q, vol, pan, off = 0) {
+  const ac = audio.ac, src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+  src.buffer = noise(); f.type = type; f.frequency.setValueAtTime(freq, t); f.Q.value = q;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  src.connect(f).connect(g).connect(outAt(t, pan)); src.start(t, off % 1); src.stop(t + dur + 0.03);
+}
+function body(t, f0, f1, dur, vol, pan, type = 'sine') {
+  const ac = audio.ac, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  o.connect(g).connect(outAt(t, pan)); o.start(t); o.stop(t + dur + 0.03);
+}
+let stepN = 0, stepLast = -1;
 const sfx = { // each era sounds like its vehicles: hooves and a bell, engines and horns, rotors
+  /** One footfall of a walking animal: era 0 camels on sand, era 1 donkeys on stone (with cart wheels for the big ones). */
+  step(e, big, x) {
+    if (!audio || muted) return;
+    try {
+      const ac = audio.ac, now = ac.currentTime;
+      if (now - stepLast < tune.step_gap) return; // many animals at once: keep it a rhythm, not a roar
+      stepLast = now; const n = stepN++, v = tune.step_vol, pan = (x / W * 2 - 1) * 0.7;
+      const r = k => hash(n, k), lr = n % 2 ? 1 : 0.9; // every foot a little different; left and right not the same
+      if (e === 0) { // a camel's soft padded foot sinking into sand, then the sand settling
+        body(now, 110 * lr * (0.92 + r(1) * 0.16), 48, 0.13, 0.32 * v, pan);
+        grain(now, 0.16, 'bandpass', 900 + r(2) * 500, 0.8, 0.16 * v, pan, r(3));
+        grain(now + 0.03, 0.12, 'highpass', 2600 + r(4) * 1200, 0.5, 0.05 * v, pan, r(5));
+        if (big && n % 4 === 0) body(now + 0.02, 2093 * (1 + r(6) * 0.02), 2080, 0.35, 0.035 * v, pan, 'triangle'); // the howdah's little bell
+      } else { // a donkey's hoof on stone: fore and hind feet a beat apart make the clip-clop
+        for (const [d, k] of [[0, 1], [0.075 + r(7) * 0.02, 0.84]]) {
+          body(now + d, 760 * k * lr * (0.95 + r(8) * 0.1), 430 * k, 0.07, 0.2 * v, pan, 'triangle');
+          grain(now + d, 0.035, 'bandpass', 3200 + r(9) * 900, 3.5, 0.18 * v, pan, r(10 + d));
+        }
+        if (big) { grain(now, 0.3, 'lowpass', 220, 0.7, 0.12 * v, pan, r(11)); if (n % 3 === 0) body(now + 0.12, 180, 120, 0.06, 0.08 * v, pan, 'triangle'); } // wheels on cobbles
+      }
+    } catch (err) { /* a stand-in audio context may not have filters */ }
+  },
   tap(e) {
     const m = ERAS[e].move;
-    if (m === 'walk') { tone(330, 0.06, 'triangle', 0.22); tone(250, 0.07, 'triangle', 0.2, 0.1); }
+    if (m === 'walk') { sfx.step(e, false, W / 2); tone(e ? 880 : 1175, 0.12, 'sine', 0.06, 0.04); }
     else if (m === 'drive') { sweep(70, 200, 0.28, 'sawtooth', 0.07); tone(520, 0.06, 'sine', 0.12, 0.06); }
     else { sweep(160, 520, 0.22, 'sawtooth', 0.06); tone(660, 0.07, 'sine', 0.16, 0.05); }
   },
   blocked() { tone(140, 0.12, 'square', 0.1); tone(104, 0.2, 'square', 0.09, 0.09); },
   dock(e) { // arriving at a stop: a soft clop and bell, a brake hiss and chime, a landing chime
     const m = ERAS[e].move;
-    if (m === 'walk') { tone(300, 0.05, 'triangle', 0.18); tone(1046, 0.18, 'sine', 0.1, 0.06); }
+    if (m === 'walk') { tone(1046, 0.25, 'sine', 0.09, 0.05); tone(1568, 0.3, 'sine', 0.04, 0.09); }
     else if (m === 'drive') { rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.12, 0.08); }
     else { tone(784, 0.09, 'sine', 0.18); tone(1175, 0.16, 'sine', 0.14, 0.07); }
   },
-  board(k) { tone(560 + k * 62, 0.08, 'sine', 0.2); tone(1120 + k * 124, 0.04, 'triangle', 0.06); }, // a pop that rises seat by seat
-  full() { [523, 659, 784].forEach(f => tone(f, 0.26, 'triangle', 0.13)); tone(1047, 0.3, 'sine', 0.1, 0.06); }, // a short chord
+  /** A rider pays the fare: a bright coin clink (two metal partials and a tiny ring), rising seat by seat. */
+  board(k) {
+    if (!audio || muted) return;
+    try {
+      const t = audio.ac.currentTime, p = Math.pow(1.06, Math.min(k, 10)), v = tune.coin_vol;
+      grain(t, 0.02, 'highpass', 5000, 0.7, 0.1 * v, 0, k * 0.13); // the strike
+      body(t, 2637 * p, 2620 * p, 0.16, 0.11 * v, 0); body(t, 3951 * p, 3940 * p, 0.12, 0.06 * v, 0); // the coin itself
+      body(t + 0.055, 3136 * p, 3120 * p, 0.28, 0.09 * v, 0); body(t + 0.055, 4699 * p, 4690 * p, 0.2, 0.04 * v, 0); // it lands on the pile
+    } catch (err) { /* a stand-in audio context */ }
+  },
+  /** A full vehicle: the till rings "ka-ching", a drawer slides, coins tumble. */
+  full() {
+    if (!audio || muted) return;
+    try {
+      const t = audio.ac.currentTime, v = tune.coin_vol;
+      grain(t, 0.09, 'bandpass', 1400, 1.2, 0.16 * v, 0, 0.3); // ka- : the drawer's latch
+      body(t + 0.08, 2093, 2090, 0.6, 0.12 * v, 0, 'triangle'); body(t + 0.08, 2794, 2790, 0.5, 0.08 * v, 0); body(t + 0.08, 4186, 4180, 0.35, 0.04 * v, 0); // -ching: the bell
+      for (let j = 0; j < 4; j++) body(t + 0.16 + j * 0.045, 3500 + hash(j, 31) * 1500, 3400, 0.09, 0.05 * v, 0); // coins tumble in
+    } catch (err) { /* a stand-in audio context */ }
+  },
   combo(n) { for (let k = 0; k < Math.min(5, n + 1); k++) tone(660 * Math.pow(1.122, k + n), 0.1, 'square', 0.07, k * 0.06); },
   roll() { rush(0.35, 300, 900, 0.12); tone(196, 0.12, 'triangle', 0.12, 0.05); }, // a garage door rattles open
   grumble(k) { tone(150 - k * 20, 0.18, 'sawtooth', 0.06); tone(130 - k * 20, 0.24, 'sawtooth', 0.06, 0.14); },
   warn() { [110, 110, 98].forEach((f, i) => tone(f, 0.22, 'square', 0.12, i * 0.2)); tone(880, 0.5, 'sawtooth', 0.05, 0.6); },
   go(e) { // a full ground vehicle leaves through its stop
-    if (ERAS[e].move === 'walk') { [0, 0.15, 0.3, 0.45].forEach((d, k) => tone(k % 2 ? 235 : 295, 0.06, 'triangle', 0.18, d)); tone(1320, 0.4, 'sine', 0.07); rush(0.5, 400, 1200, 0.12); }
+    if (ERAS[e].move === 'walk') { tone(1320, 0.4, 'sine', 0.07); rush(0.5, 400, 1200, 0.08); }
     else { sweep(80, 380, 0.6, 'sawtooth', 0.07); if (e === 3) { tone(440, 0.14, 'square', 0.06, 0.05); tone(554, 0.2, 'square', 0.06, 0.2); } else tone(660, 0.12, 'square', 0.05, 0.08); }
   },
   spin() { sweep(90, 340, 0.4, 'sawtooth', 0.05); },
@@ -289,7 +352,7 @@ const ERAS = [
     accent: '255,198,112', base: '#3a2410', greyTint: '#cfc2aa',
     lot: { lane: 'rgba(96,52,16,0.42)', mat: 'rgba(66,34,10,0.48)', edge: 'rgba(255,224,165,0.78)', cell: 'rgba(255,220,160,0.12)',
       cellEdge: 'rgba(255,228,178,0.45)', bay: 'rgba(66,34,10,0.36)', bayEdge: 'rgba(255,228,178,0.65)', dash: true,
-      floor: 'rgba(250,234,200,0.55)', floorEdge: 'rgba(120,66,22,0.7)', puff: '226,190,140',
+      floor: 'rgba(250,234,200,0.55)', floorEdge: 'rgba(120,66,22,0.7)', puff: '226,190,140', print: '110,70,32',
       road: 'rgba(196,150,96,0.62)', roadEdge: 'rgba(92,54,20,0.55)', roadDash: 'rgba(255,236,200,0.55)' } },
   { name: 'عصر الحمير والعربات', tab: 'الحمير', bg: 'bg-2', small: 'donkey', big: 'donkey-cart', riders: 'rider-old',
     stop: 'stall', cover: 'sack', move: 'walk', noun: 'حمار',
@@ -297,7 +360,7 @@ const ERAS = [
     accent: '244,214,160', base: '#2c241c', greyTint: '#c8c0b4',
     lot: { lane: 'rgba(60,46,34,0.45)', mat: 'rgba(36,28,22,0.52)', edge: 'rgba(244,226,196,0.75)', cell: 'rgba(244,230,206,0.1)',
       cellEdge: 'rgba(244,230,206,0.42)', bay: 'rgba(36,28,22,0.38)', bayEdge: 'rgba(244,226,196,0.62)', dash: true,
-      floor: 'rgba(246,238,224,0.55)', floorEdge: 'rgba(92,70,48,0.7)', puff: '205,190,165',
+      floor: 'rgba(246,238,224,0.55)', floorEdge: 'rgba(92,70,48,0.7)', puff: '205,190,165', print: '80,62,44',
       road: 'rgba(120,104,88,0.66)', roadEdge: 'rgba(50,38,28,0.6)', roadDash: 'rgba(244,226,196,0.55)' } },
   { name: 'عصر المواتير', tab: 'المواتير', bg: 'bg-3', small: 'motorbike', big: 'tuktuk', riders: 'rider',
     stop: 'tin', cover: 'grey', move: 'drive', noun: 'مركبة', garage: 'shed', garageName: 'ورشة تنك',
@@ -372,7 +435,7 @@ function requestEra(e) {
   E.smallImg = COLOURS.map(c => getImg(`${E.small}-${c}.webp`));
   E.bigImg = COLOURS.map(c => getImg(`${E.big}-${c}.webp`));
   E.riderImg = COLOURS.map(c => getImg(`${E.riders}-${c}.webp`));
-  g.imgs = [E.bgImg, ...E.smallImg, ...E.bigImg, ...E.riderImg];
+  g.imgs = [E.bgImg, ...E.smallImg, ...E.bigImg, ...E.riderImg, ...fxSheets()];
   onLoaded();
 }
 function onLoaded() {
@@ -515,14 +578,41 @@ function drawCoverShape(style, w, h, c, K, cover) {
 }
 // A vehicle seen from above at (cx, cy), facing ang, len cells long on cells of size c, colour ci.
 // o: era, alt (air taxi hover), rotor (blur), gait/breath (animals), cover, glow, flash, seats, alpha.
+// Walk rigs for the animal sprites (nose up): where the neck meets the body and where the hind legs start,
+// as shares of the sprite's height. The cart's donkey swings as a whole against the shafts.
+const WALK_RIG = {
+  'camel': { neck: 0.27, legs: 0.8 },
+  'camel-howdah': { neck: 0.2, legs: 0.84 },
+  'donkey': { neck: 0.21, legs: 0.8 },
+  'donkey-cart': { neck: 0.44, legs: null },
+};
+/** Draw an animal sprite in parts: hind legs stepping in turn, the head and neck swinging, then the body over the joins. */
+function walkSprite(img, w, h, rig, ph) {
+  const top = -h / 2, nY = top + rig.neck * h, s = Math.sin(ph), x0 = -w / 2;
+  if (rig.legs != null) { // each hind leg (left and right half) slides along the body in turn
+    const lY = top + rig.legs * h, lift = h * 0.07, L = tune.leg_swing * h;
+    for (const sd of [-1, 1]) {
+      ctx.save(); ctx.beginPath(); ctx.rect(sd < 0 ? x0 - 4 : 0, lY - lift, w / 2 + 4, h / 2 - lY + lift + 6); ctx.clip();
+      ctx.drawImage(img, x0, top + sd * s * L, w, h); ctx.restore();
+    }
+  }
+  { // head and neck: a side-to-side swing from the shoulders, a little behind the legs
+    const a = tune.neck_swing * Math.sin(ph - 0.7), nod = 1 + 0.035 * Math.cos(ph * 2);
+    ctx.save(); ctx.translate(0, nY); ctx.rotate(a); ctx.scale(1, nod);
+    ctx.beginPath(); ctx.rect(x0 - 10, top - nY - 6, w + 20, nY - top + h * 0.06); ctx.clip();
+    ctx.drawImage(img, x0, top - nY, w, h); ctx.restore();
+  }
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 4, nY, w + 8, (rig.legs != null ? top + rig.legs * h : h / 2 + 6) - nY); ctx.clip();
+  ctx.drawImage(img, x0, top, w, h); ctx.restore();
+}
 function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
   o = o || {};
   const e = o.era != null ? o.era : eraNow(), E = ERAS[e], big = big3(len);
   const { img, h, w, K } = vehSize(len, c, ci, e);
   const alt = o.alt || 0, cover = o.cover || 0, rot = o.rotor || 0;
   let sc = 1 + alt * 0.28, sway = 0, walkPh = null;
-  if (E.move === 'walk') {
-    if (o.gait != null) { const g = Math.sin(o.gait * Math.PI / tune.stride); sc *= 1 + tune.bob * Math.abs(g); sway = tune.sway * g; walkPh = g; }
+  if (E.move === 'walk') { // gait phase: one full cycle (left step, right step) every 2 strides of path
+    if (o.gait != null) { walkPh = o.gait * Math.PI / tune.stride; const g = Math.sin(walkPh); sc *= 1 + tune.bob * Math.abs(g); sway = tune.sway * g; }
     if (o.breath != null) sc *= 1 + 0.014 * o.breath;
   }
   let drv = null; // a road vehicle under way: engine rumble, suspension and body roll
@@ -533,9 +623,7 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
   }
   ctx.save(); ctx.translate(cx, cy);
   if (drv != null) ctx.translate(Math.sin(drv * 1.9) * tune.rumble, Math.cos(drv * 2.3) * tune.rumble);
-  if (walkPh != null) ctx.translate(0, -tune.hop * Math.abs(walkPh)); // each step lifts the body a little (screen up)
   ctx.rotate(ang + sway); ctx.scale(sc * (o.sqA || 1), sc * (o.sqC || 1));
-  if (walkPh != null) ctx.transform(1, tune.step_shear * walkPh, 0, 1, 0, 0); // the body leans into each stride
   if (o.alpha != null) ctx.globalAlpha *= o.alpha;
   const a0 = ctx.globalAlpha;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -552,7 +640,11 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     for (const k of [-0.28, 0, 0.28]) { const x = k * w, y0 = h * 0.5 + 4 + ph * 10; ctx.globalAlpha = a0 * (k ? 0.45 : 0.7); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + L * (k ? 0.7 : 1)); ctx.stroke(); }
     ctx.globalAlpha = a0;
   }
-  if (cover < 1) { if (okImg(img)) ctx.drawImage(img, -w / 2, -h / 2, w, h); else fallbackVehicle(w, h, PAL[ci].base); }
+  if (cover < 1) {
+    const rig = walkPh != null && okImg(img) ? WALK_RIG[big ? E.big : E.small] : null;
+    if (rig) walkSprite(img, w, h, rig, walkPh); // legs step, the head swings: a real walk, not a sliding picture
+    else if (okImg(img)) ctx.drawImage(img, -w / 2, -h / 2, w, h); else fallbackVehicle(w, h, PAL[ci].base);
+  }
   if (cover > 0) { // a colourless body under the cover: every covered vehicle looks the same
     ctx.globalAlpha = a0 * cover;
     const gi = big ? GREY[e].big : GREY[e].small;
@@ -1329,7 +1421,9 @@ function leavePath(i, fly) {
   const ex = nose[0] + dir * 116;
   return curvePath(P, { x: ex, y: YB, ang: dir > 0 ? 0 : Math.PI, k1: 34, k2: 58 }, [[dir > 0 ? W + 260 : -260, YB]]);
 }
-const moveSpeed = e => ERAS[e].move === 'walk' ? tune.speed_walk : ERAS[e].move === 'drive' ? tune.speed_drive : tune.glide_speed;
+// Each era is quicker than the one before: camels, then donkeys, motorbikes, taxis, air taxis.
+const ERA_SPEED = ['speed_camels', 'speed_donkeys', 'speed_motorbikes', 'speed_taxis', 'speed_air'];
+const moveSpeed = e => tune[ERA_SPEED[e]];
 
 // ---- Game state ------------------------------------------------------------------------------
 let scene, state;
@@ -1464,7 +1558,7 @@ function schedule(evs) {
         state.fx.push({ t: t0, k: 'spin' }, { t: tLift, k: 'lift', id: ev.id });
         state.busyUntil = Math.max(state.busyUntil, tFly + 0.6);
       } else { // a bounce of joy, then out along the road (later if the road is busy)
-        const path = leavePath(ev.id, false), bc = parkPose(ev.id).cell, d = Math.max(0.5, path.total / tune.leave_speed);
+        const path = leavePath(ev.id, false), bc = parkPose(ev.id).cell, d = Math.max(0.5, path.total / (moveSpeed(e) * tune.leave_boost));
         const mv = { kind: 'leave', id: ev.id, path, s0: cm.len * bc, len: cm.len, bc, t0: 0, t1: d };
         const go = clearStart(mv, t0 + tune.celebrate_time);
         state.moves.push(mv);
@@ -1686,8 +1780,25 @@ function seatWorld(i, k, out = PT_A) {
 
 
 // ---- Particles: one fixed pool, reused, so effects never make garbage frame after frame ------------
-// kind 0 a dot (col), 1 a puff (rgb, grows), 2 a ring (rgb, grows), 3 a spark streak (col).
-const PARTS = []; for (let k = 0; k < 280; k++) PARTS.push({ life: 0, max: 1, kind: 0, x: 0, y: 0, vx: 0, vy: 0, r: 0, grow: 0, g: 0, a: 1, col: '#fff', rgb: '255,255,255', under: false });
+// kind 0 a dot (col), 1 a puff (rgb, grows), 2 a ring (rgb, grows), 3 a spark streak (col),
+// 4 a painted effect sprite (one frame of a Dreamina effect sheet: dust, smoke, sparkle, rotor wash).
+const PARTS = []; for (let k = 0; k < 320; k++) PARTS.push({ life: 0, max: 1, kind: 0, x: 0, y: 0, vx: 0, vy: 0, r: 0, grow: 0, g: 0, a: 1, col: '#fff', rgb: '255,255,255', under: false, sheet: null, frame: 0, rot: 0, spin: 0, add: false });
+// Effect sheets: one strip per kind, every frame in a 192x192 slot (assets/fx-*.webp, made with Dreamina).
+const FX_SLOT = 192;
+const FX = {
+  dust: { file: 'fx-dust.webp', frames: [0, 1, 2, 3, 4, 5, 6, 7], wisp: Math.PI },          // tan sand clouds, the wisps trail to the left
+  smoke: { file: 'fx-smoke.webp', dark: [0, 1, 2, 4, 5, 8], light: [3, 6, 7, 9, 10], wisp: 2.1 }, // grey exhaust, the wisps trail down-left
+  spark: { file: 'fx-spark.webp', star: [0, 1, 2, 10, 11, 12], twinkle: [3, 4, 5], flare: [6, 7, 8, 9] },
+  wash: { file: 'fx-wash.webp', ring: [0, 2], swirl: [1, 3, 4, 5, 6, 7], disc: [8, 9] },
+};
+function fxSheets() { return Object.values(FX).map(k => (k.img = k.img || getImg(k.file))); }
+const pick = arr => arr[Math.floor(rng() * arr.length) % arr.length];
+/** Spawn one painted effect sprite. size and grow in logical px; rot the sprite's angle; add = glow (lighter blend). */
+function fxs(sheet, frame, x, y, vx, vy, size, grow, life, a, rot, spin, under, add = false) {
+  const p = spawn(4, x, y, vx, vy, size, life, '#fff', 0, under, grow, a);
+  p.sheet = sheet; p.frame = frame; p.rot = rot; p.spin = spin; p.add = add;
+  return p;
+}
 let partNext = 0;
 function spawn(kind, x, y, vx, vy, r, life, col, g = 0, under = false, grow = 0, a = 1) {
   const p = PARTS[partNext]; partNext = (partNext + 1) % PARTS.length;
@@ -1700,6 +1811,7 @@ function stepParts(dt) {
   for (const p of PARTS) {
     if (p.life <= 0) continue;
     p.life -= dt; if (p.kind === 2) continue;
+    if (p.kind === 4) p.rot += p.spin * dt;
     p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 1 - dt * 2; if (!p.g) p.vy *= 1 - dt * 2;
   }
 }
@@ -1707,13 +1819,27 @@ function drawParts(under) {
   for (const p of PARTS) {
     if (p.life <= 0 || p.under !== under) continue;
     const u = 1 - p.life / p.max, a = clamp(p.life / p.max, 0, 1) * p.a;
+    if (p.kind === 4) { // painted sprite: eases in fast, grows with an ease-out, fades out softly
+      const img = p.sheet.img, sz = p.r + p.grow * (1 - (1 - u) * (1 - u)), al = p.a * Math.min(1, u * 9) * (1 - u * u);
+      if (!okImg(img) || al <= 0.01) continue;
+      ctx.save(); ctx.globalAlpha = al; if (p.add) ctx.globalCompositeOperation = 'lighter';
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.drawImage(img, p.frame * FX_SLOT, 0, FX_SLOT, FX_SLOT, -sz / 2, -sz / 2, sz, sz);
+      ctx.restore(); continue;
+    }
     if (p.kind === 2) { const r = p.r + p.grow * u; ctx.strokeStyle = `rgba(${p.rgb},${a})`; ctx.lineWidth = 1 + 4 * (1 - u); ell(p.x, p.y, r, r * 0.8); ctx.stroke(); }
     else if (p.kind === 1) { const r = p.r + p.grow * u; ctx.fillStyle = `rgba(${p.rgb},${a * (1 - u * 0.4)})`; ell(p.x, p.y, r, r); ctx.fill(); }
     else if (p.kind === 3) { ctx.globalAlpha = a; ctx.strokeStyle = p.col; ctx.lineWidth = p.r; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 0.04, p.y - p.vy * 0.04); ctx.stroke(); ctx.globalAlpha = 1; }
     else { ctx.globalAlpha = a; ctx.fillStyle = p.col; ell(p.x, p.y, p.r, p.r); ctx.fill(); ctx.globalAlpha = 1; }
   }
 }
-function puff(x, y, k, rgb) { spawn(1, x + (rng() - 0.5) * 8, y + (rng() - 0.5) * 8, (rng() - 0.5) * 40, (rng() - 0.5) * 40, 4 * k, 0.6, rgb, 0, true, 14 * k, 0.55); }
+/** A one-off puff in the era's own material: sand for animals, exhaust for engines, downwash for air taxis. */
+function puff(x, y, k, rgb, ang = rng() * Math.PI * 2) {
+  const mv = ERAS[eraNow()].move, vx = (rng() - 0.5) * 50, vy = (rng() - 0.5) * 50;
+  if (mv === 'fly') return fxs(FX.wash, pick(FX.wash.swirl), x, y, vx, vy, 26 * k, 46 * k, 0.6, 0.6, rng() * 6.3, (rng() < 0.5 ? -1 : 1) * 4, true, true);
+  if (mv === 'drive') return fxs(FX.smoke, pick(FX.smoke.light), x, y, vx, vy - 20, 22 * k, 44 * k, 0.8, 0.75, ang - FX.smoke.wisp + (rng() - 0.5) * 0.6, (rng() - 0.5) * 0.8, true);
+  return fxs(FX.dust, pick(FX.dust.frames), x, y, vx, vy, 22 * k, 46 * k, 0.8, 0.85, ang - FX.dust.wisp + (rng() - 0.5) * 0.6, (rng() - 0.5) * 0.6, true);
+}
 function floater(text, x, y, size, col, life = 0.8, rise = 60) { state.floats.push({ text, x, y, size, col, t0: state.t, life, rise }); }
 
 // ---- Backgrounds painted once into a cached canvas -----------------------------------------------
@@ -2420,13 +2546,14 @@ function updatePlayWorld(dt) {
       sfx.board(f.seat); const sp = seatWorld(f.id, f.seat), x = sp[0], y = sp[1];
       v.popSeat = f.seat; v.popT = t; v.squashT = t; state.lastBoardT = t;
       state.anger = Math.max(0, state.anger - tune.calm_per_board);
-      spawn(2, x, y, 0, 0, 6, 0.3, '255,255,255', 0, false, 16);
-      for (let j = 0; j < 4; j++) spawn(0, x, y, (rng() - 0.5) * 140, -rng() * 140, 2.5, 0.35, '#ffffff');
+      fxs(FX.spark, pick(FX.spark.twinkle), x, y, 0, -20, 22, 40, 0.45, 0.95, rng() * 6.3, 2, false, true);
       floater('+1', x, y - 24, 28, '#ffffff', 0.7, 46);
       if (f.full) { // the vehicle is full: a flash, a chord, sparks; full ones close together build a combo
         v.fullT = t; sfx.full();
         const p = parkPose(f.id);
-        for (let j = 0; j < 12; j++) { const a = j * Math.PI / 6; spawn(3, p.x, p.y, Math.cos(a) * 260, Math.sin(a) * 200 - 40, 3, 0.45, j % 2 ? PAL[lv.taxis[f.id].colour].light : '#fff6c8'); }
+        fxs(FX.spark, pick(FX.spark.flare), p.x, p.y, 0, 0, p.cell * 0.6, p.cell * 1.6, 0.55, 0.9, rng() * 6.3, 1.5, false, true);
+        for (let j = 0; j < 9; j++) { const a = j * Math.PI * 2 / 9 + rng() * 0.4, sp = 170 + rng() * 130;
+          fxs(FX.spark, pick(FX.spark.star), p.x, p.y, Math.cos(a) * sp, Math.sin(a) * sp * 0.8 - 40, 26 + rng() * 14, 8, 0.7 + rng() * 0.25, 1, rng() * 6.3, (rng() - 0.5) * 9, false); }
         state.combo = t - state.lastFullT <= tune.combo_window ? state.combo + 1 : 1; state.lastFullT = t;
         if (state.combo >= 2) {
           const w = COMBO_WORDS[Math.min(COMBO_WORDS.length - 1, state.combo - 2)];
@@ -2438,44 +2565,58 @@ function updatePlayWorld(dt) {
     else if (f.k === 'dock') { // arrival: a dock bump, a ring in the era's light
       sfx.dock(e); v.arriveT = t; const p = parkPose(f.id);
       spawn(2, p.x, p.y, 0, 0, 30, 0.5, E.accent, 0, true, 50);
-      for (let j = 0; j < 6; j++) puff(p.x - v.dir * (lv.taxis[f.id].len * p.cell * 0.4) + (rng() - 0.5) * 30, p.y + (rng() - 0.5) * 40, 1.1, E.lot.puff);
+      for (let j = 0; j < 5; j++) { const a = j * Math.PI * 2 / 5 + rng(); puff(p.x + Math.cos(a) * p.cell * 0.45, p.y + Math.sin(a) * p.cell * 0.35, 1.3, E.lot.puff, a); }
     }
     else if (f.k === 'depart-lot') events.push({ type: 'trip', id: f.id });
     else if (f.k === 'roll') sfx.roll();
     else if (f.k === 'spin') sfx.spin();
-    else if (f.k === 'go') { sfx.go(e); const p = parkPose(f.id); for (let j = 0; j < 6; j++) puff(p.x - v.dir * (j * 12), p.y + (j - 2.5) * 6, 1.3, E.lot.puff); }
+    else if (f.k === 'go') { sfx.go(e); const p = parkPose(f.id); for (let j = 0; j < 4; j++) puff(p.x - v.dir * (lv.taxis[f.id].len * p.cell * 0.4 + j * 14), p.y + (j - 1.5) * 12, 1.4, E.lot.puff, v.dir > 0 ? 0 : Math.PI); }
     else if (f.k === 'lift') {
       sfx.whoosh(); const p = parkPose(f.id);
-      spawn(2, p.x, p.y, 0, 0, 30, 0.7, '170,240,255', 0, true, 90);
-      for (let j = 0; j < 12; j++) { const a = j * Math.PI / 6; spawn(0, p.x + Math.cos(a) * 30, p.y + Math.sin(a) * 24, Math.cos(a) * 160, Math.sin(a) * 120, 4 + rng() * 4, 0.5, '#d8f6ff', 0, false, 0, 0.7); }
+      fxs(FX.wash, pick(FX.wash.ring), p.x, p.y, 0, 0, p.cell * 0.6, p.cell * 2.2, 0.8, 0.85, rng() * 6.3, 0, true, true);
+      fxs(FX.wash, pick(FX.wash.swirl), p.x, p.y, 0, 0, p.cell * 0.8, p.cell * 1.6, 0.9, 0.7, rng() * 6.3, 6, true, true);
     }
+  }
+  // hoofprints: each step of a walking animal leaves a print in the ground that fades after a few seconds
+  if (E.move === 'walk') for (let i = 0; i < lv.taxis.length; i++) {
+    const v = state.vc[i], walking = (v.trip && t >= v.trip.t0 && t < v.trip.t1) || (v.leave && v.leave.kind === 'ground' && t >= v.leave.go && t < v.leave.mv.t1);
+    if (!walking) continue;
+    const p = taxiPose(i); if (!p || p.gait == null) continue;
+    const step = Math.floor(p.gait / tune.stride); if (v.lastStep === step) continue;
+    const first = v.lastStep == null; v.lastStep = step; if (first) continue;
+    const ca = Math.cos(p.ang), sa = Math.sin(p.ang), sd = step % 2 ? 1 : -1, c = p.cell, back = lv.taxis[i].len * c * 0.3, sx = -sa * c * 0.13 * sd, sy = ca * c * 0.13 * sd;
+    for (const k of [0, 1]) { const bk = back + k * c * 0.5; spawn(1, p.x - ca * bk + sx, p.y - sa * bk + sy, 0, 0, Math.max(2.5, c * 0.045), tune.print_life, E.lot.print, 0, true, 0, 0.5); }
+    if (p.x > -40 && p.x < W + 40) sfx.step(e, big3(lv.taxis[i].len), p.x);
   }
   // era effects behind moving vehicles: sand puffs for animals, exhaust for engines, rotor wash for air taxis
   for (let i = 0; i < lv.taxis.length; i++) {
     const v = state.vc[i], moving = (v.trip && t >= v.trip.t0 && t < v.trip.t1) || (v.leave && v.leave.kind === 'ground' && t >= v.leave.go && t < v.leave.mv.t1);
     const idle = E.move === 'drive' && !v.trip && !v.gone && !v.parked && t >= v.rollT && canExit(lv, state.S, i) && !state.pending;
     if (!moving && !idle) continue;
-    const period = moving ? (E.move === 'fly' ? 0.09 : E.move === 'walk' ? 0.075 : 0.05) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
+    const period = moving ? (E.move === 'fly' ? 0.1 : E.move === 'walk' ? 0.09 : 0.07) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
     if (Math.floor((t + ph) / period) === Math.floor((t - dt + ph) / period)) continue;
     const p = taxiPose(i); if (!p) continue;
     const ca = Math.cos(p.ang), sa = Math.sin(p.ang), back = lv.taxis[i].len * p.cell * 0.5, side = p.cell * 0.28;
-    const bx = p.x - ca * back, by = p.y - sa * back, fx = tune.fx;
-    if (E.move === 'fly') { // rotor wash: rings and a cool downdraft
-      spawn(2, p.x + 6, p.y + 10, 0, 0, p.cell * 0.32, 0.45, '170,240,255', 0, true, p.cell * 0.7 * fx, 0.7);
-      if (moving) spawn(1, bx, by, -ca * 60, -sa * 60, 5 * fx, 0.5, '210,245,255', 0, true, 22 * fx, 0.45);
+    const bx = p.x - ca * back, by = p.y - sa * back;
+    const c = p.cell, fx = tune.fx, jit = () => (rng() - 0.5);
+    if (E.move === 'fly') { // rotor downwash: a spinning swirl of air under the taxi, now and then a glowing ring
+      fxs(FX.wash, pick(FX.wash.swirl), p.x + 4, p.y + 8, -ca * 40, -sa * 40, c * 0.5, c * 0.9 * fx, 0.55, 0.5, rng() * 6.3, 5, true, true);
+      if (rng() < 0.18) fxs(FX.wash, pick(FX.wash.ring), p.x + 4, p.y + 8, 0, 0, c * 0.4, c * 1.2 * fx, 0.6, 0.55, rng() * 6.3, 0, true, true);
       continue;
     }
     if (E.move === 'walk') { // hooves kick up sand: a cloud behind each side, now and then a bigger one
-      const k = moving ? 1.6 * fx : 0.6;
-      for (const sd of [-1, 1]) spawn(1, bx - sa * side * sd + (rng() - 0.5) * 10, by + ca * side * sd + (rng() - 0.5) * 10, -ca * 50 + (rng() - 0.5) * 40, -sa * 50 - 20 + (rng() - 0.5) * 30, 5 * k, 0.75, E.lot.puff, 0, true, 20 * k, 0.6);
-      if (moving && rng() < 0.3) spawn(1, bx, by, -ca * 30, -sa * 30 - 15, 8 * k, 1.0, E.lot.puff, 0, true, 34 * k, 0.45);
+      if (!moving) continue;
+      for (const sd of [-1, 1]) fxs(FX.dust, pick(FX.dust.frames), bx - sa * side * sd + jit() * 12, by + ca * side * sd + jit() * 12, -ca * 45 + jit() * 30, -sa * 45 + jit() * 30,
+        c * 0.28 * fx, c * 0.42 * fx, 0.75, 0.9, p.ang - FX.dust.wisp + jit() * 0.5, jit() * 0.6, true);
+      if (rng() < 0.25) fxs(FX.dust, pick(FX.dust.frames), bx - ca * 10, by - sa * 10, -ca * 25, -sa * 25, c * 0.45 * fx, c * 0.6 * fx, 1.0, 0.7, p.ang - FX.dust.wisp + jit() * 0.4, jit() * 0.4, true);
       continue;
     }
-    // engines: dark exhaust smoke from the tailpipe that billows and rises, plus road dust
-    const k = moving ? 1.5 * fx : 0.8, px = bx + sa * side * 0.6, py = by - ca * side * 0.6;
-    spawn(1, px, py, -ca * 70 + (rng() - 0.5) * 25, -sa * 70 - 35 + (rng() - 0.5) * 20, 5 * k, moving ? 1.1 : 0.8, moving ? '165,165,172' : '150,150,158', 0, false, 32 * k, moving ? 0.62 : 0.35);
-    if (moving) spawn(1, px, py, -ca * 50, -sa * 50 - 20, 3 * k, 0.5, '60,60,66', 0, false, 12 * k, 0.6); // a dark core at the pipe
-    if (moving && rng() < 0.5) spawn(1, bx - sa * side, by + ca * side, -ca * 40, -sa * 40, 4 * k, 0.6, E.lot.puff, 0, true, 16 * k, 0.4);
+    // engines: a dark puff at the pipe that billows into light grey exhaust as it drifts back, plus road dust
+    const px = bx + sa * side * 0.6, py = by - ca * side * 0.6, sang = p.ang - FX.smoke.wisp;
+    if (!moving) { fxs(FX.smoke, pick(FX.smoke.light), px, py, -ca * 20, -sa * 20 - 10, c * 0.16, c * 0.3, 0.9, 0.55, sang + jit() * 0.5, jit() * 0.5, false); continue; }
+    fxs(FX.smoke, pick(rng() < 0.4 ? FX.smoke.dark : FX.smoke.light), px, py, -ca * 60 + jit() * 20, -sa * 60 - 18 + jit() * 16,
+      c * 0.2 * fx, c * 0.55 * fx, 0.95, 0.8, sang + jit() * 0.5, jit() * 0.7, false);
+    if (rng() < 0.3) fxs(FX.dust, pick(FX.dust.frames), bx - sa * side, by + ca * side, -ca * 30, -sa * 30, c * 0.2 * fx, c * 0.3 * fx, 0.6, 0.45, p.ang - FX.dust.wisp + jit() * 0.5, 0, true);
   }
   // the line shuffles forward on its conveyor
   while (state.qv < lv.queue.length) { const tr = state.tr[state.qv]; if (tr.done || (tr.startT != null && t >= tr.startT)) state.qv++; else break; }

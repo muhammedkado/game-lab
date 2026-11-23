@@ -399,6 +399,30 @@
   model: "seedream_4.0"
   date: 2026-11-23
   ships: true
+- path: assets/fx-dust.webp
+  origin: ai
+  tool: "Dreamina; sand dust clouds, one 4x4 sheet on black, matted and packed into a 192px strip (tools: scratchpad vfxslice.js)"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/fx-smoke.webp
+  origin: ai
+  tool: "Dreamina; exhaust smoke puffs, one 4x4 sheet on black, matted and packed into a 192px strip (tools: scratchpad vfxslice.js)"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/fx-spark.webp
+  origin: ai
+  tool: "Dreamina; celebration sparkles, one 4x4 sheet on black, matted and packed into a 192px strip (tools: scratchpad vfxslice.js)"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
+- path: assets/fx-wash.webp
+  origin: ai
+  tool: "Dreamina; rotor downwash rings and swirls, one 4x4 sheet on black, matted and packed into a 192px strip (tools: scratchpad vfxslice.js)"
+  model: "seedream_4.0"
+  date: 2026-11-23
+  ships: true
 - path: vendor/almarai.css
   origin: licensed
   tool: "subset-font 2.3.0 (Arabic + Latin ranges, woff2) embedded as data URIs"

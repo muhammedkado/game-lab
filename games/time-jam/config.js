@@ -111,25 +111,32 @@ window.CONFIG = {
   rider_h: { value: 62, min: 40, max: 66, step: 1 },          // rider height in the line
 
   // The trip to the stop (logical px, px per second, seconds)
-  speed_walk: { value: 430, min: 200, max: 2000, step: 10 },   // camels and donkeys: a quick walk you can see
-  speed_drive: { value: 860, min: 300, max: 2500, step: 20 },  // motorbikes, tuk-tuks, cars and vans
-  glide_speed: { value: 940, min: 300, max: 3000, step: 20 },  // air taxis
+  // trip speed to the stop, logical px per second: every era quicker than the one before
+  speed_camels: { value: 560, min: 200, max: 2000, step: 10 },     // era 1: a brisk camel walk you can follow
+  speed_donkeys: { value: 680, min: 200, max: 2000, step: 10 },    // era 2: donkeys trot
+  speed_motorbikes: { value: 900, min: 300, max: 2500, step: 20 }, // era 3: motorbikes and tuk-tuks
+  speed_taxis: { value: 1060, min: 300, max: 2500, step: 20 },     // era 4: cars and vans
+  speed_air: { value: 1240, min: 300, max: 3000, step: 20 },       // era 5: air taxis
   trip_ease: { value: 0.26, min: 0.05, max: 0.5, step: 0.01 }, // share of a trip spent speeding up, and again braking
   corner_r: { value: 56, min: 10, max: 120, step: 2 },         // radius of the road's rounded corners
   approach: { value: 150, min: 80, max: 260, step: 5 },        // length of the S that swings a vehicle into its bay
   bump_time: { value: 0.32, min: 0.1, max: 0.8, step: 0.02 },  // the squash and dock bump on arrival
-  bob: { value: 0.08, min: 0, max: 0.15, step: 0.005 },         // how much a walking animal bobs (scale)
-  sway: { value: 0.12, min: 0, max: 0.25, step: 0.005 },        // how far a walking animal's body swings side to side (radians)
-  stride: { value: 55, min: 10, max: 80, step: 1 },             // logical px walked per half step (shorter = quicker steps)
+  bob: { value: 0.02, min: 0, max: 0.15, step: 0.005 },         // how much a walking animal bobs (scale)
+  sway: { value: 0.035, min: 0, max: 0.25, step: 0.005 },        // how far a walking animal's body swings side to side (radians)
+  stride: { value: 68, min: 10, max: 120, step: 1 },             // logical px walked per half step (shorter = quicker steps)
   drive_bounce: { value: 0.025, min: 0, max: 0.08, step: 0.005 }, // a road vehicle's suspension bounce (scale) under way
   drive_roll: { value: 0.05, min: 0, max: 0.2, step: 0.005 },     // a road vehicle's body roll side to side (radians)
   rumble: { value: 1.6, min: 0, max: 5, step: 0.1 },              // engine rumble shake (logical px)
-  streak_len: { value: 0.45, min: 0, max: 1.2, step: 0.05 },      // speed streaks behind a moving vehicle (share of its length)
+  streak_len: { value: 0, min: 0, max: 1.2, step: 0.05 },      // speed streaks behind a moving vehicle (share of its length)
   road_scale: { value: 0.9, min: 0.4, max: 1.2, step: 0.05 },    // a vehicle's size on the road, as a share of its lot size
   dock_shrink: { value: 140, min: 20, max: 400, step: 10 },     // logical px before the stop over which it shrinks to the bay size
   fx: { value: 1.2, min: 0, max: 3, step: 0.1 },                // strength of dust, exhaust smoke and rotor wash
-  hop: { value: 10, min: 0, max: 16, step: 0.5 },                // logical px a walking animal lifts on each step
-  step_shear: { value: 0.15, min: 0, max: 0.3, step: 0.01 },    // how much a walking animal's body leans into each stride
+  leg_swing: { value: 0.07, min: 0, max: 0.12, step: 0.005 },  // how far each hind leg steps along the body (share of its length)
+  neck_swing: { value: 0.17, min: 0, max: 0.35, step: 0.01 },   // how far the head and neck swing side to side (radians)
+  step_vol: { value: 1, min: 0, max: 2, step: 0.05 },           // loudness of the animals' footfalls
+  step_gap: { value: 0.07, min: 0, max: 0.3, step: 0.01 },       // shortest gap between two footfall sounds (s), so a crowd stays a rhythm
+  coin_vol: { value: 1, min: 0, max: 2, step: 0.05 },           // loudness of the coin as each rider pays, and the till when a vehicle is full
+  print_life: { value: 2.6, min: 0, max: 6, step: 0.1 },        // seconds a hoofprint stays in the ground
   hover_alt: { value: 0.14, min: 0, max: 0.4, step: 0.02 },    // how high a gliding air taxi hovers (scale and shadow)
   roll_time: { value: 0.45, min: 0.1, max: 1.2, step: 0.05 },  // a garage vehicle rolling out onto its strip
 
@@ -141,7 +148,7 @@ window.CONFIG = {
   combo_window: { value: 2, min: 0.5, max: 5, step: 0.1 },          // full vehicles this close together build a combo ("رائع!", "ممتاز!")
   depart_delay: { value: 0.16, min: 0, max: 1, step: 0.02 },        // pause before a full vehicle celebrates
   celebrate_time: { value: 0.36, min: 0, max: 1, step: 0.02 },      // its bounce of joy before it drives off
-  leave_speed: { value: 800, min: 300, max: 2500, step: 50 },      // a full ground vehicle driving off along the road
+  leave_boost: { value: 1.15, min: 0.5, max: 2.5, step: 0.05 },   // a full ground vehicle leaves this much quicker than its era's trip speed
   spin_time: { value: 0.3, min: 0.05, max: 1, step: 0.05 },         // air taxi rotors spinning up before lift-off
   rise_time: { value: 0.45, min: 0.1, max: 1.5, step: 0.05 },       // the air taxi's rise at its stop
   fly_speed: { value: 1000, min: 300, max: 2500, step: 50 },        // a full air taxi climbing away
