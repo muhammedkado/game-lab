@@ -21,7 +21,7 @@ window.CONFIG = {
   // trap count (free taps after which the level can no longer be won) fall inside the row's bands.
   // Every row raises something over the row before and lowers nothing, and each band starts where
   // the one before ends, so no level can come out easier than the one before it
-  // (evidence/dealer-proof.txt). Keep vehicles <= 52 (the solver's sets) and lots <= 8x10 (cells >= 76 px).
+  // (evidence/dealer-proof.txt). Keep vehicles <= 52 (the solver's sets) and lots <= 8x10 (cells >= 71 px).
   level_table: [
     [6, 2, 4, 5, 0, 0, 0, 0, 1, 1, 0, 0],         // 1  camels: every lane clear, one tap fills one camel
     [7, 2, 4, 5, 0, 0, 0, 0, 2, 2, 1, 3],         // 2  صعبة: one camel blocks another, three stops only
@@ -115,7 +115,7 @@ window.CONFIG = {
   calm_per_board: { value: 0.06, min: 0, max: 0.3, step: 0.01 }, // how much each boarding rider calms the line
 
   // Sizes (logical px; the canvas is 720 x 1280)
-  cell_max: { value: 112, min: 76, max: 140, step: 2 },       // largest lot cell (early levels); 8x10 lots give 76
+  cell_max: { value: 112, min: 76, max: 140, step: 2 },       // largest lot cell (early levels); 8x10 lots give 71
   veh_fill: { value: 0.92, min: 0.7, max: 1, step: 0.01 },    // a sprite's length as a share of its footprint
   veh_fill_w: { value: 0.94, min: 0.6, max: 1.1, step: 0.01 },// a sprite's width as a share of a cell
   squeeze_min: { value: 0.82, min: 0.6, max: 1, step: 0.02 }, // the most a too-wide sprite is narrowed before it is drawn shorter

@@ -2,7 +2,9 @@
 # (canvas "Sky Taxi · Game Lab", 2026-11-23). Sprite sheets were cut out with Dreamina's image cutout, sliced
 # locally into one sprite per colour, resized and saved as WebP. Full-size originals: design/sky-taxi-art/.
 # Backgrounds keep Dreamina's AI marks. Riders: the modern set was made at the owner's request (bare heads),
-# the traditional set is an image-to-image variant of it (robes, bare heads).
+# the traditional set is an image-to-image variant of it (robes, bare heads). On 2026-11-24 both sets were
+# redrawn facing the viewer (the line now stands above the stops): image-to-image from the back-view sheets,
+# Seedream 4.7 (4.0 is no longer offered), cut out with Dreamina; full sheets in design/sky-taxi-art/riders_*front-full.png.
 - path: assets/bg-1.jpg
   origin: ai
   tool: "Dreamina; background"
@@ -215,63 +217,63 @@
   ships: true
 - path: assets/rider-blue.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "see prototypes/sky-taxi/assets/provenance.yaml"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the modern back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-green.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "see prototypes/sky-taxi/assets/provenance.yaml"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the modern back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-old-blue.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "seedream_4.0"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the robes back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-old-green.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "seedream_4.0"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the robes back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-old-purple.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "seedream_4.0"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the robes back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-old-red.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "seedream_4.0"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the robes back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-old-yellow.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "seedream_4.0"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the robes back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-purple.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "see prototypes/sky-taxi/assets/provenance.yaml"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the modern back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-red.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "see prototypes/sky-taxi/assets/provenance.yaml"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the modern back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/rider-yellow.webp
   origin: ai
-  tool: "Dreamina; sprite sliced from a 5-colour sheet + Dreamina cutout"
-  model: "see prototypes/sky-taxi/assets/provenance.yaml"
-  date: 2026-11-23
+  tool: "Dreamina; front view, image-to-image from the modern back-view sheet, sprite sliced from a 5-colour sheet + Dreamina cutout"
+  model: "seedream_4.7"
+  date: 2026-11-24
   ships: true
 - path: assets/taxi-big-blue.webp
   origin: ai

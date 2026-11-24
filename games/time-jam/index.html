@@ -1001,15 +1001,19 @@ function bigButton(x, y, w, h, label, kind = 'primary') {
 }
 
 // ---- Layout -------------------------------------------------------------------------------
-// The lot sits in the top two thirds inside a road loop with rounded corners. Three wide bays sit
-// side by side under the loop's bottom edge: a vehicle swings into its bay sideways, its stop drawn
-// along the bay's kerb. The riders' line, a conveyor, fills the bottom. An 8x10 lot keeps 76 px
-// cells. Nothing is drawn over Dreamina's two AI marks.
-const XL = 26, XR = 694, YT = 118, YB = 952;          // the road loop round the lot (centre lines)
-const AV = { x0: 56, x1: 664, y0: 150, y1: 912 };     // the box a lot may use
-const BAY_Y = 1028, BAY_X0 = 60, BAY_W = 600;          // where parked vehicles sit; the bays' span
-const DOOR_Y = 1062, DOOR_H = 26;                      // each stop, drawn along its bay's kerb
-const Q_ROW1 = 1150, Q_ROW2 = 1218, Q_FRONT_X = 516, Q_GAP = 42, Q_PER_ROW = 12; // riders' feet
+// Top to bottom: the bar, the riders' line (a conveyor), the stops, then the lot. The owner asked
+// for the stops up top and the lot below, under the thumb: the eye reads the line and the stops
+// together and the hand stays on the lot. Three wide bays sit side by side over the road loop's top
+// edge: a vehicle swings up into its bay sideways, its stop drawn along the bay's top kerb, and
+// leaves along the top road, which runs off both sides of the screen. The lot sits in a road loop
+// with rounded corners below it. An 8x10 lot keeps 71 px cells. Nothing is drawn over Dreamina's
+// two AI marks (the bottom road stays clear of the bottom-right one).
+const XL = 26, XR = 694, YT = 398, YB = 1186;         // the road loop round the lot (centre lines)
+const AV = { x0: 56, x1: 664, y0: 430, y1: 1146 };    // the box a lot may use
+const BAY_Y = 322, BAY_X0 = 60, BAY_W = 600;           // where parked vehicles sit; the bays' span
+const DOOR_Y = 264, DOOR_H = 26;                       // each stop, drawn along its bay's top kerb
+const Q_ROW1 = 250, Q_ROW2 = 182, Q_FRONT_X = 516, Q_GAP = 42, Q_PER_ROW = 12; // riders' feet: row 1 by the stops
+const BANNER_Y = 296, COMBO_Y = YT + 20;               // the level's tip (over the empty bays); combo words, by the bays
 const BTN = { mute: [56, 12, 76, 72], menu: [142, 12, 76, 72], undo: [530, 12, 82, 72], restart: [624, 12, 82, 72] };
 // Stops in use now: the config's stops plus the free extra one once it is taken.
 const nGates = () => tune.gates + (state ? state.extra : 0);
@@ -1459,43 +1463,43 @@ function gridGeom(i) {
   return { fx, fy, cx: fx - dx * L / 2, cy: fy - dy * L / 2, ang: Math.atan2(dy, dx), dx, dy, L };
 }
 // The trip from the lot to bay `slot`: out along the lane to the road, round the loop on the shorter
-// side, along the bottom road, then a smooth S into the bay, parked sideways facing the way it was
-// going. A vehicle whose lane points down near its bay swings straight in.
+// side, along the top road, then a smooth S up into the bay, parked sideways facing the way it was
+// going. A vehicle whose lane points up near its bay swings straight in.
 function tripPath(i, slot, n) {
   const lv = state.lv, cm = lv.taxis[i], q = gridGeom(i), g = lv.geo, bc = bayCellN(n);
   const bx = bayXn(slot, n), D = tune.approach;
   const P = [[q.fx - q.dx * q.L, q.fy - q.dy * q.L], [q.fx, q.fy]];
   const lotB = g.gy + lv.rows * g.cell;
   let dir, k1, k2, nx;
-  if (cm.d === 2) {
+  if (cm.d === 0) {
     dir = bx > q.fx + 1 ? 1 : bx < q.fx - 1 ? -1 : (slot < n / 2 ? 1 : -1);
     nx = bx + dir * cm.len * bc / 2;
-    if (Math.abs(nx - q.fx) < D + 40) { // straight down into the bay
-      const y0 = Math.max(q.fy, lotB) + 8; P.push([q.fx, y0]);
-      k1 = 0.5 * (BAY_Y - y0); k2 = Math.max(60, 0.6 * Math.abs(nx - q.fx));
-    } else { dir = Math.sign(nx - q.fx); nx = bx + dir * cm.len * bc / 2; P.push([q.fx, YB], [nx - dir * D, YB]); k1 = k2 = D * 0.5; }
+    if (Math.abs(nx - q.fx) < D + 40) { // straight up into the bay
+      const y0 = Math.min(q.fy, g.gy) - 8; P.push([q.fx, y0]);
+      k1 = 0.5 * (y0 - BAY_Y); k2 = Math.max(60, 0.6 * Math.abs(nx - q.fx));
+    } else { dir = Math.sign(nx - q.fx); nx = bx + dir * cm.len * bc / 2; P.push([q.fx, YT], [nx - dir * D, YT]); k1 = k2 = D * 0.5; }
   } else {
     const side = cm.d === 1 ? XR : cm.d === 3 ? XL : ((q.fx - XL) + Math.abs(bx - XL) <= (XR - q.fx) + Math.abs(XR - bx) ? XL : XR);
-    if (cm.d === 0) P.push([q.fx, YT], [side, YT]); else P.push([side, q.fy]);
+    if (cm.d === 2) P.push([q.fx, YB], [side, YB]); else P.push([side, q.fy]);
     dir = side === XL ? 1 : -1; nx = bx + dir * cm.len * bc / 2;
     const qx = nx - dir * D;
     if ((qx - side) * dir < tune.corner_r + 30) { // the bay is by the corner: one swoop off the side road
-      const y0 = Math.max(P[P.length - 1][1] + 30, YB - 60); P.push([side, y0]);
-      k1 = 0.5 * (BAY_Y - y0); k2 = Math.max(60, 0.6 * Math.abs(nx - side));
-    } else { P.push([side, YB], [qx, YB]); k1 = k2 = D * 0.5; }
+      const y0 = Math.min(P[P.length - 1][1] - 30, YT + 60); P.push([side, y0]);
+      k1 = 0.5 * (y0 - BAY_Y); k2 = Math.max(60, 0.6 * Math.abs(nx - side));
+    } else { P.push([side, YT], [qx, YT]); k1 = k2 = D * 0.5; }
   }
   const path = curvePath(P, { x: nx, y: BAY_Y, ang: dir > 0 ? 0 : Math.PI, k1, k2 });
   const ahead = cm.d === 0 ? q.fy - g.gy : cm.d === 1 ? g.gx + lv.cols * g.cell - q.fx : cm.d === 2 ? lotB - q.fy : q.fx - g.gx;
   return { path, s0: q.L, sExit: q.L + ahead, dir, bc, len: cm.len, gc: g.cell };
 }
-// After boarding, a ground vehicle pulls forward with a hard turn up onto the bottom road and drives
+// After boarding, a ground vehicle pulls forward with a hard turn down onto the top road and drives
 // along it off the screen; an air taxi climbs away along its own curve.
 function leavePath(i, fly) {
   const v = state.vc[i], cm = state.lv.taxis[i], p = parkPose(i), dir = v.dir, bc = p.cell;
   const nose = [p.x + dir * cm.len * bc / 2, p.y], P = [[nose[0] - dir * cm.len * bc, nose[1]], nose];
   if (fly) return curvePath(P, { x: nose[0] + dir * 140, y: -260, ang: -Math.PI / 2, k1: 170, k2: 420 });
   const ex = nose[0] + dir * 116;
-  return curvePath(P, { x: ex, y: YB, ang: dir > 0 ? 0 : Math.PI, k1: 34, k2: 58 }, [[dir > 0 ? W + 260 : -260, YB]]);
+  return curvePath(P, { x: ex, y: YT, ang: dir > 0 ? 0 : Math.PI, k1: 34, k2: 58 }, [[dir > 0 ? W + 260 : -260, YT]]);
 }
 // Each era is quicker than the one before: camels, then donkeys, motorbikes, taxis, air taxis.
 const ERA_SPEED = ['speed_camels', 'speed_donkeys', 'speed_motorbikes', 'speed_taxis', 'speed_air'];
@@ -1960,12 +1964,12 @@ function paintBackground(lv, e) {
   ctx.fillStyle = E.base; ctx.fillRect(0, 0, W, H);
   if (okImg(E.bgImg)) ctx.drawImage(E.bgImg, 0, 0, W, H);
   if (!lv) return;
-  // the road: a loop round the lot, and the bottom road running on off both sides of the screen
+  // the road: a loop round the lot, and the top road running on off both sides of the screen
   ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
   const strokeRoad = (wid, col, dash) => {
     ctx.strokeStyle = col; ctx.lineWidth = wid; ctx.setLineDash(dash || []);
     roadLoop(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-20, YB); ctx.lineTo(W + 20, YB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-20, YT); ctx.lineTo(W + 20, YT); ctx.stroke();
     ctx.setLineDash([]);
   };
   strokeRoad(66, S.roadEdge); strokeRoad(58, S.road); strokeRoad(3, S.roadDash, S.dash ? [10, 14] : [22, 16]);
@@ -1993,7 +1997,7 @@ function paintBackground(lv, e) {
       ctx.beginPath(); ctx.moveTo(x - dx * s + px * s, y - dy * s + py * s); ctx.lineTo(x + dx * s * 0.6, y + dy * s * 0.6); ctx.lineTo(x - dx * s - px * s, y - dy * s - py * s); ctx.stroke();
     }
   }
-  // the bays under the road, wide and painted
+  // the bays over the road, wide and painted
   const NG = nGates(), bw = BAY_W / NG;
   for (let i = 0; i < NG; i++) {
     const x0 = BAY_X0 + bw * i;
@@ -2214,7 +2218,7 @@ function drawPlay() {
     const q = gridGeom(state.hint), k = Math.sin(t * 5) * 10;
     drawHand(q.cx + 18 + k * 0.5, q.cy + 16 + k, -0.45);
   }
-  if (!state.warn && t - state.bannerT < 4.2 && !state.tapped) { // gone at the first tap, so the road below is clear to watch
+  if (!state.warn && t - state.bannerT < 4.2 && !state.tapped) { // gone at the first tap, so the bays are clear to watch
     const a = clamp(Math.min((t - state.bannerT) / 0.3, (4.2 - (t - state.bannerT)) / 0.5), 0, 1);
     ctx.globalAlpha = a; drawBanner(); ctx.globalAlpha = 1;
   }
@@ -2255,12 +2259,13 @@ const TIPS = {
 };
 function drawBanner() {
   const L = state.level;
-  ctx.fillStyle = 'rgba(10,12,28,0.92)'; rrect(40, 962, 640, 112, 24); ctx.fill();
+  const y = BANNER_Y; // over the bays, empty until the first tap
+  ctx.fillStyle = 'rgba(10,12,28,0.92)'; rrect(40, y, 640, 112, 24); ctx.fill();
   ctx.strokeStyle = `rgb(${accent()})`; ctx.lineWidth = 2.5; ctx.stroke();
-  text(TIPS[L] || 'خطّط قبل أن تضغط', W / 2, 1000, 30, '#ffffff');
-  text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, 1044, 26, '#7ef0b0');
-  checkMark(W / 2 + 178, 1044, 26, '#7ef0b0');
-  if (state.lv.tier === 1) hardPill(W / 2, 962, 1.1); // said before the level starts
+  text(TIPS[L] || 'خطّط قبل أن تضغط', W / 2, y + 38, 30, '#ffffff');
+  text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, y + 82, 26, '#7ef0b0');
+  checkMark(W / 2 + 178, y + 82, 26, '#7ef0b0');
+  if (state.lv.tier === 1) hardPill(W / 2, y, 1.1); // said before the level starts
 }
 // The red banner before a "صعبة جداً" level: it slides in, says so, and goes on a tap or by itself.
 function drawWarn() {
@@ -2694,7 +2699,7 @@ function updatePlayWorld(dt) {
         state.combo = t - state.lastFullT <= tune.combo_window ? state.combo + 1 : 1; state.lastFullT = t;
         if (state.combo >= 2) {
           const w = COMBO_WORDS[Math.min(COMBO_WORDS.length - 1, state.combo - 2)];
-          state.floats.push({ text: w, x: W / 2, y: 930, size: 56, col: '#ffd34d', t0: t, life: 1.1, rise: 70, big: true });
+          state.floats.push({ text: w, x: W / 2, y: COMBO_Y, size: 56, col: '#ffd34d', t0: t, life: 1.1, rise: 70, big: true });
           sfx.combo(state.combo); events.push({ type: 'combo', n: state.combo });
         }
       }
