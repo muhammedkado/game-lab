@@ -12,7 +12,11 @@ window.CONFIG = {
   undos: { value: 3, min: 0, max: 9, step: 1 },          // free undos per level
   seats_small: { value: 4, min: 2, max: 4, step: 1 },    // seats on a small vehicle (2 cells): camel, donkey, motorbike, car, air taxi
   seats_big: { value: 8, min: 4, max: 8, step: 1 },      // seats on a big vehicle (3 cells): howdah, cart, tuk-tuk, van, air shuttle
-  levels: { value: 25, min: 5, max: 25, step: 5 },       // levels in the game, 5 per era
+  levels: { value: 200, min: 5, max: 200, step: 5 },     // levels in the game: 5 per era, 25 per season (a season is one trip through the five eras)
+  // Seasons after the first deal from a later stretch of the table below: season k's 25 levels spread over
+  // rows season_start[k]+1 .. 25 (the last entry serves every later season), so each season opens with a
+  // breather and climbs to the hardest rows again. Their deals differ (the seed takes the level).
+  season_start: [0, 5, 8, 10],
 
   // The 25-level ramp, one row per level (levels 1-5 camels, 6-10 donkeys, 11-15 motorbikes,
   // 16-20 taxis, 21-25 air taxis). Each row is
@@ -89,6 +93,188 @@ window.CONFIG = {
     [22, 152, '1u33plj'], // 23
     [40, 163, 'bc7xar'], // 24
     [161, 200, '1564ojh'], // 25
+    // season 2 (levels 26-50): table rows 6-25, scanned offline 2026-11-25 (evidence/dealer-proof-seasons.txt)
+    [30, 15, '18tlwuu'], // 26
+    [70, 18, '1ix3guo'], // 27
+    [24, 19, '1eat1ge'], // 28
+    [11, 30, 'e2z04'], // 29
+    [22, 28, 'j3hj2k'], // 30
+    [10, 35, 'b22xp4'], // 31
+    [9, 41, 'wse7ph'], // 32
+    [17, 49, '16unoud'], // 33
+    [17, 58, 'slybxl'], // 34
+    [62, 58, 'zqxgri'], // 35
+    [0, 65, '1b6xmaj'], // 36
+    [35, 79, 'vzfka6'], // 37
+    [18, 83, '2wfk99'], // 38
+    [8, 90, '16bjicm'], // 39
+    [74, 90, '1r6tvtk'], // 40
+    [16, 104, '8vf42'], // 41
+    [91, 116, '1pxyw2b'], // 42
+    [17, 135, '9027re'], // 43
+    [14, 145, 'a8ysvb'], // 44
+    [89, 145, '45q4pf'], // 45
+    [57, 145, '8mwxxa'], // 46
+    [161, 159, 'xix9wm'], // 47
+    [14, 169, '1q33ie6'], // 48
+    [55, 199, '1ul7mq1'], // 49
+    [52, 223, '1rc5s0l'], // 50
+    // season 3 (levels 51-75): table rows 9-25, scanned offline 2026-11-25 (evidence/dealer-proof-seasons.txt)
+    [6, 27, '1enlud6'], // 51
+    [9, 37, '1nu7vtw'], // 52
+    [1, 42, '1ucf52l'], // 53
+    [12, 40, '1ongth5'], // 54
+    [56, 48, '1o574ke'], // 55
+    [16, 52, 'kg12cl'], // 56
+    [38, 56, 'ffotz9'], // 57
+    [0, 61, '1gmv02w'], // 58
+    [31, 79, '7076a4'], // 59
+    [93, 80, 'j8esed'], // 60
+    [76, 81, '1ad9fyg'], // 61
+    [7, 89, 'aiys1q'], // 62
+    [4, 84, 'ub8c2e'], // 63
+    [34, 103, '1ekgcgv'], // 64
+    [147, 118, 'q8kmd3'], // 65
+    [26, 118, '3352k5'], // 66
+    [0, 132, '16hoqkc'], // 67
+    [22, 142, 'rf7qdt'], // 68
+    [19, 141, '1anhbo7'], // 69
+    [232, 152, '1pzi7s6'], // 70
+    [9, 154, 'z0uqkn'], // 71
+    [15, 159, '1pxqx3r'], // 72
+    [154, 166, '1iwrfo1'], // 73
+    [73, 214, 'trjdo2'], // 74
+    [136, 212, '1n6qh8v'], // 75
+    // season 4 (levels 76-100): table rows 11-25, scanned offline 2026-11-25 (evidence/dealer-proof-seasons.txt)
+    [4, 39, '1driol0'], // 76
+    [66, 47, 'gnum7w'], // 77
+    [5, 47, '1lehymn'], // 78
+    [56, 55, 'gxe26j'], // 79
+    [80, 58, '6biy5o'], // 80
+    [15, 64, '1hddcmx'], // 81
+    [7, 80, '1txd961'], // 82
+    [6, 80, '1cnpgic'], // 83
+    [85, 84, '50lt6g'], // 84
+    [48, 84, 'ccqc4j'], // 85
+    [14, 89, '2azgxp'], // 86
+    [13, 104, '10hr9ne'], // 87
+    [26, 92, '1bfch05'], // 88
+    [10, 113, 'ac9smj'], // 89
+    [26, 117, '102dn49'], // 90
+    [1, 120, '1rs2ozz'], // 91
+    [44, 145, '17705c4'], // 92
+    [15, 136, 'a4upco'], // 93
+    [13, 152, '1gdj5wk'], // 94
+    [23, 152, 'qh4vin'], // 95
+    [33, 154, 'gdcoir'], // 96
+    [114, 169, 'n3fzbd'], // 97
+    [13, 163, '8lelwn'], // 98
+    [124, 194, 'pr90z9'], // 99
+    [6, 256, '3f0za9'], // 100
+    // season 5 (levels 101-125): table rows 11-25, scanned offline 2026-11-25 (evidence/dealer-proof-seasons.txt)
+    [19, 42, '7d4dzd'], // 101
+    [13, 48, 'dr1np'], // 102
+    [12, 46, '15xumy4'], // 103
+    [21, 58, '18425qg'], // 104
+    [78, 58, 'asswwn'], // 105
+    [18, 66, '7fdl2l'], // 106
+    [16, 79, '1nai67a'], // 107
+    [2, 66, 'uiuhn1'], // 108
+    [39, 83, '1pkb79a'], // 109
+    [310, 84, 'imib4g'], // 110
+    [25, 84, 'yyl1x3'], // 111
+    [46, 105, '6a2yjs'], // 112
+    [16, 99, '1sub78x'], // 113
+    [54, 115, '1tq2cx9'], // 114
+    [51, 118, 'mouhvb'], // 115
+    [16, 130, '1wmr6kd'], // 116
+    [11, 143, '1rqelvy'], // 117
+    [55, 141, '1ld4wm4'], // 118
+    [43, 150, '1rrgc9c'], // 119
+    [160, 152, '2v02wo'], // 120
+    [9, 159, '1742vl9'], // 121
+    [38, 169, '19l893t'], // 122
+    [25, 161, '1o5nbdo'], // 123
+    [84, 241, 'mn534q'], // 124
+    [16, 247, '17ab6b7'], // 125
+    // season 6 (levels 126-150): table rows 11-25, scanned offline 2026-11-25 (evidence/dealer-proof-seasons.txt)
+    [4, 40, '2ut28v'], // 126
+    [8, 48, '1ciln2e'], // 127
+    [15, 46, '1ce8nng'], // 128
+    [34, 57, 'cso0rz'], // 129
+    [73, 58, 'p7lxmy'], // 130
+    [15, 64, 'u85tjd'], // 131
+    [0, 77, '1h9u5wz'], // 132
+    [5, 78, '1paeg8w'], // 133
+    [72, 84, '7irugv'], // 134
+    [140, 84, '1123pbv'], // 135
+    [15, 87, '18tvajd'], // 136
+    [74, 103, 'ghi3gd'], // 137
+    [35, 100, 'pkdx6'], // 138
+    [144, 118, 'xg3lgx'], // 139
+    [59, 117, 'r45kvv'], // 140
+    [1, 127, 'kgzywh'], // 141
+    [24, 143, '1lqyvoa'], // 142
+    [74, 144, 'c7en4c'], // 143
+    [87, 152, '1h4x1hg'], // 144
+    [183, 151, 'knyor0'], // 145
+    [0, 154, 'bs2dtn'], // 146
+    [65, 170, 'lnfzyj'], // 147
+    [9, 163, 'gzgfzm'], // 148
+    [41, 198, 'uz5muz'], // 149
+    [119, 216, '1ji6nel'], // 150
+    // season 7 (levels 151-175): table rows 11-25, scanned offline 2026-11-25 (evidence/dealer-proof-seasons.txt)
+    [2, 40, '1lj563i'], // 151
+    [41, 50, '1kegtfw'], // 152
+    [20, 43, '1rl8fdq'], // 153
+    [92, 57, 'qzyvbd'], // 154
+    [58, 58, '1yatpns'], // 155
+    [4, 61, '16tm1gc'], // 156
+    [62, 79, '19no1q7'], // 157
+    [2, 68, '1pcxyll'], // 158
+    [92, 84, 'kztrzq'], // 159
+    [1, 84, 'rgsq94'], // 160
+    [18, 88, 's05rj'], // 161
+    [56, 99, '17r04fn'], // 162
+    [4, 100, '15sl3pe'], // 163
+    [0, 118, '15lx6sh'], // 164
+    [87, 117, '19f8p32'], // 165
+    [0, 127, '2kgzij'], // 166
+    [37, 144, '19gnqsz'], // 167
+    [1, 135, '1tfwaxf'], // 168
+    [164, 150, '14etxye'], // 169
+    [337, 152, '1z52wm'], // 170
+    [50, 157, '16d2l4a'], // 171
+    [68, 168, '14gt66x'], // 172
+    [102, 168, 'stoxy3'], // 173
+    [112, 217, '1by87nm'], // 174
+    [226, 221, '175kmbr'], // 175
+    // season 8 (levels 176-200): table rows 11-25, scanned offline 2026-11-25 (evidence/dealer-proof-seasons.txt)
+    [5, 38, 'b8n66c'], // 176
+    [2, 50, 'd6c8y3'], // 177
+    [6, 48, 'ayga90'], // 178
+    [37, 57, '1xq67ih'], // 179
+    [11, 58, 'hm3kuz'], // 180
+    [11, 59, '65reip'], // 181
+    [14, 77, '13fq92s'], // 182
+    [1, 67, '1suozgz'], // 183
+    [24, 83, '1co7zkt'], // 184
+    [116, 84, '1tkrx4y'], // 185
+    [55, 88, 'u0ra6z'], // 186
+    [80, 100, '55ad6u'], // 187
+    [0, 105, '194me2g'], // 188
+    [70, 117, '1e23ztf'], // 189
+    [194, 118, '1spth4x'], // 190
+    [16, 133, '1arpwjn'], // 191
+    [3, 143, '1u10yns'], // 192
+    [2, 139, '6vx0ue'], // 193
+    [70, 147, 'hrfeh0'], // 194
+    [14, 152, 'j8flo2'], // 195
+    [9, 156, '1orcfm6'], // 196
+    [111, 167, '1xjszpa'], // 197
+    [60, 166, '13xq8gu'], // 198
+    [114, 222, '1vnz8wo'], // 199
+    [184, 233, '10wgc87'], // 200
   ],
 
   // Free help, honest labels, covered vehicles, queueing
@@ -155,9 +341,19 @@ window.CONFIG = {
   roll_time: { value: 0.45, min: 0.1, max: 1.2, step: 0.05 },  // a garage vehicle rolling out onto its strip
 
   // Boarding and leaving
-  board_interval: { value: 0.12, min: 0.04, max: 0.5, step: 0.01 }, // gap between riders hopping on, one at a time
-  board_flight: { value: 0.3, min: 0.08, max: 0.8, step: 0.02 },    // a rider's hop from the line to its seat
-  hop_h: { value: 70, min: 0, max: 200, step: 5 },                  // how high the hop arcs
+  board_interval: { value: 0.12, min: 0.04, max: 0.5, step: 0.01 }, // gap between riders leaving the line, one at a time
+  board_flight: { value: 0.24, min: 0.08, max: 0.8, step: 0.02 },   // a rider's jump from the kerb down into its seat
+  hop_h: { value: 70, min: 0, max: 200, step: 5 },                  // how high that jump arcs
+  // Riders in motion (round 4): they walk up the line, run along the kerb to their vehicle and jump in
+  run_speed: { value: 1150, min: 300, max: 3000, step: 50 },        // a boarding rider's run along the kerb, logical px per second
+  run_stride: { value: 17, min: 6, max: 60, step: 1 },              // logical px per running step (shorter = quicker legs)
+  run_lane: { value: 18, min: 0, max: 40, step: 1 },                // how far in front of the line the runners pass (logical px below its feet)
+  rider_stride: { value: 13, min: 4, max: 40, step: 1 },            // logical px per step when the line walks forward
+  fidget_every: { value: 4.5, min: 1, max: 20, step: 0.5 },         // about how often a waiting rider shuffles its feet (s)
+  cheer_time: { value: 0.5, min: 0.2, max: 1.5, step: 0.05 },       // a rider's jump for joy when a vehicle in its colour pulls in
+  cheer_riders: { value: 6, min: 0, max: 24, step: 1 },             // how many riders in that colour jump
+  scene_fade: { value: 0.22, min: 0, max: 1, step: 0.02 },          // a new screen fades in from the dark (s)
+  panel_pop: { value: 0.26, min: 0.02, max: 1, step: 0.02 },        // a panel over the lot (results, stuck) pops in (s)
   squash: { value: 0.06, min: 0, max: 0.2, step: 0.01 },            // how much each landing rider squashes the vehicle
   combo_window: { value: 2, min: 0.5, max: 5, step: 0.1 },          // full vehicles this close together build a combo ("رائع!", "ممتاز!")
   depart_delay: { value: 0.16, min: 0, max: 1, step: 0.02 },        // pause before a full vehicle celebrates

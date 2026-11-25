@@ -436,6 +436,75 @@
   licence: {id: CC0-1.0}
   date: 2026-11-23
   ships: true
+# Round 4 (2026-11-25): rider pose strips. Six Dreamina sheets, image-to-image from the two front-view sheets
+# (Seedream 4.7, 2K): walking A, walking B and cheering for each set; five were cut out with Dreamina (the hoodie
+# set's walking B sheet is not used: its strip mirrors the legs of walking A). tools/rider-anim.js slices, aligns and
+# packs them with the standing cut-outs into one strip per colour and writes the shared frame box (rider-anim.js).
+- path: assets/rider-anim-red.webp
+  origin: ai
+  tool: "Dreamina; modern (hoodie) set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-anim-blue.webp
+  origin: ai
+  tool: "Dreamina; modern (hoodie) set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-anim-green.webp
+  origin: ai
+  tool: "Dreamina; modern (hoodie) set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-anim-yellow.webp
+  origin: ai
+  tool: "Dreamina; modern (hoodie) set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-anim-purple.webp
+  origin: ai
+  tool: "Dreamina; modern (hoodie) set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-old-anim-red.webp
+  origin: ai
+  tool: "Dreamina; robe set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-old-anim-blue.webp
+  origin: ai
+  tool: "Dreamina; robe set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-old-anim-green.webp
+  origin: ai
+  tool: "Dreamina; robe set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-old-anim-yellow.webp
+  origin: ai
+  tool: "Dreamina; robe set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-old-anim-purple.webp
+  origin: ai
+  tool: "Dreamina; robe set pose strip (standing, walking A, walking B, cheering): image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-25
+  ships: true
+- path: assets/rider-anim.js
+  origin: code
+  tool: "tools/rider-anim.js (the frame box of the rider strips)"
+  date: 2026-11-25
+  ships: true
 - path: vendor/almarai.css
   origin: licensed
   tool: "subset-font 2.3.0 (Arabic + Latin ranges, woff2) embedded as data URIs"

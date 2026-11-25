@@ -23,6 +23,7 @@
 <script src="config.js"></script>
 <script src="ads.js"></script>
 <script src="assets/sfx-data.js"></script>
+<script src="assets/rider-anim.js"></script>
 <script>
 'use strict';
 // Time Jam (زحمة الزمن): Sky Taxi's proven jam-and-board rules run through five eras, oldest to
@@ -328,9 +329,18 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
 const SAVE_KEY = 'time-jam-save-v1';
 let save = { stars: [], unlocked: 1, seen: 1 };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && Array.isArray(s.stars)) save = Object.assign(save, s); } catch (e) { /* no storage */ }
+// A save from the 25-level game: whoever finished level 25 goes straight on to season 2.
+function migrateSave() {
+  const top = CONFIG.levels.value; let last = 0;
+  for (let k = 0; k < save.stars.length; k++) if (save.stars[k]) last = k + 1;
+  if (last >= (save.unlocked || 1) && last < top) save.unlocked = last + 1;
+  save.done = (save.stars[top - 1] || 0) > 0;
+}
+migrateSave();
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* no storage */ } }
 function totalStars() { return save.stars.reduce((a, b) => a + (b || 0), 0); }
-function eraStars(e) { let s = 0; for (let k = 0; k < ERA_LEVELS; k++) s += save.stars[e * ERA_LEVELS + k] || 0; return s; }
+function seasonStars(s) { let n = 0; for (let k = 0; k < SEASON_LEVELS; k++) n += save.stars[s * SEASON_LEVELS + k] || 0; return n; }
+function eraStars(e, s = viewSeason) { let n = 0; for (let k = 0; k < ERA_LEVELS; k++) n += save.stars[lvAt(s, e, k) - 1] || 0; return n; }
 
 // ---- Local play log: honest per-level numbers for the owner's playtests, on this device only --
 // An attempt counts from its first vehicle tap; firstTryWin is 1 when the very first attempt was won.
@@ -414,7 +424,7 @@ function padlock(x, y, s, col) { // a drawn padlock: locked eras and levels
 const ERA_LEVELS = 5;  // levels per era
 const ERAS = [
   { name: 'عصر القوافل', tab: 'القوافل', bg: 'bg-1', small: 'camel', big: 'camel-howdah', riders: 'rider-old',
-    stop: 'post', cover: 'cloth', move: 'walk', noun: 'جمل',
+    stop: 'post', cover: 'cloth', move: 'walk', noun: 'جمل', garage: 'tent', garageName: 'خيمة القافلة',
     smallName: 'جمل', bigName: 'جمل بهودج', coverName: 'مغطى بقماش', stopName: 'أعمدة الربط',
     accent: '255,198,112', base: '#3a2410', greyTint: '#cfc2aa',
     lot: { lane: 'rgba(96,52,16,0.42)', mat: 'rgba(66,34,10,0.48)', edge: 'rgba(255,224,165,0.78)', cell: 'rgba(255,220,160,0.12)',
@@ -422,7 +432,7 @@ const ERAS = [
       floor: 'rgba(250,234,200,0.55)', floorEdge: 'rgba(120,66,22,0.7)', puff: '226,190,140', print: '110,70,32',
       road: 'rgba(196,150,96,0.62)', roadEdge: 'rgba(92,54,20,0.55)', roadDash: 'rgba(255,236,200,0.55)' } },
   { name: 'عصر الحمير والعربات', tab: 'الحمير', bg: 'bg-2', small: 'donkey', big: 'donkey-cart', riders: 'rider-old',
-    stop: 'stall', cover: 'sack', move: 'walk', noun: 'حمار',
+    stop: 'stall', cover: 'sack', move: 'walk', noun: 'حمار', garage: 'stable', garageName: 'إسطبل',
     smallName: 'حمار', bigName: 'حمار بعربة', coverName: 'مغطى بالخيش', stopName: 'مظلة السوق',
     accent: '244,214,160', base: '#2c241c', greyTint: '#c8c0b4',
     lot: { lane: 'rgba(60,46,34,0.45)', mat: 'rgba(36,28,22,0.52)', edge: 'rgba(244,226,196,0.75)', cell: 'rgba(244,230,206,0.1)',
@@ -454,7 +464,14 @@ const ERAS = [
       floor: 'rgba(110,150,200,0.4)', floorEdge: 'rgba(110,225,255,0.45)', puff: '200,240,255',
       road: 'rgba(14,40,80,0.62)', roadEdge: 'rgba(90,220,255,0.55)', roadDash: 'rgba(160,240,255,0.8)' } },
 ];
-const eraOf = L => clamp(Math.floor((L - 1) / ERA_LEVELS), 0, ERAS.length - 1);
+// The series: a season is one trip through the five eras (25 levels); the next season starts again at
+// the camels with harder deals (config.js: levels, season_start). A chapter is one era of one season.
+const SEASON_LEVELS = ERA_LEVELS * ERAS.length;
+const chapOf = L => Math.floor((Math.max(1, L) - 1) / ERA_LEVELS);          // 0, 1, 2 ... across seasons
+const eraOf = L => chapOf(L) % ERAS.length;
+const seasonOf = L => Math.floor((Math.max(1, L) - 1) / SEASON_LEVELS);
+const lvAt = (s, e, k) => (s * ERAS.length + e) * ERA_LEVELS + k + 1;        // season, era, place in the era -> level
+const nSeasons = () => Math.ceil(tune.levels / SEASON_LEVELS);
 // Each sprite's fit: a slight widening for the thinnest animals, where its riders sit (zone: the
 // share of its length from the nose; across: each of the two seat columns' offset as a share of its
 // width), and the part a cover hides (fractions of its length from the nose). Air taxis also name
@@ -502,7 +519,8 @@ function requestEra(e) {
   E.smallImg = COLOURS.map(c => getImg(`${E.small}-${c}.webp`));
   E.bigImg = COLOURS.map(c => getImg(`${E.big}-${c}.webp`));
   E.riderImg = COLOURS.map(c => getImg(`${E.riders}-${c}.webp`));
-  g.imgs = [E.bgImg, ...E.smallImg, ...E.bigImg, ...E.riderImg, ...fxSheets()];
+  E.riderAnim = COLOURS.map(c => getImg(`${E.riders}-anim-${c}.webp`)); // stand, two steps, a jump (tools/rider-anim.js)
+  g.imgs = [E.bgImg, ...E.smallImg, ...E.bigImg, ...E.riderImg, ...E.riderAnim, ...fxSheets()];
   onLoaded();
 }
 function onLoaded() {
@@ -517,7 +535,7 @@ function onLoaded() {
 }
 function loadProgress(eras) {
   let n = 1, d = titleImg && titleImg.done ? 1 : 0;
-  for (const e of eras) { const g = LOAD[e]; n += g.started ? g.imgs.length : 16; if (g.started) d += g.imgs.filter(im => im.done).length; }
+  for (const e of eras) { const g = LOAD[e]; n += g.started ? g.imgs.length : 21; if (g.started) d += g.imgs.filter(im => im.done).length; }
   return d / n;
 }
 const okImg = img => !!img && img.complete && img.naturalWidth > 0;
@@ -795,15 +813,47 @@ function facingCue(x, y, dx, dy, c, e) {
   ctx.moveTo(x + px * hw0, y + py * hw0); ctx.lineTo(x + dx * L + px * hw1, y + dy * L + py * hw1);
   ctx.lineTo(x + dx * L - px * hw1, y + dy * L - py * hw1); ctx.lineTo(x - px * hw0, y - py * hw0); ctx.closePath(); ctx.fill();
 }
-// A rider (sprite seen from behind: bare head, clothes in the colour) with feet at (x, y), h tall.
+// A rider (front view: bare head, clothes in the colour) with feet at (x, y), h tall.
 // Eras 1-2 use the robed set, eras 3-5 the hoodie set (hood down); both share one scale and foot line.
-function drawRider(x, y, ci, h, a = 1, e = eraNow()) {
-  const set = ERAS[e].riderImg, img = set ? set[ci] : null, a0 = ctx.globalAlpha;
-  ctx.fillStyle = `rgba(0,0,0,${0.35 * a})`; ell(x, y - 2, h * 0.3, h * 0.07); ctx.fill();
+// Each colour has a strip of frames (assets/<set>-anim-<colour>.webp, Dreamina poses put together by
+// tools/rider-anim.js): 0 standing, 1 and 2 the two steps of a walk, 3 a jump for joy. Every frame shares
+// one box: the standing figure's middle on RIDER_ATLAS.cx, the ground on .gy; .hh is its height.
+// m (optional) is how it moves right now: f the frame, lift its height off the ground, lean a tilt in
+// radians, sy a stretch (breathing). Without a strip the single standing sprite is drawn, moved the same way.
+const RIDER_ATLAS = window.RIDER_ANIM || { fw: 99, fh: 167, cx: 50, gy: 165, hh: 160 }; // assets/rider-anim.js, written with the strips
+const MO = { f: 0, lift: 0, lean: 0, sy: 1 }; // scratch: one motion at a time, nothing allocated per rider
+function drawRider(x, y, ci, h, a = 1, e = eraNow(), m = null) {
+  const E = ERAS[e], strip = E.riderAnim ? E.riderAnim[ci] : null, set = E.riderImg, img = set ? set[ci] : null, a0 = ctx.globalAlpha;
+  const lift = m ? m.lift : 0, sh = clamp(1 - lift / (h * 1.1), 0.4, 1); // the shadow shrinks as it leaves the ground
+  ctx.fillStyle = `rgba(0,0,0,${0.35 * a * sh})`; ell(x, y - 2, h * 0.3 * sh, h * 0.07 * sh); ctx.fill();
   ctx.globalAlpha = a0 * a;
-  if (okImg(img)) { const w = h * img.naturalWidth / img.naturalHeight; ctx.drawImage(img, x - w / 2, y - h, w, h); }
-  else { ctx.fillStyle = PAL[ci].base; rrect(x - h * 0.22, y - h * 0.62, h * 0.44, h * 0.6, h * 0.16); ctx.fill(); ctx.fillStyle = '#2a1d17'; ell(x, y - h * 0.75, h * 0.2, h * 0.2); ctx.fill(); }
+  ctx.save(); ctx.translate(x, y - lift);
+  if (m) { if (m.lean) ctx.rotate(m.lean); if (m.sy !== 1) ctx.scale(2 - m.sy, m.sy); }
+  if (okImg(strip)) {
+    const A = RIDER_ATLAS, k = h / A.hh, n = Math.max(1, Math.round(strip.naturalWidth / A.fw)), f = m ? Math.min(n - 1, m.f) : 0;
+    ctx.drawImage(strip, f * A.fw, 0, A.fw, A.fh, -A.cx * k, -A.gy * k, A.fw * k, A.fh * k);
+  } else if (okImg(img)) { const w = h * img.naturalWidth / img.naturalHeight; ctx.drawImage(img, -w / 2, -h, w, h); }
+  else { ctx.fillStyle = PAL[ci].base; rrect(-h * 0.22, -h * 0.62, h * 0.44, h * 0.6, h * 0.16); ctx.fill(); ctx.fillStyle = '#2a1d17'; ell(0, -h * 0.75, h * 0.2, h * 0.2); ctx.fill(); }
+  ctx.restore();
   ctx.globalAlpha = a0;
+}
+// A rider marching on the spot (menus): two steps, a beat standing, two steps.
+function marching(t, k) { const u = (t * 3.2 + k * 0.6) % 6; MO.lean = 0; MO.sy = 1; if (u < 4) { MO.f = 1 + (Math.floor(u) & 1); MO.lift = Math.abs(Math.sin(u * Math.PI)) * 3; } else { MO.f = 0; MO.lift = 0; } return MO; }
+// How a rider in the line moves right now: jumping for joy when a vehicle in its colour pulls in,
+// walking when the line moves up, stamping when it is cross, and otherwise breathing, with a shuffle
+// of the feet now and then, each rider in its own time, so the line is never a row of statues.
+function queueMotion(tr, k, near, t, RH) {
+  const m = MO, ang = state.anger; m.f = 0; m.lift = 0; m.lean = 0; m.sy = 1;
+  if (tr.cheerT != null && t >= tr.cheerT && t < tr.cheerT + tune.cheer_time) { const u = (t - tr.cheerT) / tune.cheer_time; m.f = 3; m.lift = Math.sin(u * Math.PI) * RH * 0.28; return m; }
+  const sp = Math.abs(tr.vx || 0) + Math.abs(tr.vy || 0);
+  if (sp > 18) { const ph = (tr.gait || 0) / tune.rider_stride; m.f = 1 + (Math.floor(ph) & 1); m.lift = Math.abs(Math.sin(ph * Math.PI)) * 2.5; m.lean = clamp((tr.vx || 0) / 500, -1, 1) * 0.1; return m; }
+  if (ang > 0.35 && near < 14) { // cross: stamping feet, quicker as patience runs out
+    const a = (ang - 0.35) / 0.65, ph = t * (3 + a * 3.5) + k * 0.7; m.f = 1 + (Math.floor(ph) & 1); m.lift = Math.max(0, Math.sin(ph * Math.PI * 2)) * 5 * a; return m;
+  }
+  const cyc = tune.fidget_every * (0.7 + hash(k, 7) * 0.6), ph = (t + hash(k, 3) * cyc) % cyc;
+  if (ph < 0.6) { const u = ph / 0.3; m.f = 1 + (Math.floor(u) & 1); m.lift = Math.abs(Math.sin(u * Math.PI)) * 2; }
+  else m.sy = 1 + 0.016 * Math.sin(t * 2.6 + k * 1.3);
+  return m;
 }
 // A stop, drawn in the era's look at (x, y), w wide. light: the docked vehicle's colour (or null).
 function drawStop(x, light, open, w, y = DOOR_Y, e = eraNow()) {
@@ -1039,8 +1089,17 @@ const tierOf = L => CONFIG.tiers[(L - 1) % ERA_LEVELS] | 0;
 const isHard = L => tierOf(L) > 0;
 // One row of config.js's level_table per level: vehicles (garage stock included), colours, lot,
 // big vehicles, covered, garages and their stock, and the bands its chain depth and traps must fall in.
+// Season 1 reads rows 1-25 in order. A later season squeezes a harder stretch of the same table into
+// its 25 levels: season 2 runs rows 6-25, season 3 rows 11-25, season 4 on rows 16-25 (season_start),
+// so its camels already come with what season 1 kept for later (covers, garages, five colours).
+function tableRow(L) {
+  const T = CONFIG.level_table, s = seasonOf(L);
+  if (s === 0) return clamp(L, 1, T.length);
+  const j = (L - 1) % SEASON_LEVELS + 1, st = CONFIG.season_start, a = Math.min(st[Math.min(s, st.length - 1)], T.length - 1);
+  return clamp(a + Math.ceil(j * (T.length - a) / SEASON_LEVELS), 1, T.length);
+}
 function levelSpec(L) {
-  const T = CONFIG.level_table, r = T[clamp(L, 1, T.length) - 1];
+  const T = CONFIG.level_table, r = T[tableRow(L) - 1];
   const [n, colours, cols, rows, nBig, nHidden, nGar, stock, minDepth, maxDepth, trapLo, trapHi] = r;
   const plan = L === 1 ? 1 : L < tune.tight_from ? tune.plan_gates : tune.gates;
   return { L, cols, rows, n, colours, nBig, nHidden, nGar, stock, plan, minDepth, maxDepth, trapLo, trapHi, tier: tierOf(L), hard: tierOf(L) > 0 };
@@ -1507,7 +1566,8 @@ const moveSpeed = e => tune[ERA_SPEED[e]];
 
 // ---- Game state ------------------------------------------------------------------------------
 let scene, state;
-let uiEra = 0, eraSel = 0;                  // the era screen's era and its selected tile
+let uiEra = 0, eraSel = 0, uiSeason = 0;    // the era screen's era, its selected tile and its season
+let viewSeason = 0;                         // the season the title's timeline and the stats show
 let unlockEra = 1, unlockLevel = 6, unlockT = 0; // the "انتقلت إلى" scene
 let statsEra = 0;                           // the stats panel's era tab
 const nextLevel = () => Math.min(save.unlocked || 1, tune.levels);
@@ -1533,7 +1593,7 @@ function startLevel(L, again) {
     combo: 0, lastFullT: -9, belt: 0,
     warn: tierOf(L) === 2 && !again ? 1 : 0, // the red "صعبة جداً" banner before a very hard level
   };
-  uiEra = eraOf(L);
+  uiEra = eraOf(L); uiSeason = viewSeason = seasonOf(L);
   settle();
   if (state.warn) { sfx.warn(); events.push({ type: 'warn', level: L }); }
   const free = lv.taxis.filter(c => canExit(lv, state.S, c.id) && !isCovered(lv, state.S.mask, c.id));
@@ -1549,7 +1609,7 @@ function settle() {
     shakeT: -9, flashT: -9, revealT: -9, arriveT: -9, squashT: -9, fullT: -9, rollT: -9 }));
   lv.taxis.forEach((c, i) => { const v = state.vc[i]; if (!bit(S.mask, i)) v.gone = true; else if (!onLot(lv, S.mask, i)) v.rollT = Infinity; });
   S.gates.forEach(p => { const v = state.vc[p.id]; v.gone = false; v.parked = true; v.slot = p.slot; v.fillBase = p.fill; v.dir = bayX(p.slot) < W / 2 ? 1 : -1; });
-  state.tr = lv.queue.map((col, k) => ({ col, x: null, y: null, startT: null, endT: null, taxi: -1, seat: 0, done: k < S.qi, fx0: 0, fy0: 0 }));
+  state.tr = lv.queue.map((col, k) => ({ col, x: null, y: null, vx: 0, vy: 0, gait: 0, cheerT: null, runU: null, startT: null, endT: null, taxi: -1, seat: 0, done: k < S.qi, fx0: 0, fy0: 0 }));
   state.qv = S.qi; state.moves = [];
   for (let k = S.qi; k < Math.min(lv.queue.length, S.qi + 26); k++) { const p = slotPos(k - S.qi); state.tr[k].x = p[0]; state.tr[k].y = p[1]; }
   state.lastBoard = t - 1; state.gateFree = new Array(nGates() + 1).fill(t - 1); state.busyUntil = t; state.fx = [];
@@ -1625,7 +1685,8 @@ function schedule(evs) {
     } else if (ev.type === 'board') {
       const tr = state.tr[ev.qi], arrive = v.trip ? v.trip.t1 + 0.12 : t;
       tr.startT = Math.max(state.lastBoard + tune.board_interval, arrive, t);
-      tr.endT = tr.startT + tune.board_flight; tr.taxi = ev.id; tr.seat = ev.seat;
+      const run = Math.max(0.08, Math.abs(bayX(Math.max(0, v.slot)) - Q_FRONT_X) / tune.run_speed); // the run along the kerb
+      tr.endT = tr.startT + run + tune.board_flight; tr.runU = run / (run + tune.board_flight); tr.taxi = ev.id; tr.seat = ev.seat;
       state.lastBoard = tr.startT; v.lastBoardEnd = tr.endT;
       state.fx.push({ t: tr.endT, k: 'board', id: ev.id, seat: ev.seat, full: ev.seat + 1 >= cm.seats });
       state.busyUntil = Math.max(state.busyUntil, tr.endT);
@@ -1787,14 +1848,18 @@ function finishLevel() {
   for (let k = 0; k < 40; k++) spawn(0, W / 2, 470, (rng() - 0.5) * 700, -rng() * 600 - 100, 5 + rng() * 6, 1.6, PAL[k % 5].base, 700, false);
   events.push({ type: 'win', level: L, stars, angry: state.angryHit });
 }
-function openEra(e) { uiEra = e; requestEra(e); const L = nextLevel(); eraSel = eraOf(L) === e ? (L - 1) % ERA_LEVELS : 0; scene = 'era'; sfx.ui(); }
+function openEra(e, s = viewSeason) {
+  uiEra = e; uiSeason = viewSeason = s; requestEra(e);
+  const L = nextLevel(); eraSel = chapOf(L) === s * ERAS.length + e ? (L - 1) % ERA_LEVELS : 0; scene = 'era'; sfx.ui();
+}
 function openUnlock(e, L) {
   unlockEra = e; unlockLevel = L; unlockT = 0; requestEra(e);
-  save.seen = Math.max(save.seen || 1, e + 1); persist();
-  scene = 'unlock'; sfx.era(); events.push({ type: 'era-unlock', era: e + 1 });
+  save.seen = Math.max(save.seen || 1, chapOf(L) + 1); persist(); // seen counts chapters (eras across seasons)
+  viewSeason = seasonOf(L);
+  scene = 'unlock'; sfx.era(); events.push({ type: 'era-unlock', era: e + 1, season: seasonOf(L) + 1 });
 }
 function playLevel(L) { // from a menu: a new era's first visit shows its "انتقلت إلى" scene first
-  if (eraOf(L) + 1 > (save.seen || 1)) { openUnlock(eraOf(L), L); return; }
+  if (chapOf(L) + 1 > (save.seen || 1)) { openUnlock(eraOf(L), L); return; }
   startLevel(L); scene = 'play'; sfx.ui();
 }
 
@@ -1938,7 +2003,7 @@ function drawParts(under) {
       const img = p.sheet.img, sz = p.r + p.grow * (1 - (1 - u) * (1 - u)), al = p.a * Math.min(1, u * 9) * (1 - u * u);
       if (!okImg(img) || al <= 0.01) continue;
       ctx.save(); ctx.globalAlpha = al; if (p.add) ctx.globalCompositeOperation = 'lighter';
-      ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.translate(p.x + p.vx * LEAD, p.y + p.vy * LEAD); ctx.rotate(p.rot);
       ctx.drawImage(img, p.frame * FX_SLOT, 0, FX_SLOT, FX_SLOT, -sz / 2, -sz / 2, sz, sz);
       ctx.restore(); continue;
     }
@@ -2108,13 +2173,18 @@ function drawGarageShape(x, y, c, d, e, cols, t = gt) {
   const E = ERAS[e], st = E.garage || 'stable', s = c * 0.45;
   ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(DIRS[d][1], DIRS[d][0]) + Math.PI / 2); // door up in this frame
   ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(-s + 4, -s + 6, s * 2, s * 2, c * 0.12); ctx.fill();
-  const body = st === 'hangar' ? ['#16304e', '#0a1628'] : st === 'garage' ? ['#a4503a', '#6e2e20'] : st === 'shed' ? ['#7d9aa0', '#4c6468'] : ['#9a6a3a', '#5c3a1a'];
+  const body = st === 'hangar' ? ['#16304e', '#0a1628'] : st === 'garage' ? ['#a4503a', '#6e2e20'] : st === 'shed' ? ['#7d9aa0', '#4c6468'] : st === 'tent' ? ['#ead2a0', '#b08a52'] : ['#9a6a3a', '#5c3a1a'];
   const gr = ctx.createLinearGradient(-s, 0, s, 0); gr.addColorStop(0, body[1]); gr.addColorStop(0.5, body[0]); gr.addColorStop(1, body[1]);
   ctx.fillStyle = gr; rrect(-s, -s, s * 2, s * 2, c * 0.12); ctx.fill();
   ctx.strokeStyle = st === 'hangar' ? `rgba(${E.accent},0.9)` : 'rgba(20,14,10,0.8)'; ctx.lineWidth = Math.max(2, c * 0.03); ctx.stroke();
-  // the roof: ribs (tin), bricks (garage), panels (hangar), planks (stable)
-  ctx.strokeStyle = st === 'hangar' ? `rgba(${E.accent},0.35)` : 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1.5;
-  for (let k = 1; k < 5; k++) { const yy = -s + s * 2 * k / 5; ctx.beginPath(); ctx.moveTo(-s + 4, yy); ctx.lineTo(s - 4, yy); ctx.stroke(); }
+  // the roof: ribs (tin), bricks (garage), panels (hangar), planks (stable), striped cloth and a ridge pole (tent)
+  if (st === 'tent') {
+    ctx.fillStyle = 'rgba(168,52,36,0.75)'; for (let k = 0; k < 3; k++) ctx.fillRect(-s + s * 2 * (k * 2 + 1) / 7, -s + 3, s * 2 / 7, s * 2 - 6);
+    ctx.strokeStyle = 'rgba(70,40,14,0.8)'; ctx.lineWidth = Math.max(2, c * 0.03); ctx.beginPath(); ctx.moveTo(0, -s + 2); ctx.lineTo(0, s - 2); ctx.stroke();
+  } else {
+    ctx.strokeStyle = st === 'hangar' ? `rgba(${E.accent},0.35)` : 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1.5;
+    for (let k = 1; k < 5; k++) { const yy = -s + s * 2 * k / 5; ctx.beginPath(); ctx.moveTo(-s + 4, yy); ctx.lineTo(s - 4, yy); ctx.stroke(); }
+  }
   // the door, on the side facing its strip, with roller slats and a light strip over it
   const dw = s * 1.5, dh = s * 0.62;
   ctx.fillStyle = st === 'hangar' ? 'rgba(120,230,255,0.35)' : '#2b2622'; rrect(-dw / 2, -s - 2, dw, dh, c * 0.05); ctx.fill();
@@ -2257,12 +2327,20 @@ const TIPS = {
   24: 'سماء مزدحمة: انظر إلى آخر الطابور',
   25: 'المرحلة الأخيرة: زحمة الزمن كلها',
 };
+const SEASON_TIPS = ['زحمة جديدة: اقرأ الطابور قبل أن تضغط', 'صعبة: لا تشغل موقفاً بلون لا يُطلب', 'انظر بعيداً في الطابور', 'صعبة: رتّب من يخرج أولاً', 'آخر العصر: كل ضغطة مهمة'];
+function tipFor(L) { // seasons after the first say what is new, then fall back on a tip by the level's place in its era
+  if (TIPS[L]) return TIPS[L];
+  const k = (L - 1) % ERA_LEVELS, E = ERAS[eraOf(L)];
+  if ((L - 1) % SEASON_LEVELS === 0) return `الموسم ${seasonOf(L) + 1}: عدنا إلى القوافل والزحمة أصعب`;
+  if (k === 0 && state.lv.garages.length) return `${E.garageName}: يخرج ما فيها حين تفرغ الخانتان أمامها`;
+  return SEASON_TIPS[k];
+}
 function drawBanner() {
   const L = state.level;
   const y = BANNER_Y; // over the bays, empty until the first tap
   ctx.fillStyle = 'rgba(10,12,28,0.92)'; rrect(40, y, 640, 112, 24); ctx.fill();
   ctx.strokeStyle = `rgb(${accent()})`; ctx.lineWidth = 2.5; ctx.stroke();
-  text(TIPS[L] || 'خطّط قبل أن تضغط', W / 2, y + 38, 30, '#ffffff');
+  text(tipFor(L), W / 2, y + 38, 30, '#ffffff');
   text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, y + 82, 26, '#7ef0b0');
   checkMark(W / 2 + 178, y + 82, 26, '#7ef0b0');
   if (state.lv.tier === 1) hardPill(W / 2, y, 1.1); // said before the level starts
@@ -2306,9 +2384,10 @@ function drawQueue() {
       ctx.fillStyle = 'rgba(255,255,255,0.28)'; ell(tr.x, tr.y - 2, 30, 10); ctx.fill();
       ctx.strokeStyle = PAL[tr.col].base; ctx.lineWidth = 3.5; ctx.stroke();
     }
-    let hop = tr.moving ? Math.abs(Math.sin(t * 12 + k)) * 3 : 0, sx = 0;
-    if (ang > 0.35 && near < 14) { const a = (ang - 0.35) / 0.65; hop += Math.max(0, Math.sin(t * (10 + a * 8) + k * 1.7)) * 6 * a; sx = Math.sin(t * 23 + k) * 1.5 * a; }
-    drawRider(tr.x + sx, tr.y - hop, tr.col, RH);
+    let sx = 0;
+    if (ang > 0.35 && near < 14) sx = Math.sin(t * 23 + k) * 1.5 * (ang - 0.35) / 0.65;
+    const rx = tr.x + (tr.vx || 0) * LEAD, ry = tr.y + (tr.vy || 0) * LEAD; // between two steps of the simulation
+    drawRider(rx + sx, ry, tr.col, RH, 1, eraNow(), queueMotion(tr, k, near, t, RH));
     if (ang > 0.6 && near < 10 && (k * 7) % 3 !== 1) { // steam from cross riders
       const a = (ang - 0.6) / 0.4, ph = (t * 1.3 + k * 0.37) % 1, hx = tr.x + sx, hy = tr.y - RH - 6;
       ctx.fillStyle = `rgba(250,250,255,${0.85 * a * (1 - ph)})`; ell(hx - 8 + ph * 4, hy - ph * 30, 6 + ph * 9, 6 + ph * 9); ctx.fill(); ell(hx + 9 - ph * 3, hy - 6 - ph * 26, 5 + ph * 8, 5 + ph * 8); ctx.fill();
@@ -2320,15 +2399,22 @@ function drawQueue() {
     ctx.fillStyle = 'rgba(10,12,26,0.85)'; rrect(548, Q_ROW2 - 52, 70, 44, 22); ctx.fill(); ctx.strokeStyle = `rgba(${accent()},0.8)`; ctx.lineWidth = 2; ctx.stroke();
     text('+' + rest, 583, Q_ROW2 - 29, 26, '#ffffff');
   }
-  // riders hopping from the head of the line into their seat, one by one, on an arc
+  // riders leaving the head of the line one by one: a run along the kerb in front of the others to the
+  // spot over their seat, then a jump down into it. The farther the stop, the longer the run.
   for (let k = Math.max(0, state.qv - 30); k < Math.min(Q, state.qv + 40); k++) {
     const tr = state.tr[k]; if (tr.done || tr.startT == null || t < tr.startT || t >= tr.endT) continue;
-    const u = (t - tr.startT) / (tr.endT - tr.startT), sp = seatWorld(tr.taxi, tr.seat), sx = sp[0], sy = sp[1];
-    const dist = Math.hypot(sx - tr.fx0, sy - tr.fy0), arc = tune.hop_h + dist * 0.12;
-    const x = lerp(tr.fx0, sx, u), gy = lerp(tr.fy0, sy + RH * 0.2, u), s = lerp(1, 0.4, Math.pow(u, 1.4));
-    ctx.fillStyle = `rgba(0,0,0,${0.25 * (1 - u)})`; ell(x, gy, 14 * s, 5 * s); ctx.fill(); // its shadow on the ground
-    const y = gy - Math.sin(u * Math.PI) * arc, squash = u < 0.12 ? 1 - (0.12 - u) * 2 : 1;
-    drawRider(x, y, tr.col, RH * s * squash, 1, eraNow(), true);
+    const u = (t - tr.startT) / (tr.endT - tr.startT), sp = seatWorld(tr.taxi, tr.seat), sx = sp[0], sy = sp[1], m = MO;
+    const lane = Q_ROW1 + tune.run_lane, ur = tr.runU == null ? 0.6 : tr.runU;
+    m.lean = 0; m.sy = 1;
+    if (u < ur) { // running
+      const q = u / ur, d = Math.abs(sx - tr.fx0) * q + 18 * Math.min(1, q * 5), ph = d / tune.run_stride;
+      m.f = 1 + (Math.floor(ph) & 1); m.lift = Math.abs(Math.sin(ph * Math.PI)) * 4; m.lean = Math.sign(sx - tr.fx0) * 0.15 * Math.min(1, q * 6, (1 - q) * 6 + 0.3);
+      drawRider(lerp(tr.fx0, sx, q), lerp(tr.fy0, lane, Math.min(1, q * 5)), tr.col, RH, 1, eraNow(), m);
+    } else { // the jump into the seat: arms up, shrinking into the vehicle
+      const q = (u - ur) / (1 - ur), s = lerp(1, 0.42, q * q);
+      m.f = 3; m.lift = Math.sin(q * Math.PI) * tune.hop_h * 0.4 * s;
+      drawRider(sx, lerp(lane, sy + RH * 0.2, q), tr.col, RH * s, 1 - Math.max(0, q - 0.85) * 3, eraNow(), m);
+    }
   }
 }
 function angerMark(x, y, s) { // a drawn red cross-vein: a rider who has lost patience
@@ -2370,14 +2456,21 @@ function moodFace(x, y, r, a) { // a drawn face: smiling when calm, flat, then f
 }
 
 // ---- Overlays ---------------------------------------------------------------------------------
+// A panel over the lot (results, stuck, the extra-stop offer). It pops in: the lot dims, the panel
+// grows from 90% with a small overshoot. Everything drawn until panelEnd() rides on that pop.
 function panel(y0, h, img) {
-  ctx.fillStyle = 'rgba(4,6,14,0.62)'; ctx.fillRect(0, 0, W, H); keepMarks(img);
+  const u = clamp((clock.now() - sceneT) / tune.panel_pop, 0, 1), k = 1 - Math.pow(1 - u, 3);
+  ctx.fillStyle = `rgba(4,6,14,${0.62 * k})`; ctx.fillRect(0, 0, W, H); keepMarks(img);
+  ctx.save();
+  const cy = y0 + h / 2, sc = 0.9 + 0.1 * k + 0.035 * Math.sin(u * Math.PI);
+  ctx.translate(W / 2, cy); ctx.scale(sc, sc); ctx.translate(-W / 2, -cy); ctx.globalAlpha *= Math.min(1, u * 3);
   ctx.fillStyle = 'rgba(0,0,0,0.4)'; rrect(54, y0 + 10, 612, h, 30); ctx.fill();
   const gr = ctx.createLinearGradient(0, y0, 0, y0 + h); gr.addColorStop(0, '#1d2444'); gr.addColorStop(1, '#0d1226');
   ctx.fillStyle = gr; rrect(50, y0, 620, h, 30); ctx.fill();
   ctx.strokeStyle = `rgba(${accent()},0.28)`; ctx.lineWidth = 10; ctx.stroke();
   ctx.strokeStyle = `rgb(${accent()})`; ctx.lineWidth = 2.5; ctx.stroke();
 }
+function panelEnd() { ctx.restore(); }
 const OVER_BTNS = { restart: [130, 800, 460, 104], undo: [130, 922, 460, 96] };
 const OVER_SKIP = { restart: [130, 756, 460, 96], undo: [130, 868, 460, 88], skip: [130, 978, 460, 88] }; // the same screen once skipping is on offer
 const overBtns = () => (canSkip() ? OVER_SKIP : OVER_BTNS);
@@ -2424,6 +2517,7 @@ function drawOffer() { // the stops are full: one more stop for watching an ad, 
   adPill(OFFER_BTNS.extra[0] + 16, OFFER_BTNS.extra[1] - 12);
   undoRow(OFFER_BTNS.undo);
   bigButton(...OFFER_BTNS.restart, 'أعد المرحلة', 'secondary');
+  panelEnd();
 }
 function drawOver() {
   if (canTakeExtra()) { drawOffer(); return; }
@@ -2441,13 +2535,14 @@ function drawOver() {
   bigButton(...B.restart, 'أعد المرحلة', 'primary'); // trying again is always free, and never shows an ad
   undoRow(B.undo);
   if (skip) { seeOffer('skip_level'); bigButton(...B.skip, 'تخطَّ المرحلة', 'gold'); adPill(B.skip[0] + 16, B.skip[1] - 12); }
+  panelEnd();
 }
 const RES_BTNS = { next: [130, 820, 460, 108], again: [130, 946, 460, 92] };
 function drawResults() {
   drawPlay();
   panel(330, 740, ERAS[eraNow()].bgImg);
-  const L = state.level, last = L >= tune.levels, eraEnd = !last && L % ERA_LEVELS === 0;
-  text(last ? 'أنهيت الرحلة عبر الزمن!' : eraEnd ? `أنهيت ${ERAS[eraOf(L)].name}!` : 'أحسنت!', W / 2, 410, last || eraEnd ? 46 : 58, '#7ef0b0');
+  const L = state.level, last = L >= tune.levels, seasonEnd = !last && L % SEASON_LEVELS === 0, eraEnd = !last && L % ERA_LEVELS === 0;
+  text(last ? 'أنهيت كل المواسم!' : seasonEnd ? `أنهيت الموسم ${seasonOf(L) + 1}!` : eraEnd ? `أنهيت ${ERAS[eraOf(L)].name}!` : 'أحسنت!', W / 2, 410, last || eraEnd ? 46 : 58, '#7ef0b0');
   text('وصل كل المسافرين إلى وجهاتهم', W / 2, 478, 30, '#e4ecff');
   for (let k = 0; k < 3; k++) {
     const pop = clamp((state.t - state.winT - k * 0.25) / 0.3, 0, 1);
@@ -2455,18 +2550,34 @@ function drawResults() {
   }
   const best = save.stars[L - 1] || 0;
   text(state.stars > state.prevBest ? 'أفضل نتيجة جديدة!' : `أفضل نتيجة: ${best} من 3`, W / 2, 672, 30, '#ffd34d');
-  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : `التراجع المستعمل: ${state.undosUsed}`, W / 2, 718, 28, '#e4ecff', 'center', 700);
+  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : seasonEnd ? `نجوم الموسم: ${seasonStars(seasonOf(L))} من ${SEASON_LEVELS * 3}` : `التراجع المستعمل: ${state.undosUsed}`, W / 2, 718, 28, '#e4ecff', 'center', 700);
   if (state.angryHit) { moodFace(W / 2 + 170, 762, 14, 1); text('غضب المسافرون من التأخير: نجمة أقل', W / 2 - 14, 762, 26, '#ff8a9a', 'center', 700); }
-  bigButton(...RES_BTNS.next, last ? 'القائمة' : eraEnd ? 'العصر التالي' : 'المرحلة التالية', eraEnd ? 'gold' : 'primary');
+  bigButton(...RES_BTNS.next, last ? 'القائمة' : seasonEnd ? `إلى الموسم ${seasonOf(L) + 2}` : eraEnd ? 'العصر التالي' : 'المرحلة التالية', eraEnd ? 'gold' : 'primary');
   if (!last && tierOf(L + 1) === 1) hardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 64, RES_BTNS.next[1], 1); // the next one is hard
   else if (!last && tierOf(L + 1) === 2) veryHardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 84, RES_BTNS.next[1], 1);
   bigButton(...RES_BTNS.again, 'أعد هذه المرحلة', 'secondary');
+  panelEnd();
 }
 
 
 // ---- Title: the name, continue, the era timeline -------------------------------------------------
 const TITLE_BTNS = { start: [150, 282, 420, 104], home: [56, 12, 76, 72], mute: [630, 12, 76, 72], stats: [430, 12, 186, 72] };
-const eraRow = e => [40, 410 + e * 108, 640, 98];
+const eraRow = e => [40, 474 + e * 95, 640, 88];
+const SEASON_BTNS = { prev: [596, 404, 84, 64], next: [40, 404, 84, 64] }; // right to left: the earlier season is on the right
+function chevron(x, y, s, dir, col) { // a drawn arrow head: dir 1 points right, -1 left
+  ctx.strokeStyle = col; ctx.lineWidth = s * 0.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(x - dir * s * 0.22, y - s * 0.4); ctx.lineTo(x + dir * s * 0.22, y); ctx.lineTo(x - dir * s * 0.22, y + s * 0.4); ctx.stroke();
+}
+function seasonBar(vs, y, btns) { // "الموسم 2 من 4" with its two arrows; a season is 25 levels through the five eras
+  const n = nSeasons(), cy = y + 32, locked = vs * SEASON_LEVELS + 1 > (save.unlocked || 1);
+  text(`الموسم ${vs + 1} من ${n}`, W / 2 + 92, cy, 32, '#ffffff', 'center', 800);
+  if (locked) padlock(W / 2 - 110, cy - 4, 34, '#d7dde8');
+  else { drawStar(W / 2 - 62, cy - 1, 14, seasonStars(vs) > 0); text(`${seasonStars(vs)} من ${SEASON_LEVELS * 3}`, W / 2 - 84, cy + 1, 24, '#ffe2a8', 'right'); }
+  if (n < 2) return;
+  for (const [k, dir, on] of [['prev', 1, vs > 0], ['next', -1, vs < n - 1]]) {
+    const b = btns[k]; glassButton(...b, on); chevron(b[0] + b[2] / 2, b[1] + b[3] / 2, 34, dir, on ? '#f4f8ff' : '#5d6878');
+  }
+}
 function drawTitle() {
   drawBackground('title', null, -1);
   const gl = ctx.createRadialGradient(W / 2, 170, 20, W / 2, 170, 330);
@@ -2479,24 +2590,27 @@ function drawTitle() {
   // the timeline: oldest era at the top, a road of time down the right edge
   ctx.fillStyle = 'rgba(10,8,30,0.66)'; rrect(28, 398, 664, 554, 26); ctx.fill();
   ctx.strokeStyle = 'rgba(255,214,150,0.45)'; ctx.lineWidth = 2; ctx.stroke();
-  const open = eraOf(nextLevel()), cur = eraOf(L);
+  // this season's eras: how far the road is open in it (-1: the season is still locked)
+  const vs = viewSeason, open = clamp(chapOf(nextLevel()) - vs * ERAS.length, -1, ERAS.length - 1), cur = chapOf(L) - vs * ERAS.length;
+  seasonBar(vs, 404, SEASON_BTNS);
+  const ry = e => eraRow(e)[1] + 44;
   ctx.strokeStyle = 'rgba(255,214,150,0.55)'; ctx.lineWidth = 6; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(640, 440); ctx.lineTo(640, eraRow(open)[1] + 49); ctx.stroke();
-  ctx.setLineDash([4, 12]); ctx.beginPath(); ctx.moveTo(640, eraRow(open)[1] + 49); ctx.lineTo(640, 900); ctx.stroke(); ctx.setLineDash([]);
+  if (open >= 0) { ctx.beginPath(); ctx.moveTo(640, ry(0)); ctx.lineTo(640, ry(open)); ctx.stroke(); }
+  ctx.setLineDash([4, 12]); ctx.beginPath(); ctx.moveTo(640, ry(Math.max(0, open))); ctx.lineTo(640, ry(ERAS.length - 1)); ctx.stroke(); ctx.setLineDash([]);
   for (let e = 0; e < ERAS.length; e++) {
     const [x, y, w, h] = eraRow(e), E = ERAS[e], on = e <= open;
     glassButton(x, y, w, h, on, e === cur && on);
-    ctx.fillStyle = on ? `rgb(${E.accent})` : '#5a6272'; ell(640, y + h / 2, 26, 26); ctx.fill();
+    ctx.fillStyle = on ? `rgb(${E.accent})` : '#5a6272'; ell(640, y + h / 2, 24, 24); ctx.fill();
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5; ctx.stroke();
     text(String(e + 1), 640, y + h / 2 + 2, 28, on ? '#1b1206' : '#c4cad4', 'center', 800);
-    text(E.name, 598, y + 34, 30, on ? '#ffffff' : '#8792a4', 'right');
-    const s = eraStars(e);
-    text(`المراحل ${e * ERA_LEVELS + 1}–${(e + 1) * ERA_LEVELS} · ${s} من ${ERA_LEVELS * 3}`, 560, y + 72, 24, on ? '#ffe2a8' : '#7d8799', 'right');
-    drawStar(586, y + 71, 13, on && s > 0);
+    text(E.name, 598, y + 29, 30, on ? '#ffffff' : '#8792a4', 'right');
+    const s = eraStars(e, vs), a = lvAt(vs, e, 0);
+    text(`المراحل ${a}–${a + ERA_LEVELS - 1} · ${s} من ${ERA_LEVELS * 3}`, 560, y + 65, 24, on ? '#ffe2a8' : '#7d8799', 'right');
+    drawStar(586, y + 64, 13, on && s > 0);
     // the era's vehicle, nose up; a locked era shows it dimmed with a padlock
     const g = LOAD[e].ready;
-    if (g) { ctx.save(); if (!on) ctx.globalAlpha = 0.32; drawVehShadow(118, y + h / 2, -Math.PI / 2, 2, 48, 0, e); drawVehicle(118, y + h / 2, -Math.PI / 2, 2, 48, e % 5, 0, { era: e, seats: 0 }); ctx.restore(); }
-    if (!on) { ctx.fillStyle = 'rgba(6,8,18,0.35)'; rrect(x, y, w, h, 18); ctx.fill(); padlock(118, y + h / 2 - 4, 54, '#d7dde8'); }
+    if (g) { ctx.save(); if (!on) ctx.globalAlpha = 0.32; drawVehShadow(118, y + h / 2, -Math.PI / 2, 2, 44, 0, e); drawVehicle(118, y + h / 2, -Math.PI / 2, 2, 44, e % 5, 0, { era: e, seats: 0 }); ctx.restore(); }
+    if (!on) { ctx.fillStyle = 'rgba(6,8,18,0.35)'; rrect(x, y, w, h, 18); ctx.fill(); padlock(118, y + h / 2 - 4, 50, '#d7dde8'); }
     else if (s >= ERA_LEVELS * 3) checkMark(200, y + h / 2, 30, '#7ef0b0');
   }
   ctx.fillStyle = 'rgba(10,8,30,0.72)'; rrect(28, 966, 664, 248, 24); ctx.fill();
@@ -2520,7 +2634,7 @@ function drawEraScreen() {
   drawBackground('era' + e + ':' + (okImg(E.bgImg) ? 1 : 0), null, e);
   ctx.fillStyle = 'rgba(8,8,20,0.5)'; ctx.fillRect(0, 0, W, H); keepMarks(E.bgImg);
   textOutline(E.name, W / 2, 148, E.name.length > 14 ? 50 : 58, '#ffffff', 'rgba(20,10,4,0.9)', 10);
-  text(`العصر ${e + 1} من ${ERAS.length}`, W / 2, 210, 28, `rgb(${E.accent})`);
+  text(`الموسم ${uiSeason + 1} · العصر ${e + 1} من ${ERAS.length}`, W / 2, 210, 28, `rgb(${E.accent})`);
   // its two vehicles, named
   ctx.fillStyle = 'rgba(10,10,24,0.62)'; rrect(40, 246, 640, 246, 24); ctx.fill();
   ctx.strokeStyle = `rgba(${E.accent},0.5)`; ctx.lineWidth = 2; ctx.stroke();
@@ -2530,10 +2644,10 @@ function drawEraScreen() {
   }
   text(E.smallName, 470, 340, 30, '#ffffff'); text(`خانتان · ${tune.seats_small} ركاب`, 470, 384, 24, '#dbe6f4', 'center', 700);
   text(E.bigName, 290, 340, 30, '#ffffff'); text(`3 خانات · ${tune.seats_big} ركاب`, 290, 384, 24, '#dbe6f4', 'center', 700);
-  if (E.garage) { text('مرائب من هذا العصر', W / 2, 436, 24, `rgb(${E.accent})`, 'center', 700); }
+  if ([0, 1, 2, 3, 4].some(k => levelSpec(lvAt(uiSeason, e, k)).nGar > 0)) { text(`في هذا العصر: ${E.garageName}`, W / 2, 436, 24, `rgb(${E.accent})`, 'center', 700); }
   // the five level tiles, right to left
   for (let k = 0; k < ERA_LEVELS; k++) {
-    const L = e * ERA_LEVELS + k + 1, [x, y, w, h] = eraTile(k), on = L <= (save.unlocked || 1);
+    const L = lvAt(uiSeason, e, k), [x, y, w, h] = eraTile(k), on = L <= (save.unlocked || 1);
     glassButton(x, y, w, h, on, k === eraSel && on);
     text('المرحلة', x + w / 2, y + 40, 24, on ? '#dbe6f4' : '#7d8799', 'center', 700);
     text(String(L), x + w / 2, y + 88, 54, on ? '#ffffff' : '#7d8799', 'center', 800);
@@ -2541,11 +2655,11 @@ function drawEraScreen() {
     tierPill(L, x + w / 2, y + 2, 0.95);
     if (!on) { ctx.fillStyle = 'rgba(6,8,18,0.4)'; rrect(x, y, w, h, 18); ctx.fill(); padlock(x + w - 34, y + 34, 36, '#d7dde8'); }
   }
-  const L = e * ERA_LEVELS + eraSel + 1;
+  const L = lvAt(uiSeason, e, eraSel);
   if (LOAD[e].ready) bigButton(...ERA_BTNS.play, L <= (save.unlocked || 1) ? `العب المرحلة ${L}` : 'المرحلة مقفلة', L <= (save.unlocked || 1) ? 'primary' : 'secondary');
   else { rrect(160, 950, 400, 18, 9); ctx.strokeStyle = 'rgba(255,214,150,0.75)'; ctx.lineWidth = 2; ctx.stroke(); rrect(162, 952, 396 * loadProgress([e]), 14, 7); ctx.fillStyle = '#ffbe3d'; ctx.fill(); text('جارٍ تحميل الرسومات', W / 2, 1000, 26, '#ffffff'); }
-  text(`نجوم هذا العصر: ${eraStars(e)} من ${ERA_LEVELS * 3}`, W / 2, 1066, 28, '#ffe2a8');
-  if (LOAD[e].ready) for (let c = 0; c < 5; c++) drawRider(250 + c * 55, 1196, c, 82, 1, e);
+  text(`نجوم هذا العصر: ${eraStars(e, uiSeason)} من ${ERA_LEVELS * 3}`, W / 2, 1066, 28, '#ffe2a8');
+  if (LOAD[e].ready) for (let c = 0; c < 5; c++) drawRider(244 + c * 58, 1196, c, 82, 1, e, marching(gt, c));
   glassButton(...ERA_BTNS.back); drawIcon('back', ERA_BTNS.back[0] + 38, ERA_BTNS.back[1] + 36, 44, '#f4f8ff');
   glassButton(...ERA_BTNS.mute); drawIcon(muted ? 'mute' : 'sound', ERA_BTNS.mute[0] + 38, ERA_BTNS.mute[1] + 36, 44, '#f4f8ff');
 }
@@ -2562,9 +2676,9 @@ function drawUnlock() {
   keepMarks(E.bgImg);
   const a = clamp(unlockT / 0.4, 0, 1);
   ctx.globalAlpha = a;
-  text('انتقلت إلى', W / 2, 200, 44, '#ffffff');
+  text(unlockLevel > 1 && (unlockLevel - 1) % SEASON_LEVELS === 0 ? `الموسم ${seasonOf(unlockLevel) + 1}: عدت إلى` : 'انتقلت إلى', W / 2, 200, 44, '#ffffff');
   textOutline(E.name, W / 2, 288, E.name.length > 14 ? 58 : 70, `rgb(${E.accent})`, 'rgba(16,8,2,0.92)', 12);
-  text(`العصر ${e + 1} من ${ERAS.length} · المراحل ${e * ERA_LEVELS + 1}–${(e + 1) * ERA_LEVELS}`, W / 2, 362, 28, '#ffffff');
+  { const s = seasonOf(unlockLevel), a = lvAt(s, e, 0); text(`الموسم ${s + 1} · العصر ${e + 1} من ${ERAS.length} · المراحل ${a}–${a + ERA_LEVELS - 1}`, W / 2, 362, 28, '#ffffff'); }
   ctx.globalAlpha = 1;
   if (ready) { // the era's vehicle arrives: walks, drives, or flies in and settles
     const k = easeOut(u), y = lerp(1420, 720, k), c = 168, fly = E.move === 'fly';
@@ -2583,6 +2697,7 @@ function drawUnlock() {
 // ---- The play log panel, "إحصائياتي" ----------------------------------------------------------
 const STATS_BTNS = { back: [372, 1060, 300, 96], clear: [48, 1060, 300, 96] };
 const statTab = k => [552 - k * 126, 324, 122, 76];
+const STATS_SEASON = { prev: [590, 188, 76, 54], next: [54, 188, 76, 54] };
 let statsClearT = -9; // a second tap on "clear" within 3 seconds wipes the log
 function drawStats() {
   drawBackground('title', null, -1);
@@ -2593,7 +2708,7 @@ function drawStats() {
   ctx.strokeStyle = '#5fdcff'; ctx.lineWidth = 2.5; ctx.stroke();
   drawIcon('chart', W / 2 + 128, 166, 44, '#5fdcff');
   text('إحصائياتي', W / 2 - 20, 168, 48, '#ffffff');
-  text('سجل على هذا الجهاز فقط، لا يُرسل إلى أي مكان', W / 2, 216, 24, '#a3b6d0', 'center', 700);
+  seasonBar(viewSeason, 184, STATS_SEASON);
   let A = 0, Wn = 0, St = 0, F = 0, Fp = 0;
   for (let L = 1; L <= tune.levels; L++) {
     const r = playLog.levels[String(L)]; if (!r) continue;
@@ -2607,7 +2722,7 @@ function drawStats() {
     ctx.fillStyle = on ? `rgba(${ERAS[k].accent},0.9)` : 'rgba(95,220,255,0.1)'; rrect(x, y, w, h, 16); ctx.fill();
     ctx.strokeStyle = on ? '#ffffff' : 'rgba(95,220,255,0.4)'; ctx.lineWidth = 2; ctx.stroke();
     text(ERAS[k].tab, x + w / 2, y + 28, 24, on ? '#1b1206' : '#e4ecff', 'center', 800);
-    text(`${k * ERA_LEVELS + 1}–${(k + 1) * ERA_LEVELS}`, x + w / 2, y + 56, 24, on ? '#1b1206' : '#a3b6d0', 'center', 700);
+    text(`${lvAt(viewSeason, k, 0)}–${lvAt(viewSeason, k, ERA_LEVELS - 1)}`, x + w / 2, y + 56, 24, on ? '#1b1206' : '#a3b6d0', 'center', 700);
   }
   // the table, right to left: level, attempts, wins, first attempt, best time, undos, extra stops
   const heads = [['مرحلة'], ['محاولات'], ['فوز'], ['أول', 'محاولة'], ['أفضل', 'وقت'], ['تراجع'], ['موقف', 'إضافي']];
@@ -2616,7 +2731,7 @@ function drawStats() {
   heads.forEach((h, k) => h.forEach((w, j) => text(w, cx(k), h.length === 1 ? 454 : 438 + j * 30, 24, '#bfe2f6')));
   const RH = 70, y0 = 534, dim = 'rgba(160,190,220,0.45)';
   for (let i = 0; i < ERA_LEVELS; i++) {
-    const L = statsEra * ERA_LEVELS + i + 1, r = playLog.levels[String(L)] || null, y = y0 + i * RH;
+    const L = lvAt(viewSeason, statsEra, i), r = playLog.levels[String(L)] || null, y = y0 + i * RH;
     if (i % 2) { ctx.fillStyle = 'rgba(95,220,255,0.06)'; rrect(44, y - RH / 2, 632, RH, 8); ctx.fill(); }
     if (isHard(L)) { ctx.fillStyle = tierOf(L) === 2 ? '#a8001c' : '#e0245e'; rrect(cx(0) - 28, y - 18, 56, 36, 18); ctx.fill(); if (tierOf(L) === 2) { ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2; ctx.stroke(); } text(String(L), cx(0), y + 1, 28, '#ffffff'); }
     else text(String(L), cx(0), y + 1, 28, '#ffffff');
@@ -2636,6 +2751,7 @@ function drawStats() {
   ctx.fillStyle = '#a8001c'; rrect(W / 2 + 54, ly - 16, 40, 32, 16); ctx.fill(); ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2; ctx.stroke();
   text('صعبة جداً', W / 2 - 16, ly + 1, 24, '#bfe2f6');
   text(`نجوم ${ERAS[statsEra].name}: ${eraStars(statsEra)} من ${ERA_LEVELS * 3}`, W / 2, ly + 52, 26, '#ffe2a8');
+  text('سجل على هذا الجهاز فقط، لا يُرسل إلى أي مكان', W / 2, 1036, 24, '#a3b6d0', 'center', 700);
   { const a = Ads.totals(); text(`إعلانات (تجريبية): عُرضت ${a.offered} · شوهدت ${a.completed} · أُغلقت ${a.closed}`, W / 2, ly + 96, 24, '#ffd34d'); }
   bigButton(...STATS_BTNS.back, 'رجوع', 'primary');
   const armed = gt - statsClearT < 3;
@@ -2704,8 +2820,10 @@ function updatePlayWorld(dt) {
         }
       }
     }
-    else if (f.k === 'dock') { // arrival: a dock bump, a ring in the era's light
+    else if (f.k === 'dock') { // arrival: a dock bump, a ring in the era's light; riders in its colour cheer
       sfx.dock(e); v.arriveT = t; const p = parkPose(f.id);
+      { const col = lv.taxis[f.id].colour; let n = 0;
+        for (let k = state.qv; k < Math.min(lv.queue.length, state.qv + Q_PER_ROW * 2) && n < tune.cheer_riders; k++) { const tr = state.tr[k]; if (tr.col === col && tr.startT == null) { tr.cheerT = t + 0.05 + n * 0.07; n++; } } }
       spawn(2, p.x, p.y, 0, 0, 30, 0.5, E.accent, 0, true, 50);
       for (let j = 0; j < 5; j++) { const a = j * Math.PI * 2 / 5 + rng(); puff(p.x + Math.cos(a) * p.cell * 0.45, p.y + Math.sin(a) * p.cell * 0.35, 1.3, E.lot.puff, a); }
     }
@@ -2768,10 +2886,19 @@ function updatePlayWorld(dt) {
     if (tr.x == null) { const p = slotPos(k - state.qv + 1); tr.x = p[0]; tr.y = p[1]; }
     const dx = tx - tr.x, dy = ty - tr.y, ee = Math.min(1, dt * tune.queue_ease);
     tr.moving = Math.abs(dx) + Math.abs(dy) > 1.5; if (tr.moving) moved = true;
+    tr.vx = dx * ee / dt; tr.vy = dy * ee / dt; tr.gait = (tr.gait || 0) + Math.abs(dx * ee) + Math.abs(dy * ee); // for its walk
     tr.x += dx * ee; tr.y += dy * ee;
   }
   if (moved) state.belt += dt * 90;
-  for (let k = Math.max(0, state.qv - 30); k < Math.min(lv.queue.length, state.qv + 30); k++) { const tr = state.tr[k]; if (tr.startT != null && !tr.flying && t >= tr.startT) { tr.flying = true; tr.fx0 = tr.x == null ? Q_FRONT_X : tr.x; tr.fy0 = tr.y == null ? Q_ROW1 : tr.y; } }
+  for (let k = Math.max(0, state.qv - 30); k < Math.min(lv.queue.length, state.qv + 30); k++) {
+    const tr = state.tr[k]; if (tr.startT == null || t < tr.startT) continue;
+    if (!tr.flying) { tr.flying = true; tr.fx0 = tr.x == null ? Q_FRONT_X : tr.x; tr.fy0 = tr.y == null ? Q_ROW1 : tr.y; }
+    const u = (t - tr.startT) / (tr.endT - tr.startT), ur = tr.runU == null ? 0.6 : tr.runU;
+    if (u < ur && Math.floor(t / 0.07) !== Math.floor((t - dt) / 0.07) && state.vc[tr.taxi]) { // dust at a runner's heels
+      const tx = bayX(Math.max(0, state.vc[tr.taxi].slot)), q = u / ur, x = lerp(tr.fx0, tx, q);
+      spawn(1, x - Math.sign(tx - tr.fx0) * 8, Q_ROW1 + tune.run_lane - 2, 0, -8, 3, 0.32, '245,238,225', 0, false, 9, 0.45);
+    }
+  }
   stepParts(dt);
   if (state.floats.length && t - state.floats[0].t0 > 2) state.floats = state.floats.filter(f => t - f.t0 < f.life);
   // the line's patience: once play has begun, riders get cross while nothing comes for them
@@ -2851,6 +2978,7 @@ function playInput() {
     if (garageAt(p)) { toast('تخرج المركبة حين تفرغ الخانتان أمام المرآب'); sfx.blocked(); }
   }
 }
+function stepSeason(d) { const v = clamp(viewSeason + d, 0, nSeasons() - 1); if (v === viewSeason) return; viewSeason = v; sfx.ui(); events.push({ type: 'season-view', season: v + 1 }); }
 const scenes = {
   figures: {
     update(dt) { state.t += dt; },
@@ -2859,15 +2987,19 @@ const scenes = {
   title: {
     update() {
       if (pressed('Enter') || pressed('Space')) { playLevel(save.done ? 1 : nextLevel()); return; }
-      if (pressed('KeyL')) { scene = 'stats'; statsEra = eraOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
+      if (pressed('KeyL')) { scene = 'stats'; statsEra = eraOf(nextLevel()); viewSeason = seasonOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
+      if (pressed('ArrowRight')) stepSeason(-1); // right to left: the earlier season is on the right
+      if (pressed('ArrowLeft')) stepSeason(1);
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...TITLE_BTNS.mute)) { setMuted(!muted); continue; }
         if (location.protocol.startsWith('http') && inRect(p, ...TITLE_BTNS.home)) { location.href = '../../'; return; }
-        if (inRect(p, ...TITLE_BTNS.stats)) { scene = 'stats'; statsEra = eraOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
+        if (inRect(p, ...TITLE_BTNS.stats)) { scene = 'stats'; statsEra = eraOf(nextLevel()); viewSeason = seasonOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
         if (inRect(p, ...TITLE_BTNS.start)) { playLevel(save.done ? 1 : nextLevel()); return; }
+        if (inRect(p, ...SEASON_BTNS.prev)) { stepSeason(-1); continue; }
+        if (inRect(p, ...SEASON_BTNS.next)) { stepSeason(1); continue; }
         for (let e = 0; e < ERAS.length; e++) if (inRect(p, ...eraRow(e))) {
-          if (e <= eraOf(nextLevel())) openEra(e); else { sfx.blocked(); events.push({ type: 'era-locked', era: e + 1 }); }
+          if (viewSeason * ERAS.length + e <= chapOf(nextLevel())) openEra(e, viewSeason); else { sfx.blocked(); events.push({ type: 'era-locked', era: e + 1, season: viewSeason + 1 }); }
           return;
         }
       }
@@ -2876,18 +3008,18 @@ const scenes = {
   },
   era: {
     update() {
-      const e = uiEra, open = k => e * ERA_LEVELS + k + 1 <= (save.unlocked || 1);
+      const e = uiEra, open = k => lvAt(uiSeason, e, k) <= (save.unlocked || 1);
       if (pressed('Escape') || pressed('Backspace')) { scene = 'title'; sfx.ui(); return; }
       if (pressed('ArrowRight')) eraSel = Math.max(0, eraSel - 1); // right to left
       if (pressed('ArrowLeft')) eraSel = Math.min(ERA_LEVELS - 1, eraSel + 1);
-      if ((pressed('Enter') || pressed('Space')) && LOAD[e].ready && open(eraSel)) { playLevel(e * ERA_LEVELS + eraSel + 1); return; }
+      if ((pressed('Enter') || pressed('Space')) && LOAD[e].ready && open(eraSel)) { playLevel(lvAt(uiSeason, e, eraSel)); return; }
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...ERA_BTNS.back)) { scene = 'title'; sfx.ui(); return; }
         if (inRect(p, ...ERA_BTNS.mute)) { setMuted(!muted); continue; }
-        if (inRect(p, ...ERA_BTNS.play) && LOAD[e].ready && open(eraSel)) { playLevel(e * ERA_LEVELS + eraSel + 1); return; }
+        if (inRect(p, ...ERA_BTNS.play) && LOAD[e].ready && open(eraSel)) { playLevel(lvAt(uiSeason, e, eraSel)); return; }
         for (let k = 0; k < ERA_LEVELS; k++) if (inRect(p, ...eraTile(k))) {
-          if (open(k) && LOAD[e].ready) { eraSel = k; playLevel(e * ERA_LEVELS + k + 1); return; }
+          if (open(k) && LOAD[e].ready) { eraSel = k; playLevel(lvAt(uiSeason, e, k)); return; }
           if (!open(k)) sfx.blocked();
         }
       }
@@ -2915,6 +3047,8 @@ const scenes = {
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...STATS_BTNS.back)) { scene = 'title'; sfx.ui(); return; }
+        if (inRect(p, ...STATS_SEASON.prev)) { stepSeason(-1); continue; }
+        if (inRect(p, ...STATS_SEASON.next)) { stepSeason(1); continue; }
         for (let k = 0; k < ERAS.length; k++) if (inRect(p, ...statTab(k))) { statsEra = k; sfx.ui(); }
         if (inRect(p, ...STATS_BTNS.clear)) {
           if (gt - statsClearT < 3) { logClear(); statsClearT = -9; sfx.undo(); events.push({ type: 'log-cleared' }); }
@@ -3014,12 +3148,12 @@ function step() {
   if (waitingFor() === null) scenes[scene].update(STEP);
   hit.clear(); taps = [];
 }
-let last, acc = 0, ALPHA = 1, pageBg = '';
+let last, acc = 0, ALPHA = 1, LEAD = 0, pageBg = ''; // LEAD: seconds since the last step, for drawing in between
 function tick() {
   const now = clock.now();
   acc += Math.min(now - last, 0.25); last = now;
   while (acc >= STEP) { step(); acc -= STEP; }
-  ALPHA = acc / STEP;
+  ALPHA = acc / STEP; LEAD = adUp ? 0 : acc;
   drawFrame();
 }
 function drawFrame() {
@@ -3028,8 +3162,21 @@ function drawFrame() {
   if (bg !== pageBg) { pageBg = bg; document.documentElement.style.background = bg; document.body.style.background = bg; }
   const w = waitingFor();
   if (w !== null) { drawLoading(w); return; }
+  // Motion is planned in time (trips, hops, departures), so the picture is drawn LEAD seconds past the
+  // last 60 Hz step: on a 90 or 120 Hz screen every frame differs, and a late frame never stutters.
+  const live = state && (scene === 'play' || scene === 'over' || scene === 'results'), t0 = live ? state.t : 0, g0 = gt;
+  // a soft cut between screens: the new one fades in from the dark (back from a stuck screen it is the same lot: no fade)
+  if (scene !== shownScene) { fadeOn = FADES[scene] && !(shownScene === 'over' && scene === 'play'); shownScene = scene; sceneT = clock.now(); }
+  if (live) state.t = t0 + LEAD;
+  gt = g0 + LEAD;
   scenes[scene].draw();
+  if (live) state.t = t0;
+  gt = g0;
+  const fa = 1 - (clock.now() - sceneT) / tune.scene_fade;
+  if (fa > 0 && fadeOn) { ctx.fillStyle = `rgba(8,6,18,${0.6 * fa * fa})`; ctx.fillRect(0, 0, W, H); keepMarks(viewEra >= 0 ? ERAS[viewEra].bgImg : titleImg); } // Dreamina's marks stay visible through the fade
 }
+let shownScene = '', sceneT = -9, fadeOn = false;
+const FADES = { title: 1, era: 1, stats: 1, play: 1, unlock: 1 }; // the panels over the lot (results, stuck) pop in by themselves
 function frame() { tick(); requestAnimationFrame(frame); }
 function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
 
@@ -3042,7 +3189,7 @@ window.game = {
   get events() { return events; },
   step(n = 1, draw = true, alpha = 1) {
     for (let i = 0; i < n; i++) step();
-    if (draw) { ALPHA = alpha; drawFrame(); }
+    if (draw) { ALPHA = alpha; LEAD = 0; drawFrame(); }
   },
 };
 
@@ -3057,7 +3204,7 @@ window.game = {
 reset();
 scene = params.get('scene') || 'title';
 if (!scenes[scene]) scene = 'title';
-if (scene === 'era') uiEra = eraOf(state.level);
+if (scene === 'era') { uiEra = eraOf(state.level); uiSeason = viewSeason = seasonOf(state.level); }
 if (scene === 'unlock') { unlockEra = eraOf(state.level); unlockLevel = state.level; requestEra(unlockEra); }
 last = clock.now();
 if (params.get('manual') === '1') drawFrame();
