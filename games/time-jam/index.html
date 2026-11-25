@@ -2475,14 +2475,18 @@ const OVER_BTNS = { restart: [130, 800, 460, 104], undo: [130, 922, 460, 96] };
 const OVER_SKIP = { restart: [130, 756, 460, 96], undo: [130, 868, 460, 88], skip: [130, 978, 460, 88] }; // the same screen once skipping is on offer
 const overBtns = () => (canSkip() ? OVER_SKIP : OVER_BTNS);
 const OFFER_BTNS = { extra: [130, 748, 460, 108], undo: [130, 886, 460, 88], restart: [130, 990, 460, 88] };
+const OFFER_SKIP = { extra: [130, 668, 460, 100], undo: [130, 792, 460, 84], restart: [130, 892, 460, 84], skip: [130, 1000, 460, 84] }; // the same screen once skipping is on offer
+const offerBtns = () => (canSkip() ? OFFER_SKIP : OFFER_BTNS);
 function frontRider(y) { // the front rider, big, on a soft spotlight
   const front = state.tr[state.S.qi]; if (!front) return;
   ctx.fillStyle = 'rgba(255,255,255,0.12)'; ell(W / 2, y, 70, 70); ctx.fill();
   drawRider(W / 2, y + 60, front.col, 124);
 }
-// On a stuck screen, taking back a move costs an ad. The free undos are for slips during play; getting out
-// of a dead end is the rescue, like the extra stop. Trying the level again stays free.
+// On a stuck screen the player's own undos come first and cost nothing, as in play (the owner: the ones
+// I have were not counted). With none left, taking back a move costs an ad. Trying again stays free.
 function canRescue() { return state.hist.length > 0; }
+const freeUndo = () => state.undos > 0 && state.hist.length > 0;
+function stuckUndo() { if (freeUndo()) doUndo(); else askRescue(); }
 function askRescue() {
   if (!canRescue() || Ads.busy) return;
   const lv = state.lv;
@@ -2495,28 +2499,37 @@ function askRescue() {
     scene = 'play';
   });
 }
-function undoRow(r) { // the undo line of a stuck screen: one step back for an ad
-  if (canRescue()) { seeOffer('stuck_undo'); bigButton(...r, 'تراجع خطوة', 'secondary'); adPill(r[0] + 16, r[1] - 12); }
+function undoRow(r) { // the undo line of a stuck screen: one step back, free while the player has undos, then for an ad
+  if (freeUndo()) {
+    bigButton(...r, 'تراجع خطوة', 'secondary');
+    ctx.fillStyle = '#0b7a4b'; ell(r[0] + 34, r[1] + 4, 23, 23); ctx.fill(); // the same green counter as the bar's undo button
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5; ctx.stroke();
+    text(String(state.undos), r[0] + 34, r[1] + 6, 30, '#fff');
+  }
+  else if (canRescue()) { seeOffer('stuck_undo'); bigButton(...r, 'تراجع خطوة', 'secondary'); adPill(r[0] + 16, r[1] - 12); }
   else text('لا خطوة للتراجع', W / 2, r[1] + r[3] / 2, 28, '#a3b6d0');
 }
-function undoTap(p, r) { if (!inRect(p, ...r) || !canRescue()) return false; askRescue(); return true; }
+function undoTap(p, r) { if (!inRect(p, ...r) || !canRescue()) return false; stuckUndo(); return true; }
+function skipRow(r) { seeOffer('skip_level'); bigButton(...r, 'تخطَّ المرحلة', 'gold'); adPill(r[0] + 16, r[1] - 12); }
 function drawOffer() { // the stops are full: one more stop for watching an ad, once per attempt
   drawPlay();
-  panel(330, 780, ERAS[eraNow()].bgImg);
-  text('المواقف ممتلئة', W / 2, 400, 54, '#ffb347');
+  const skip = canSkip(), B = offerBtns(), dy = skip ? -74 : 0; // with the skip row the panel is taller and its top moves up
+  panel(skip ? 262 : 330, skip ? 852 : 780, ERAS[eraNow()].bgImg);
+  text('المواقف ممتلئة', W / 2, 400 + dy, 54, '#ffb347');
   const front = state.tr[state.S.qi], noun = ERAS[eraNow()].noun;
   if (front) {
-    text(`أول مسافر بلون ${COLOUR_NAME[front.col]}`, W / 2, 468, 32, '#e4ecff');
-    text(`ولا ${noun} بلونه عند المواقف`, W / 2, 514, 32, '#e4ecff');
-    frontRider(616);
+    text(`أول مسافر بلون ${COLOUR_NAME[front.col]}`, W / 2, 468 + dy, 32, '#e4ecff');
+    text(`ولا ${noun} بلونه عند المواقف`, W / 2, 514 + dy, 32, '#e4ecff');
+    frontRider(616 + dy - (skip ? 6 : 0));
   }
-  text('شاهد إعلاناً قصيراً وخذ موقفاً إضافياً', W / 2, 712, 28, '#7ef0b0');
+  text('شاهد إعلاناً قصيراً وخذ موقفاً إضافياً', W / 2, B.extra[1] - 36, 28, '#7ef0b0');
   seeOffer('extra_stop');
-  bigButton(...OFFER_BTNS.extra, 'موقف إضافي', 'primary');
-  drawIcon('gate', OFFER_BTNS.extra[0] + 400, OFFER_BTNS.extra[1] + 58, 56, '#ffffff');
-  adPill(OFFER_BTNS.extra[0] + 16, OFFER_BTNS.extra[1] - 12);
-  undoRow(OFFER_BTNS.undo);
-  bigButton(...OFFER_BTNS.restart, 'أعد المرحلة', 'secondary');
+  bigButton(...B.extra, 'موقف إضافي', 'primary');
+  drawIcon('gate', B.extra[0] + 400, B.extra[1] + B.extra[3] / 2 + 4, 56, '#ffffff');
+  adPill(B.extra[0] + 16, B.extra[1] - 12);
+  undoRow(B.undo);
+  bigButton(...B.restart, 'أعد المرحلة', 'secondary');
+  if (skip) skipRow(B.skip);
   panelEnd();
 }
 function drawOver() {
@@ -2534,7 +2547,7 @@ function drawOver() {
   }
   bigButton(...B.restart, 'أعد المرحلة', 'primary'); // trying again is always free, and never shows an ad
   undoRow(B.undo);
-  if (skip) { seeOffer('skip_level'); bigButton(...B.skip, 'تخطَّ المرحلة', 'gold'); adPill(B.skip[0] + 16, B.skip[1] - 12); }
+  if (skip) skipRow(B.skip);
   panelEnd();
 }
 const RES_BTNS = { next: [130, 820, 460, 108], again: [130, 946, 460, 92] };
@@ -3081,18 +3094,20 @@ const scenes = {
       if (canTakeExtra()) { // the offer screen; Enter, Space or E takes the free stop
         if (pressed('KeyE') || pressed('Enter') || pressed('Space')) { askExtra(); return; }
         if (pressed('KeyR')) { doRestart(); return; }
-        if (pressed('KeyU')) { askRescue(); return; }
+        if (pressed('KeyU')) { stuckUndo(); return; }
+        if (pressed('KeyN') && canSkip()) { askSkip(); return; }
         if (pressed('Escape')) { openEra(eraNow()); return; }
-        let p;
+        let p; const B = offerBtns();
         while ((p = takeTap())) {
-          if (inRect(p, ...OFFER_BTNS.extra)) { askExtra(); return; }
-          if (undoTap(p, OFFER_BTNS.undo)) return;
-          if (inRect(p, ...OFFER_BTNS.restart)) { doRestart(); return; }
+          if (inRect(p, ...B.extra)) { askExtra(); return; }
+          if (undoTap(p, B.undo)) return;
+          if (inRect(p, ...B.restart)) { doRestart(); return; }
+          if (B.skip && inRect(p, ...B.skip)) { askSkip(); return; }
         }
         return;
       }
       if (pressed('KeyR') || pressed('Enter') || pressed('Space')) { doRestart(); return; }
-      if (pressed('KeyU')) { askRescue(); return; }
+      if (pressed('KeyU')) { stuckUndo(); return; }
       if (pressed('KeyN') && canSkip()) { askSkip(); return; }
       if (pressed('Escape')) { openEra(eraNow()); return; }
       let p; const B = overBtns();

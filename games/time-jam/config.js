@@ -284,7 +284,7 @@ window.CONFIG = {
   // sits between levels after a win. Never after a loss, on a restart, before the win screen or a new era's opening.
   ads_on: { value: 1, min: 0, max: 1, step: 1 },               // 0 = no ads at all: the help is simply given
   ad_undos: { value: 3, min: 0, max: 9, step: 1 },             // undos given for one ad when the free ones are used up (once per attempt)
-  skip_after: { value: 3, min: 0, max: 10, step: 1 },          // stuck screens on one level before "skip the level" is offered for an ad (0 = never)
+  skip_after: { value: 2, min: 0, max: 10, step: 1 },          // stuck screens on one level before "skip the level" is offered for an ad, on both stuck screens (0 = never)
   ads_first_level: { value: 3, min: 1, max: 25, step: 1 },     // no between-levels ad until this level has been won
   ads_every_wins: { value: 2, min: 1, max: 10, step: 1 },      // wins since the last ad (of any kind) before a between-levels ad
   ads_gap: { value: 150, min: 0, max: 600, step: 10 },         // seconds since the last ad (of any kind) before a between-levels ad
