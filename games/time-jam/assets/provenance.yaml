@@ -3,7 +3,7 @@
 # locally into one sprite per colour, resized and saved as WebP. Full-size originals: design/sky-taxi-art/.
 # Backgrounds: Dreamina's two corner marks (the small "AI" label, the logo) were taken off on 2026-11-26 at the
 # owner's request: tools/clean-marks.js refilled the marks' pixels from the picture around them (sources: the six
-# canvas nodes' 1440x2560 downloads). The title screen keeps the credit to Dreamina AI. Riders: the modern set was made at the owner's request (bare heads),
+# canvas nodes' 1440x2560 downloads). Riders: the modern set was made at the owner's request (bare heads),
 # the traditional set is an image-to-image variant of it (robes, bare heads). On 2026-11-24 both sets were
 # redrawn facing the viewer (the line now stands above the stops): image-to-image from the back-view sheets,
 # Seedream 4.7 (4.0 is no longer offered), cut out with Dreamina; full sheets in design/sky-taxi-art/riders_*front-full.png.
