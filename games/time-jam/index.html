@@ -222,6 +222,165 @@ function body(t, f0, f1, dur, vol, pan, type = 'sine') {
   o.connect(g).connect(outAt(t, pan)); o.start(t); o.stop(t + dur + 0.03);
 }
 let stepN = 0, stepLast = -1;
+// ---- Music: made here, note by note, no files --------------------------------------------------
+// Each era has its own key, rhythm and instruments; the tune itself is drawn from the level number, so
+// every level has its own. The band follows the level: calm on the menus, the full groove in play, more
+// percussion and a quicker beat on a hard level, more again on a very hard one or when the line is cross;
+// muffled on a stuck screen. Notes are booked a fifth of a second ahead on the audio clock.
+const STYLES = [
+  // root: MIDI note of the key; scale: its seven notes; prog: eight bars of chords (scale steps)
+  { root: 50, scale: [0, 1, 4, 5, 7, 8, 10], prog: [0, 0, 3, 0, 0, 1, 6, 0], bpm: 96, swing: 0, kit: 'maqsum', lead: 'oud', bass: 'pluck', bed: 'drone' },      // caravans: Hijaz, hand drum
+  { root: 48, scale: [0, 2, 3, 5, 7, 8, 11], prog: [0, 3, 4, 0, 0, 5, 4, 0], bpm: 104, swing: 0, kit: 'saidi', lead: 'qanun', bass: 'pluck', bed: 'drone' },    // the souk: Nahawand, a heavier hand drum
+  { root: 52, scale: [0, 2, 3, 5, 7, 9, 10], prog: [0, 0, 3, 3, 0, 0, 3, 4], bpm: 108, swing: 0.16, kit: 'funk', lead: 'clav', bass: 'funk', bed: 'stab' },    // the seventies street: swung funk
+  { root: 55, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 4, 5, 3, 0, 4, 3, 4], bpm: 116, swing: 0, kit: 'pop', lead: 'mallet', bass: 'round', bed: 'keys' },      // the taxi rank: bright and major
+  { root: 57, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 5, 2, 6, 0, 5, 3, 4], bpm: 122, swing: 0, kit: 'four', lead: 'synth', bass: 'saw', bed: 'pad' },         // the sky port: four on the floor
+];
+const RHYTHMS = [[0, 4, 6, 8, 12, 14], [0, 3, 6, 8, 11, 14], [0, 2, 4, 8, 10, 12], [0, 4, 6, 8, 10, 12, 14], [0, 3, 6, 10, 12], [2, 4, 6, 8, 12, 14]];
+const MU = { bus: null, lp: null, dead: false, t: 0, step: 0, bar: 0, bpm: 100, style: -1, seed: -1, A: null, B: null, I: 0, gain: -1, cut: -1, notes: 0 };
+const mHz = m => 440 * Math.pow(2, (m - 69) / 12);
+const mNote = (S, d) => S.root + 12 * Math.floor(d / 7) + S.scale[((d % 7) + 7) % 7]; // scale step -> MIDI note
+function musicBus() {
+  if (MU.bus || MU.dead) return !MU.dead;
+  try {
+    const ac = audio.ac, bus = ac.createGain(), lp = ac.createBiquadFilter(), comp = ac.createDynamicsCompressor();
+    bus.gain.value = 0.0001; lp.type = 'lowpass'; lp.frequency.value = 16000; lp.Q.value = 0.5;
+    bus.connect(lp).connect(comp).connect(audio.out); MU.bus = bus; MU.lp = lp;
+  } catch (err) { MU.dead = true; } // a stand-in audio context: no music
+  return !MU.dead;
+}
+/** One note: an oscillator through its own envelope (and a closing low-pass when cut is given). */
+function mOsc(t, type, f, dur, vol, o = {}) {
+  const ac = audio.ac, osc = ac.createOscillator(), g = ac.createGain(), a = o.a || 0.005;
+  osc.type = type; osc.frequency.setValueAtTime(f, t); if (o.f1) osc.frequency.exponentialRampToValueAtTime(o.f1, t + dur * (o.sweep || 1));
+  if (o.detune) osc.detune.value = o.detune;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + a);
+  if (o.hold) { g.gain.setValueAtTime(vol, t + dur - 0.08); g.gain.linearRampToValueAtTime(0.0001, t + dur); } else g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  if (o.cut) { const fl = ac.createBiquadFilter(); fl.type = 'lowpass'; fl.Q.value = o.q || 1; fl.frequency.setValueAtTime(o.cut, t); if (o.cut1) fl.frequency.exponentialRampToValueAtTime(o.cut1, t + dur * 0.6); osc.connect(fl).connect(g); }
+  else osc.connect(g);
+  g.connect(MU.bus); osc.start(t); osc.stop(t + dur + 0.03); MU.notes++;
+}
+function mNoise(t, dur, type, f, q, vol) {
+  const ac = audio.ac, src = ac.createBufferSource(), fl = ac.createBiquadFilter(), g = ac.createGain();
+  src.buffer = noise(); fl.type = type; fl.frequency.value = f; fl.Q.value = q;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  src.connect(fl).connect(g).connect(MU.bus); src.start(t, (MU.notes * 0.037) % 1); src.stop(t + dur + 0.03); MU.notes++;
+}
+const DRUM = {
+  doum: (t, v) => { mOsc(t, 'sine', 190, 0.2, 0.6 * v, { f1: 72, sweep: 0.5 }); mNoise(t, 0.03, 'lowpass', 900, 0.7, 0.2 * v); },
+  tek: (t, v) => { mNoise(t, 0.06, 'bandpass', 3100, 2.4, 0.42 * v); mOsc(t, 'triangle', 840, 0.05, 0.16 * v); },
+  ka: (t, v) => { mNoise(t, 0.045, 'bandpass', 2300, 2, 0.26 * v); },
+  riq: (t, v) => { mNoise(t, 0.07, 'highpass', 6200, 1.5, 0.11 * v); },
+  kick: (t, v) => { mOsc(t, 'sine', 210, 0.22, 0.62 * v, { f1: 52, sweep: 0.45 }); mNoise(t, 0.02, 'lowpass', 1400, 0.7, 0.18 * v); },
+  snare: (t, v) => { mNoise(t, 0.16, 'bandpass', 1900, 0.8, 0.36 * v); mOsc(t, 'triangle', 210, 0.09, 0.2 * v, { f1: 150 }); },
+  clap: (t, v) => { mNoise(t, 0.1, 'bandpass', 1300, 1.3, 0.3 * v); mNoise(t + 0.013, 0.1, 'bandpass', 1500, 1.3, 0.24 * v); },
+  hat: (t, v) => { mNoise(t, 0.04, 'highpass', 7600, 0.8, 0.1 * v); },
+  ohat: (t, v) => { mNoise(t, 0.14, 'highpass', 7000, 0.8, 0.09 * v); },
+};
+// The drums of each kit by layer: [layer the hit comes in at, the drum, its steps (of 16), loudness]
+const KITS = {
+  maqsum: [[0, 'doum', [0], 0.8], [1, 'doum', [8], 0.9], [0, 'tek', [12], 0.5], [1, 'tek', [2, 6], 0.85], [0, 'riq', [0, 4, 8, 12], 0.7], [1, 'riq', [2, 6, 10, 14], 0.55], [2, 'ka', [4, 10, 14], 0.7], [3, 'ka', [3, 7, 11, 15], 0.45], [3, 'doum', [7], 0.5]],
+  saidi: [[0, 'doum', [0], 0.8], [1, 'doum', [6, 8], 0.9], [0, 'tek', [12], 0.5], [1, 'tek', [2], 0.85], [0, 'riq', [0, 4, 8, 12], 0.7], [1, 'riq', [2, 6, 10, 14], 0.55], [2, 'ka', [4, 10, 14], 0.7], [3, 'ka', [3, 11, 15], 0.45], [3, 'tek', [5, 13], 0.4]],
+  funk: [[0, 'kick', [0], 0.8], [1, 'kick', [6, 10], 0.85], [1, 'snare', [4, 12], 0.9], [0, 'hat', [0, 4, 8, 12], 0.8], [1, 'hat', [2, 6, 10], 0.8], [1, 'ohat', [14], 0.8], [2, 'hat', [1, 3, 5, 7, 9, 11, 13], 0.4], [3, 'kick', [15], 0.6], [3, 'snare', [7, 9], 0.3]],
+  pop: [[0, 'kick', [0], 0.8], [1, 'kick', [8, 10], 0.85], [1, 'snare', [4, 12], 0.85], [0, 'hat', [0, 4, 8, 12], 0.8], [1, 'hat', [2, 6, 10, 14], 0.7], [2, 'clap', [4, 12], 0.6], [2, 'hat', [1, 5, 9, 13], 0.35], [3, 'kick', [4, 12, 14], 0.7], [3, 'ohat', [6, 14], 0.6]],
+  four: [[0, 'kick', [0, 8], 0.8], [1, 'kick', [4, 12], 0.85], [1, 'clap', [4, 12], 0.8], [0, 'hat', [2, 6, 10, 14], 0.8], [2, 'hat', [1, 3, 5, 7, 9, 11, 13, 15], 0.4], [2, 'ohat', [14], 0.7], [3, 'snare', [11, 15], 0.4], [3, 'ohat', [6], 0.6]],
+};
+// Bass lines: [step, 0 root / 1 fifth / 2 octave] by layer
+const BASS = {
+  pluck: [[[0, 0], [8, 0]], [[0, 0], [6, 0], [8, 1], [12, 0]], [[0, 0], [6, 0], [8, 1], [12, 0], [14, 1]], [[0, 0], [3, 0], [6, 0], [8, 1], [11, 0], [12, 0], [14, 1]]],
+  funk: [[[0, 0], [8, 0]], [[0, 0], [3, 0], [6, 2], [8, 0], [10, 1], [14, 2]], [[0, 0], [3, 0], [6, 2], [8, 0], [10, 1], [13, 0], [14, 2]], [[0, 0], [2, 2], [3, 0], [6, 2], [8, 0], [10, 1], [11, 2], [13, 0], [14, 2]]],
+  round: [[[0, 0], [8, 0]], [[0, 0], [4, 0], [6, 1], [8, 0], [12, 0], [14, 1]], [[0, 0], [4, 0], [6, 1], [8, 0], [10, 0], [12, 0], [14, 1]], [[0, 0], [2, 0], [4, 2], [6, 1], [8, 0], [10, 0], [12, 2], [14, 1]]],
+  saw: [[[0, 0], [8, 0]], [[0, 0], [2, 0], [4, 0], [6, 0], [8, 0], [10, 0], [12, 0], [14, 0]], [[0, 0], [2, 0], [4, 0], [6, 2], [8, 0], [10, 0], [12, 0], [14, 2]], [[0, 0], [2, 2], [4, 0], [6, 2], [8, 0], [10, 2], [12, 0], [14, 2]]],
+};
+function mBass(t, kind, m, sd) {
+  const f = mHz(m - 12);
+  if (kind === 'funk') mOsc(t, 'sawtooth', f, sd * 1.6, 0.3, { cut: 900, cut1: 260, q: 2 });
+  else if (kind === 'saw') mOsc(t, 'sawtooth', f, sd * 1.8, 0.26, { cut: 700, cut1: 240, q: 3 });
+  else mOsc(t, 'triangle', f, sd * 3, 0.34);
+  mOsc(t, 'sine', f * 2, sd * 2, kind === 'funk' || kind === 'saw' ? 0.1 : 0.16); // an octave up, so a phone's small speaker carries the line
+}
+function mLead(t, kind, m, dur, vol) {
+  const f = mHz(m);
+  if (kind === 'oud') { mOsc(t, 'sawtooth', f, Math.max(0.3, dur * 1.5), vol, { cut: 2600, cut1: 600 }); mOsc(t, 'triangle', f / 2, 0.25, vol * 0.5); }
+  else if (kind === 'qanun') { mOsc(t, 'sawtooth', f, Math.max(0.26, dur * 1.3), vol * 0.8, { cut: 4200, cut1: 1200 }); mOsc(t, 'triangle', f * 2, 0.18, vol * 0.3); }
+  else if (kind === 'clav') mOsc(t, 'square', f, Math.max(0.16, dur), vol * 0.6, { cut: 2200, cut1: 500, q: 2 });
+  else if (kind === 'mallet') { mOsc(t, 'sine', f, Math.max(0.4, dur * 1.6), vol); mOsc(t, 'sine', f * 3, 0.12, vol * 0.3); }
+  else { mOsc(t, 'sawtooth', f, Math.max(0.3, dur * 1.4), vol * 0.6, { cut: 2600, cut1: 900, q: 2 }); mOsc(t, 'sawtooth', f, Math.max(0.3, dur * 1.4), vol * 0.4, { cut: 2600, cut1: 900, detune: 9 }); }
+}
+function mBed(t, S, deg, st, sd, I) { // what sits under the tune: a drone, guitar stabs, keys or a pad
+  const tri = [deg, deg + 2, deg + 4].map(d => mHz(mNote(S, d + 7) - 12));
+  if (S.bed === 'drone') { if (st === 0) { mOsc(t, 'triangle', mHz(mNote(S, deg)), sd * 16, 0.07, { a: 0.3, hold: true }); mOsc(t, 'triangle', mHz(mNote(S, deg + 4)), sd * 16, 0.04, { a: 0.4, hold: true }); } }
+  else if (S.bed === 'stab') {
+    if (I >= 1 && (st === 3 || st === 6 || st === 11 || st === 14)) tri.forEach(f => mOsc(t, 'sawtooth', f * 2, 0.08, 0.05, { cut: 2600 }));
+    if (I === 0 && st % 8 === 0) tri.forEach(f => mOsc(t, 'triangle', f * 2, sd * 8, 0.045, { a: 0.02, hold: true })); // on the menus: soft held chords
+  }
+  else if (S.bed === 'keys') { if (st === 0 || (I >= 1 ? st === 6 || st === 10 : st === 8)) tri.forEach(f => mOsc(t, 'triangle', f * 2, I ? (st ? 0.28 : 0.6) : sd * 8, 0.06, I ? {} : { hold: true })); }
+  else if (st === 0) tri.forEach((f, k) => mOsc(t, 'sawtooth', f, sd * 16, 0.035, { a: 0.15, hold: true, cut: 900, detune: k * 5 - 5 }));
+}
+function mMotifs(seed) { // two short phrases from the level number: a rhythm each, then a walk that lands on chord notes on the beat
+  const mk = h0 => {
+    const r = RHYTHMS[Math.floor(hash(seed, h0) * RHYTHMS.length)], notes = []; let d = [0, 2, 4][Math.floor(hash(seed, h0 + 1) * 3)];
+    r.forEach((st, i) => {
+      if (i) {
+        const u = hash(seed, h0 + 7 + i * 3);
+        if (st % 4 === 0) { const want = d + (u < 0.5 ? -1.5 : 1.5); d = [0, 2, 4, 7, 9].reduce((a, c) => Math.abs(c - want) < Math.abs(a - want) ? c : a, 0); }
+        else d += u < 0.45 ? -1 : u < 0.9 ? 1 : 2;
+        d = clamp(d, -1, 9);
+      }
+      notes.push([st, d, Math.min((r[i + 1] == null ? 16 : r[i + 1]) - st, 4)]);
+    });
+    return notes;
+  };
+  MU.A = mk(11); MU.B = mk(53);
+}
+function musicWant() { // what the band should be playing now
+  const inLevel = (scene === 'play' || scene === 'over' || scene === 'results') && state;
+  const L = inLevel ? state.level : nextLevel();
+  const style = scene === 'era' ? uiEra : scene === 'unlock' ? unlockEra : eraOf(L);
+  let I = 0;
+  if (scene === 'play') I = Math.min(3, 1 + tierOf(L) + (state.anger > 0.5 ? 1 : 0));
+  else if (scene === 'over' || scene === 'unlock') I = 1;
+  return { style, seed: inLevel ? L : 9000 + style, I, tier: inLevel ? tierOf(L) : 0, muffled: scene === 'over', gain: scene === 'play' ? 1 : scene === 'results' ? 0.6 : scene === 'over' ? 0.7 : 0.8 };
+}
+function musicStep(t, w) { // book everything that sounds on this sixteenth
+  const st = MU.step % 16;
+  if (st === 0 && (w.style !== MU.style || w.seed !== MU.seed)) { MU.style = w.style; MU.seed = w.seed; MU.bar = 0; mMotifs(w.seed + w.style * 977); } // a new tune starts on a bar line
+  const S = STYLES[MU.style], I = MU.I = w.I, sd = 60 / MU.bpm / 4, bar = MU.bar % 8, deg = S.prog[bar];
+  const tt = t + (st % 2 ? S.swing * sd : 0);
+  for (const [lay, drum, steps, v] of KITS[S.kit]) if (lay <= I && steps.includes(st)) DRUM[drum](tt, v);
+  if (bar === 7 && I >= 1 && st >= 12) DRUM[S.kit === 'maqsum' || S.kit === 'saidi' ? 'tek' : 'snare'](tt, 0.45 + (st - 12) * 0.15); // a fill into the repeat
+  for (const [bs, k] of BASS[S.bass][I]) if (bs === st) mBass(tt, S.bass, mNote(S, deg + (k === 1 ? 4 : k === 2 ? 7 : 0)), sd);
+  mBed(tt, S, deg, st, sd, I);
+  // the tune: phrase A, its answer B, A again, B a step higher, and the eighth bar comes to rest on its chord's
+  // root; on the menus it rests every other pair of bars
+  if (I > 0 || bar < 2 || (bar >= 4 && bar < 6)) {
+    const m = bar === 7 ? MU.A.filter(n => n[0] < 8).concat([[8, 0, 6]]) : bar % 2 ? MU.B : MU.A, top = Math.max(...m.map(n => n[1]));
+    const base = deg + 7 + (bar === 3 ? 1 : 0) - (deg + 7 + top > 17 ? 7 : 0);
+    for (const [ns, d, len] of m) if (ns === st) {
+      const note = mNote(S, base + d), vol = I ? 0.2 : 0.13;
+      mLead(tt, S.lead, note, len * sd, vol);
+      if (I >= 2) mLead(tt, S.lead === 'oud' ? 'qanun' : S.lead, note + 12, len * sd, vol * 0.35); // doubled an octave up when it heats up
+    }
+  }
+  if (I >= 3) mOsc(tt, 'triangle', mHz(mNote(S, deg + 7 + [0, 2, 4, 7][st % 4])), sd * 0.9, 0.05); // a running figure on the chord
+  if (st === 15) MU.bar++;
+  MU.step++;
+}
+function musicTick() {
+  if (!audio || muted || !(tune.music_vol > 0) || !musicBus()) { MU.t = 0; return; }
+  try {
+    const ac = audio.ac, now = ac.currentTime, w = musicWant();
+    const gain = tune.music_vol * w.gain, cut = w.muffled ? 420 : 16000;
+    if (gain !== MU.gain) { MU.gain = gain; MU.bus.gain.setTargetAtTime(gain, now, 0.25); }
+    if (cut !== MU.cut) { MU.cut = cut; MU.lp.frequency.setTargetAtTime(cut, now, 0.12); }
+    if (MU.t < now) { MU.t = now + 0.06; MU.step = Math.ceil(MU.step / 16) * 16; } // (re)start on a bar line, never a burst of late notes
+    while (MU.t < now + 0.2) {
+      const target = STYLES[w.style].bpm * (w.I === 0 ? 0.92 : 1 + 0.07 * w.tier + (w.I > 1 + w.tier ? 0.04 : 0));
+      MU.bpm += (target - MU.bpm) * 0.2;
+      musicStep(MU.t, w); MU.t += 60 / MU.bpm / 4;
+    }
+  } catch (err) { MU.dead = true; }
+}
+
 const sfx = { // each era sounds like its vehicles: hooves and a bell, engines and horns, rotors
   /** One footfall of a walking animal: era 0 camels on sand, era 1 donkeys on stone (with cart wheels for the big ones). */
   step(e, big, x) {
@@ -3202,6 +3361,7 @@ function step() {
   if (Ads.busy !== adUp) { adUp = Ads.busy; if (audio) audio.out.gain.value = muted || adUp ? 0 : tune.volume; } // an ad owns the sound while it plays
   if (adUp) { tapQueue.length = 0; hit.clear(); return; } // and the game waits: no time passes, no input leaks through
   if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  musicTick();
   taps = tapQueue.splice(0);
   gt += STEP;
   if (waitingFor() === null) scenes[scene].update(STEP);
@@ -3246,6 +3406,7 @@ window.game = {
   press(code) { hit.add(code); },
   hold(code, on) { on ? down.add(code) : down.delete(code); },
   get events() { return events; },
+  get music() { return MU; },
   step(n = 1, draw = true, alpha = 1) {
     for (let i = 0; i < n; i++) step();
     if (draw) { ALPHA = alpha; LEAD = 0; drawFrame(); }

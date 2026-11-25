@@ -6,6 +6,7 @@
 window.CONFIG = {
   seed: 1, // every gameplay random call reads rng(), seeded from this (or ?seed= in the address)
   volume: { value: 0.5, min: 0, max: 1, step: 0.05 },
+  music_vol: { value: 0.55, min: 0, max: 1, step: 0.05 },   // the music under the sounds (0 = no music); it follows the era and the level's difficulty
 
   // The stops and the rules (round 3: three stops, bigger vehicles, more seats)
   gates: { value: 3, min: 2, max: 5, step: 1 },          // stops along the bottom (the free extra one makes 4)
