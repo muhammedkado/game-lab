@@ -514,3 +514,458 @@
   licence: {id: OFL-1.1}
   date: 2026-11-23
   ships: true
+
+# ---- The sea world (season 2), made on 2026-11-26 with Dreamina on the owner's account, the same canvas:
+# five harbour backgrounds, ten boat sheets and two rider sets (text-to-image and image-to-image, Seedream 4.7,
+# 2K, 8 credits each; cut out with Dreamina, 8 credits each; 360 credits of that day's free grant). Prompts and
+# node ids: design/sea-art/. Sheets were cut into sprites by tools/sprite-sheet.js; strips by tools/rider-anim.js.
+- path: assets/sea-1.jpg
+  origin: ai
+  tool: "Dreamina; background (dhow harbour), canvas node node_zdjtmfcmee; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/sea-2.jpg
+  origin: ai
+  tool: "Dreamina; background (fishing harbour), canvas node node_xatsrr9vv7; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/sea-3.jpg
+  origin: ai
+  tool: "Dreamina; background (steam ferry port), canvas node node_fbv0p3q8cw; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/sea-4.jpg
+  origin: ai
+  tool: "Dreamina; background (modern marina), canvas node node_15z8fh097n; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/sea-5.jpg
+  origin: ai
+  tool: "Dreamina; background (floating sea port), canvas node node_p4hdmqx2nb; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (small sailing dhows, node node_04mh84cn2f) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (small sailing dhows, node node_04mh84cn2f) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (small sailing dhows, node node_04mh84cn2f) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (small sailing dhows, node node_04mh84cn2f) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (small sailing dhows, node node_04mh84cn2f) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-big-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-masted dhows, node node_454pbgrg8r) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-big-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-masted dhows, node node_454pbgrg8r) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-big-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-masted dhows, node node_454pbgrg8r) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-big-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-masted dhows, node node_454pbgrg8r) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dhow-big-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-masted dhows, node node_454pbgrg8r) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rowboat-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (rowing boats, node node_48819sqvx7) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rowboat-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (rowing boats, node node_48819sqvx7) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rowboat-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (rowing boats, node node_48819sqvx7) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rowboat-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (rowing boats, node node_48819sqvx7) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rowboat-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (rowing boats, node node_48819sqvx7) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/fishing-boat-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (fishing boats with a canopy, node node_1xymqjyfma) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/fishing-boat-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (fishing boats with a canopy, node node_1xymqjyfma) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/fishing-boat-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (fishing boats with a canopy, node node_1xymqjyfma) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/fishing-boat-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (fishing boats with a canopy, node node_1xymqjyfma) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/fishing-boat-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (fishing boats with a canopy, node node_1xymqjyfma) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steam-launch-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (steam launches, node node_5c8b17drgm) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steam-launch-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (steam launches, node node_5c8b17drgm) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steam-launch-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (steam launches, node node_5c8b17drgm) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steam-launch-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (steam launches, node node_5c8b17drgm) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steam-launch-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (steam launches, node node_5c8b17drgm) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steamer-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (paddle steamers, node node_1c3zg2kggz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steamer-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (paddle steamers, node node_1c3zg2kggz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steamer-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (paddle steamers, node node_1c3zg2kggz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steamer-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (paddle steamers, node node_1c3zg2kggz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/steamer-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (paddle steamers, node node_1c3zg2kggz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/speedboat-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (speedboats, node node_vdej9ypb2p) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/speedboat-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (speedboats, node node_vdej9ypb2p) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/speedboat-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (speedboats, node node_vdej9ypb2p) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/speedboat-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (speedboats, node node_vdej9ypb2p) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/speedboat-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (speedboats, node node_vdej9ypb2p) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/water-taxi-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (water taxis, node node_qf3qeg3aqp) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/water-taxi-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (water taxis, node node_qf3qeg3aqp) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/water-taxi-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (water taxis, node node_qf3qeg3aqp) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/water-taxi-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (water taxis, node node_qf3qeg3aqp) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/water-taxi-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (water taxis, node node_qf3qeg3aqp) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-pod-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover pods, node node_a7fbf6b947) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-pod-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover pods, node node_a7fbf6b947) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-pod-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover pods, node node_a7fbf6b947) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-pod-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover pods, node node_a7fbf6b947) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-pod-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover pods, node node_a7fbf6b947) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-ferry-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover ferries, node node_dx9kdr33dz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-ferry-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover ferries, node node_dx9kdr33dz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-ferry-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover ferries, node node_dx9kdr33dz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-ferry-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover ferries, node node_dx9kdr33dz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/hover-ferry-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (hover ferries, node node_dx9kdr33dz) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-red.webp
+  origin: ai
+  tool: "Dreamina; standing rider (life-vest set, image-to-image from the hoodie set, node node_asjryry367) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-blue.webp
+  origin: ai
+  tool: "Dreamina; standing rider (life-vest set, image-to-image from the hoodie set, node node_asjryry367) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-green.webp
+  origin: ai
+  tool: "Dreamina; standing rider (life-vest set, image-to-image from the hoodie set, node node_asjryry367) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-yellow.webp
+  origin: ai
+  tool: "Dreamina; standing rider (life-vest set, image-to-image from the hoodie set, node node_asjryry367) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-purple.webp
+  origin: ai
+  tool: "Dreamina; standing rider (life-vest set, image-to-image from the hoodie set, node node_asjryry367) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-anim-red.webp
+  origin: ai
+  tool: "Dreamina; life-vest set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-anim-blue.webp
+  origin: ai
+  tool: "Dreamina; life-vest set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-anim-green.webp
+  origin: ai
+  tool: "Dreamina; life-vest set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-anim-yellow.webp
+  origin: ai
+  tool: "Dreamina; life-vest set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-anim-purple.webp
+  origin: ai
+  tool: "Dreamina; life-vest set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-red.webp
+  origin: ai
+  tool: "Dreamina; standing rider (old sailors set, image-to-image from the robe set, node node_4shqhmw1je) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-blue.webp
+  origin: ai
+  tool: "Dreamina; standing rider (old sailors set, image-to-image from the robe set, node node_4shqhmw1je) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-green.webp
+  origin: ai
+  tool: "Dreamina; standing rider (old sailors set, image-to-image from the robe set, node node_4shqhmw1je) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-yellow.webp
+  origin: ai
+  tool: "Dreamina; standing rider (old sailors set, image-to-image from the robe set, node node_4shqhmw1je) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-purple.webp
+  origin: ai
+  tool: "Dreamina; standing rider (old sailors set, image-to-image from the robe set, node node_4shqhmw1je) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-anim-red.webp
+  origin: ai
+  tool: "Dreamina; old sailors set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-anim-blue.webp
+  origin: ai
+  tool: "Dreamina; old sailors set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-anim-green.webp
+  origin: ai
+  tool: "Dreamina; old sailors set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-anim-yellow.webp
+  origin: ai
+  tool: "Dreamina; old sailors set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-sea-old-anim-purple.webp
+  origin: ai
+  tool: "Dreamina; old sailors set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets + Dreamina cutout, packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true

@@ -7,6 +7,12 @@ window.CONFIG = {
   seed: 1, // every gameplay random call reads rng(), seeded from this (or ?seed= in the address)
   volume: { value: 0.5, min: 0, max: 1, step: 0.05 },
   music_vol: { value: 0.55, min: 0, max: 1, step: 0.05 },   // the music under the sounds (0 = no music); it follows the era and the level's difficulty
+  // Boats (the sea world): how they ride the water
+  boat_rock: { value: 0.02, min: 0, max: 0.08, step: 0.005 },   // a moored boat's roll, radians
+  boat_bob: { value: 0.012, min: 0, max: 0.05, step: 0.002 },   // and its rise and fall, as a share of its size
+  boat_swell: { value: 1.7, min: 0.2, max: 5, step: 0.1 },      // how quick the swell is
+  boat_heel: { value: 0.035, min: 0, max: 0.12, step: 0.005 },  // a moving boat's heel, radians
+  wake_len: { value: 0.34, min: 0, max: 1.5, step: 0.05 },       // the wake behind a moving boat, as a share of its length
 
   // The stops and the rules (round 3: three stops, bigger vehicles, more seats)
   gates: { value: 3, min: 2, max: 5, step: 1 },          // stops along the bottom (the free extra one makes 4)

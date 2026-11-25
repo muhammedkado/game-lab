@@ -78,6 +78,10 @@ function text(s, x, y, size, c, align = 'center', weight = 700) {
   ctx.textBaseline = 'middle'; ctx.direction = AR.test(s) ? 'rtl' : 'ltr';
   ctx.fillText(s, x, y); ctx.direction = 'ltr';
 }
+function textFit(s, x, y, size, maxW, c, align = 'center', weight = 700) { // as text(), but never wider than maxW
+  ctx.font = `${weight} ${size}px ${FONT}`; const w = ctx.measureText(s).width;
+  text(s, x, y, w > maxW ? Math.floor(size * maxW / w) : size, c, align, weight);
+}
 function textOutline(s, x, y, size, c, outline, lw) {
   ctx.font = `800 ${size}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.direction = AR.test(s) ? 'rtl' : 'ltr'; ctx.lineJoin = 'round';
@@ -234,6 +238,12 @@ const STYLES = [
   { root: 52, scale: [0, 2, 3, 5, 7, 9, 10], prog: [0, 0, 3, 3, 0, 0, 3, 4], bpm: 108, swing: 0.16, kit: 'funk', lead: 'clav', bass: 'funk', bed: 'stab' },    // the seventies street: swung funk
   { root: 55, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 4, 5, 3, 0, 4, 3, 4], bpm: 116, swing: 0, kit: 'pop', lead: 'mallet', bass: 'round', bed: 'keys' },      // the taxi rank: bright and major
   { root: 57, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 5, 2, 6, 0, 5, 3, 4], bpm: 122, swing: 0, kit: 'four', lead: 'synth', bass: 'saw', bed: 'pad' },         // the sky port: four on the floor
+  // the sea, in the same order as its eras
+  { root: 52, scale: [0, 1, 3, 5, 7, 8, 10], prog: [0, 0, 5, 0, 0, 6, 5, 0], bpm: 94, swing: 0, kit: 'maqsum', lead: 'qanun', bass: 'pluck', bed: 'drone' },   // dhows: Kurd, a rolling hand drum
+  { root: 50, scale: [0, 1, 4, 5, 7, 8, 11], prog: [0, 3, 0, 1, 0, 3, 1, 0], bpm: 106, swing: 0, kit: 'saidi', lead: 'oud', bass: 'pluck', bed: 'drone' },      // fishing boats: Hijaz Kar
+  { root: 53, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 3, 4, 0, 0, 3, 4, 4], bpm: 104, swing: 0.2, kit: 'funk', lead: 'mallet', bass: 'round', bed: 'keys' },  // steamers: a swung promenade tune
+  { root: 57, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 3, 0, 4, 0, 3, 4, 0], bpm: 120, swing: 0, kit: 'pop', lead: 'mallet', bass: 'round', bed: 'stab' },     // speedboats: sunny and quick
+  { root: 52, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 6, 5, 6, 0, 6, 5, 4], bpm: 126, swing: 0, kit: 'four', lead: 'synth', bass: 'saw', bed: 'pad' },         // the hover port: a night drive
 ];
 const RHYTHMS = [[0, 4, 6, 8, 12, 14], [0, 3, 6, 8, 11, 14], [0, 2, 4, 8, 10, 12], [0, 4, 6, 8, 10, 12, 14], [0, 3, 6, 10, 12], [2, 4, 6, 8, 12, 14]];
 const MU = { bus: null, lp: null, dead: false, t: 0, step: 0, bar: 0, bpm: 100, style: -1, seed: -1, A: null, B: null, I: 0, gain: -1, cut: -1, notes: 0 };
@@ -417,6 +427,14 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   /** A vehicle is sent: the animal grunts or brays, the engine starts, the rotors spin up. */
   tap(e, big = false, x = W / 2) {
     const m = ERAS[e].move, pan = (x / W * 2 - 1) * 0.6, n = voiceN;
+    if (m === 'sail') { // a boat casts off: water slaps the hull, then its own voice (rigging, a steam toot, an engine, fans)
+      const k = ERAS[e].snd; rush(0.35, 500, 1500, 0.1);
+      if (k === 'steam') { tone(big ? 196 : 233, 0.24, 'square', 0.045, 0.06); tone(big ? 294 : 349, 0.24, 'square', 0.03, 0.06); }
+      else if (k === 'motor') { if (!play('start', n, { rate: big ? 1.05 : 1.2, vol: 0.4, pan, dur: 1.2 })) sweep(90, 260, 0.3, 'sawtooth', 0.06); }
+      else if (k === 'hover') { if (!play('rotor', n, { rate: big ? 1.1 : 1.3, vol: 0.4, pan, dur: 1.1 })) sweep(160, 520, 0.22, 'sawtooth', 0.06); }
+      else { if (!play('creak', n, { rate: 0.8 + hash(n, 3) * 0.3, vol: 0.3, pan })) tone(180, 0.1, 'triangle', 0.06); tone(big ? 880 : 1175, 0.1, 'sine', 0.04, 0.05); }
+      return;
+    }
     if (m === 'walk') { sfx.step(e, big, x); if (!voice(e, big, pan)) tone(e ? 880 : 1175, 0.12, 'sine', 0.05, 0.04); return; }
     if (m === 'drive') {
       if (e === 2 && play('moto', n, { rate: big ? 0.9 : 1, vol: 0.5, pan, dur: 1.8 })) return;  // a motorbike engine starting and running, the tuk-tuk a bit deeper
@@ -429,7 +447,8 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   blocked() { tone(140, 0.12, 'square', 0.1); tone(104, 0.2, 'square', 0.09, 0.09); },
   dock(e) { // arriving at a stop: a soft clop and bell, a brake hiss and chime, a landing chime
     const m = ERAS[e].move;
-    if (m === 'walk') { tone(1046, 0.25, 'sine', 0.09, 0.05); tone(1568, 0.3, 'sine', 0.04, 0.09); }
+    if (m === 'sail') { rush(0.3, 700, 1800, 0.08); tone(988, 0.22, 'sine', 0.08, 0.05); tone(1319, 0.3, 'sine', 0.045, 0.12); } // water against the quay, the harbour bell
+    else if (m === 'walk') { tone(1046, 0.25, 'sine', 0.09, 0.05); tone(1568, 0.3, 'sine', 0.04, 0.09); }
     else if (m === 'drive') { if (!(e === 3 && play('door', 0, { rate: 0.95, vol: 0.5, delay: 0.15 }))) rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.08, 0.08); }
     else { tone(784, 0.09, 'sine', 0.18); tone(1175, 0.16, 'sine', 0.14, 0.07); }
   },
@@ -461,6 +480,14 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   warn() { [110, 110, 98].forEach((f, i) => tone(f, 0.22, 'square', 0.12, i * 0.2)); tone(880, 0.5, 'sawtooth', 0.05, 0.6); },
   go(e, big = false, x = W / 2) { // a full ground vehicle leaves through its stop: a happy call, or a horn and the engine pulling away
     const pan = (x / W * 2 - 1) * 0.6, n = voiceN++;
+    if (ERAS[e].move === 'sail') { // a full boat leaves: a bell, a long steam whistle, a horn, or the fans
+      const k = ERAS[e].snd; rush(0.5, 400, 1600, 0.1, 0.1);
+      if (k === 'steam') { for (const f of big ? [220, 277] : [262, 330]) { tone(f, 0.7, 'square', 0.04); tone(f * 1.006, 0.7, 'sine', 0.05); } }
+      else if (k === 'motor') { if (!play('horn', n, { rate: big ? 0.8 : 0.95, vol: 0.28, pan, dur: 0.5 })) tone(330, 0.25, 'square', 0.05); play('away', 0, { rate: 1.15, vol: 0.35, pan, dur: 1.4, delay: 0.25 }); }
+      else if (k === 'hover') { if (!play('rotor', n, { rate: 1.5, vol: 0.4, pan, dur: 1.2 })) sweep(200, 700, 0.5, 'triangle', 0.05); tone(784, 0.1, 'sine', 0.1, 0.05); }
+      else { tone(1320, 0.4, 'sine', 0.05); tone(1760, 0.5, 'sine', 0.03, 0.12); }
+      return;
+    }
     if (ERAS[e].move === 'walk') { tone(1320, 0.4, 'sine', 0.05); voice(e, big, pan, 0.8); return; }
     const horn = e === 2 ? { rate: big ? 1.15 : 1.35, vol: 0.3 } : { rate: big ? 0.9 : 1, vol: 0.3 };
     if (play('horn', n, { ...horn, pan, dur: 0.5 })) { // a toot, then the engine pulls away
@@ -618,14 +645,67 @@ const ERAS = [
       cellEdge: 'rgba(100,225,255,0.45)', bay: 'rgba(18,42,78,0.34)', bayEdge: 'rgba(110,225,255,0.5)', dash: true,
       floor: 'rgba(110,150,200,0.4)', floorEdge: 'rgba(110,225,255,0.45)', puff: '200,240,255',
       road: 'rgba(14,40,80,0.62)', roadEdge: 'rgba(90,220,255,0.55)', roadDash: 'rgba(160,240,255,0.8)' } },
+  // ---- The second world: the sea and its harbours. The same five steps through time, on water: boats sail
+  // (they bob at their berths and leave a wake), the stops are quays, the riders are seafarers.
+  { name: 'عصر المراكب الشراعية', tab: 'الشراع', bg: 'sea-1', cardY: 0.72, small: 'dhow', big: 'dhow-big', riders: 'rider-sea-old',
+    stop: 'post', cover: 'cloth', move: 'sail', snd: 'oar', noun: 'مركب', garage: 'stable', garageName: 'بيت المراكب',
+    smallName: 'مركب شراعي', bigName: 'مركب بشراعين', coverName: 'مغطى بالقماش', stopName: 'أعمدة الرسو',
+    accent: '255,206,128', base: '#0f3a40', greyTint: '#cfc6b2',
+    lot: { lane: 'rgba(255,244,214,0.4)', mat: 'rgba(6,58,66,0.42)', edge: 'rgba(255,236,190,0.78)', cell: 'rgba(255,255,255,0.07)',
+      cellEdge: 'rgba(255,244,214,0.4)', bay: 'rgba(6,58,66,0.32)', bayEdge: 'rgba(255,236,190,0.68)', dash: true,
+      floor: 'rgba(60,170,170,0.22)', floorEdge: 'rgba(255,236,190,0.6)', puff: '236,252,250', print: '236,252,250',
+      road: 'rgba(8,92,104,0.5)', roadEdge: 'rgba(255,240,205,0.5)', roadDash: 'rgba(255,255,255,0.5)' } },
+  { name: 'عصر قوارب الصيد', tab: 'الصيد', bg: 'sea-2', cardY: 0.75, small: 'rowboat', big: 'fishing-boat', riders: 'rider-sea-old',
+    stop: 'stall', cover: 'sack', move: 'sail', snd: 'oar', noun: 'قارب', garage: 'stable', garageName: 'بيت القوارب',
+    smallName: 'قارب تجديف', bigName: 'قارب صيد', coverName: 'مغطى بالخيش', stopName: 'مظلة الصيادين',
+    accent: '176,232,220', base: '#0c2f36', greyTint: '#c2c8c6',
+    lot: { lane: 'rgba(230,250,244,0.4)', mat: 'rgba(4,46,54,0.45)', edge: 'rgba(226,246,238,0.75)', cell: 'rgba(255,255,255,0.06)',
+      cellEdge: 'rgba(226,246,238,0.4)', bay: 'rgba(4,46,54,0.34)', bayEdge: 'rgba(226,246,238,0.65)', dash: true,
+      floor: 'rgba(50,150,150,0.22)', floorEdge: 'rgba(226,246,238,0.55)', puff: '232,250,248', print: '232,250,248',
+      road: 'rgba(6,78,88,0.52)', roadEdge: 'rgba(226,246,238,0.5)', roadDash: 'rgba(255,255,255,0.5)' } },
+  { name: 'عصر البواخر', tab: 'البواخر', bg: 'sea-3', cardY: 0.74, small: 'steam-launch', big: 'steamer', riders: 'rider-sea',
+    stop: 'tin', cover: 'grey', move: 'sail', snd: 'steam', noun: 'باخرة', garage: 'shed', garageName: 'ورشة السفن',
+    smallName: 'زورق بخاري', bigName: 'باخرة ركاب', coverName: 'غطاء رمادي', stopName: 'رصيف البواخر',
+    accent: '255,176,120', base: '#0b2c2c', greyTint: '#c4c8cc',
+    lot: { lane: 'rgba(255,236,214,0.42)', mat: 'rgba(4,40,40,0.46)', edge: 'rgba(255,226,196,0.78)', cell: 'rgba(255,255,255,0.05)',
+      cellEdge: 'rgba(255,232,206,0.42)', bay: 'rgba(4,40,40,0.34)', bayEdge: 'rgba(255,226,196,0.68)', dash: false,
+      floor: 'rgba(46,130,120,0.22)', floorEdge: 'rgba(214,110,70,0.7)', puff: '240,244,240', print: '240,244,240',
+      road: 'rgba(6,66,66,0.55)', roadEdge: 'rgba(255,226,196,0.5)', roadDash: 'rgba(255,255,255,0.55)' } },
+  { name: 'عصر اللنشات', tab: 'اللنشات', bg: 'sea-4', cardY: 0.76, small: 'speedboat', big: 'water-taxi', riders: 'rider-sea',
+    stop: 'bay', cover: 'grey', move: 'sail', snd: 'motor', noun: 'لنش', garage: 'garage', garageName: 'مرفأ مغطى',
+    smallName: 'لنش سريع', bigName: 'تاكسي بحري', coverName: 'غطاء رمادي', stopName: 'رصيف المارينا',
+    accent: '120,226,255', base: '#07324a', greyTint: '#c2c6cc',
+    lot: { lane: 'rgba(255,255,255,0.5)', mat: 'rgba(2,44,74,0.42)', edge: 'rgba(255,255,255,0.85)', cell: 'rgba(255,255,255,0.06)',
+      cellEdge: 'rgba(255,255,255,0.5)', bay: 'rgba(2,44,74,0.32)', bayEdge: 'rgba(255,255,255,0.78)', dash: false,
+      floor: 'rgba(90,200,235,0.2)', floorEdge: 'rgba(255,255,255,0.7)', puff: '255,255,255', print: '255,255,255',
+      road: 'rgba(4,84,128,0.5)', roadEdge: 'rgba(255,255,255,0.6)', roadDash: 'rgba(255,255,255,0.8)' } },
+  { name: 'عصر الحوّامات', tab: 'الحوّامات', bg: 'sea-5', cardY: 0.75, small: 'hover-pod', big: 'hover-ferry', riders: 'rider-sea',
+    stop: 'glass', cover: 'charge', move: 'sail', snd: 'hover', noun: 'حوّامة', garage: 'hangar', garageName: 'حوض الشحن',
+    smallName: 'حوّامة صغيرة', bigName: 'عبّارة حوّامة', coverName: 'حوّامة تشحن', stopName: 'بوابة زجاج',
+    accent: '120,236,255', base: '#050c1a', greyTint: '#b8c2d0',
+    lot: { lane: 'rgba(110,225,255,0.26)', mat: 'rgba(2,10,28,0.5)', edge: 'rgba(90,220,255,0.62)', cell: 'rgba(40,95,150,0.18)',
+      cellEdge: 'rgba(100,225,255,0.45)', bay: 'rgba(14,36,74,0.36)', bayEdge: 'rgba(110,225,255,0.52)', dash: true,
+      floor: 'rgba(60,110,180,0.26)', floorEdge: 'rgba(110,225,255,0.45)', puff: '200,240,255', print: '200,240,255',
+      road: 'rgba(10,34,76,0.6)', roadEdge: 'rgba(90,220,255,0.55)', roadDash: 'rgba(160,240,255,0.8)' } },
 ];
-// The series: a season is one trip through the five eras (25 levels); the next season starts again at
-// the camels with harder deals (config.js: levels, season_start). A chapter is one era of one season.
-const SEASON_LEVELS = ERA_LEVELS * ERAS.length;
+// A world is five eras in one place; a season plays one world from its oldest era to its newest. Seasons past the
+// last drawn world take the worlds in turn again, with harder deals (config.js: levels, season_start).
+const EPS = 5; // eras per season
+const WORLDS = [
+  { name: 'المدينة والطريق', stop: ['موقف', 'المواقف', 'موقفاً'], back: 'عدت إلى', riders: ['ركاب العصور القديمة', 'ركاب العصر الحديث'] },
+  { name: 'البحر والموانئ', stop: ['رصيف', 'الأرصفة', 'رصيفاً'], back: 'أبحرت إلى', riders: ['بحّارة الزمن القديم', 'مسافرو البحر'] },
+];
+// The series: a chapter is one era of one season; a level's era is its season's world and its chapter's place in it.
+const SEASON_LEVELS = ERA_LEVELS * EPS;
 const chapOf = L => Math.floor((Math.max(1, L) - 1) / ERA_LEVELS);          // 0, 1, 2 ... across seasons
-const eraOf = L => chapOf(L) % ERAS.length;
 const seasonOf = L => Math.floor((Math.max(1, L) - 1) / SEASON_LEVELS);
-const lvAt = (s, e, k) => (s * ERAS.length + e) * ERA_LEVELS + k + 1;        // season, era, place in the era -> level
+const placeOf = L => chapOf(L) % EPS;                                       // its era's place in its season, 0..4
+const worldOf = s => ((s % WORLDS.length) + WORLDS.length) % WORLDS.length; // the world a season plays
+const eraAt = (s, k) => worldOf(s) * EPS + k;                               // season, place -> the era (ERAS index)
+const eraOf = L => eraAt(seasonOf(L), placeOf(L));
+const lvAt = (s, k, i) => (s * EPS + k) * ERA_LEVELS + i + 1;               // season, place, place in the era -> level
+const worldNow = () => WORLDS[Math.floor((state ? eraOf(state.level) : 0) / EPS)];
+const stopW = k => worldNow().stop[k];                                      // "موقف" on land, "رصيف" at sea: one, many, object
 const nSeasons = () => Math.ceil(tune.levels / SEASON_LEVELS);
 // Each sprite's fit: a slight widening for the thinnest animals, where its riders sit (zone: the
 // share of its length from the nose; across: each of the two seat columns' offset as a share of its
@@ -644,6 +724,17 @@ const KIND = {
     rotors: [[0.165, 0.165], [0.835, 0.16], [0.155, 0.84], [0.845, 0.84]], r: 0.145, nose: 0.12, tail: 0.1 },
   'taxi-big': { widen: 1, aspect: 0.506, zone: [0.24, 0.72], across: 0.1, cov: [0.12, 0.88],
     rotors: [[0.173, 0.227], [0.822, 0.227], [0.173, 0.557], [0.822, 0.557], [0.173, 0.807], [0.822, 0.807]], r: 0.15, nose: 0.06, tail: 0.045 },
+  // the sea: riders sit on the open deck, under the awning or the cabin roof
+  'dhow': { widen: 1.1, aspect: 0.4, zone: [0.17, 0.6], across: 0.19, cov: [0.06, 0.96] },
+  'dhow-big': { widen: 1, aspect: 0.388, zone: [0.2, 0.6], across: 0.17, cov: [0.05, 0.96] },
+  'rowboat': { widen: 1, aspect: 0.455, zone: [0.26, 0.84], across: 0.17, cov: [0.04, 0.97] },
+  'fishing-boat': { widen: 1.12, aspect: 0.294, zone: [0.27, 0.63], across: 0.2, cov: [0.04, 0.97] },
+  'steam-launch': { widen: 1.16, aspect: 0.345, zone: [0.32, 0.72], across: 0.19, cov: [0.04, 0.97] },
+  'steamer': { widen: 1.14, aspect: 0.285, zone: [0.42, 0.88], across: 0.2, cov: [0.04, 0.97] },
+  'speedboat': { widen: 1.3, aspect: 0.285, zone: [0.4, 0.76], across: 0.2, cov: [0.03, 0.9] },
+  'water-taxi': { widen: 1.16, aspect: 0.276, zone: [0.24, 0.8], across: 0.2, cov: [0.03, 0.98] },
+  'hover-pod': { widen: 1, aspect: 0.51, zone: [0.16, 0.6], across: 0.15, cov: [0.03, 0.97] },
+  'hover-ferry': { widen: 1.06, aspect: 0.342, zone: [0.18, 0.78], across: 0.13, cov: [0.03, 0.97] },
 };
 
 // ---- The art: Dreamina images in assets/ (provenance.yaml), loaded era by era ---------------------
@@ -665,6 +756,11 @@ function getImg(file) {
     im.src = 'assets/' + file;
   }
   return im;
+}
+function queueWorld(e, first = false) { // era e's world loads one era after another, from e on (the title shows their cards)
+  const w = Math.floor(e / EPS) * EPS, add = [];
+  for (let k = 0; k < EPS; k++) { const id = w + (e - w + k) % EPS; if (!loadQueue.includes(id)) add.push(id); }
+  loadQueue = first ? add.concat(loadQueue) : loadQueue.concat(add);
 }
 function requestEra(e) {
   const g = LOAD[e]; if (g.started) return;
@@ -853,6 +949,11 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     sc *= 1 + tune.drive_bounce * Math.abs(Math.sin(drv / 23));
     sway = tune.drive_roll * Math.sin(drv / 37);
   }
+  let sail = null; // a boat: under way it heels a little and trails a wake; at its berth it rides the swell
+  if (E.move === 'sail') {
+    if (o.gait != null) { sail = o.gait; sway = tune.boat_heel * Math.sin(sail / 60); }
+    else if (!cover) { const ph = gt * tune.boat_swell + cx * 0.031 + cy * 0.017; sway = tune.boat_rock * Math.sin(ph); sc *= 1 + tune.boat_bob * Math.sin(ph * 1.3 + 1); }
+  }
   ctx.save(); ctx.translate(cx, cy);
   if (drv != null) ctx.translate(Math.sin(drv * 1.9) * tune.rumble, Math.cos(drv * 2.3) * tune.rumble);
   ctx.rotate(ang + sway); ctx.scale(sc * (o.sqA || 1), sc * (o.sqC || 1));
@@ -870,6 +971,12 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     ctx.strokeStyle = E.move === 'walk' ? 'rgba(255,240,210,0.55)' : 'rgba(255,255,255,0.6)'; ctx.lineWidth = Math.max(2, w * 0.05);
     const L = h * tune.streak_len, ph = ((o.gait || 0) / 40) % 1;
     for (const k of [-0.28, 0, 0.28]) { const x = k * w, y0 = h * 0.5 + 4 + ph * 10; ctx.globalAlpha = a0 * (k ? 0.45 : 0.7); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + L * (k ? 0.7 : 1)); ctx.stroke(); }
+    ctx.globalAlpha = a0;
+  }
+  if (sail != null && o.trail !== false) { // the wake: two arms of foam widening behind the stern
+    ctx.strokeStyle = `rgba(${E.lot.puff},0.5)`; ctx.lineWidth = Math.max(1.5, w * 0.055);
+    const L = h * tune.wake_len, ph = ((sail / 30) % 1) * 6;
+    for (const sd of [-1, 1]) { ctx.globalAlpha = a0 * 0.7; ctx.beginPath(); ctx.moveTo(sd * w * 0.28, h * 0.44); ctx.quadraticCurveTo(sd * w * 0.4, h * 0.5 + L * 0.5, sd * w * 0.62, h * 0.5 + L + ph); ctx.stroke(); }
     ctx.globalAlpha = a0;
   }
   if (cover < 1) {
@@ -941,9 +1048,9 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
 // (cool for air taxis, warm for road vehicles), a trodden chevron in the dust for animals.
 function facingCue(x, y, dx, dy, c, e) {
   const E = ERAS[e];
-  if (E.move === 'walk') {
+  if (E.move === 'walk' || E.move === 'sail') { // a trodden chevron in the dust; for a boat, a ripple off its bow
     const px = -dy, py = dx;
-    ctx.strokeStyle = E.stop === 'post' ? 'rgba(255,236,196,0.7)' : 'rgba(246,236,216,0.68)'; ctx.lineWidth = Math.max(3, c * 0.05); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = E.move === 'sail' ? `rgba(${E.lot.puff},0.62)` : E.stop === 'post' ? 'rgba(255,236,196,0.7)' : 'rgba(246,236,216,0.68)'; ctx.lineWidth = Math.max(3, c * 0.05); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (let k = 0; k < 2; k++) {
       const d = c * (0.1 + k * 0.14), s = c * 0.11, bx = x + dx * d, by = y + dy * d;
       ctx.globalAlpha = k ? 0.55 : 1;
@@ -1708,7 +1815,7 @@ function leavePath(i, fly) {
 }
 // Each era is quicker than the one before: camels, then donkeys, motorbikes, taxis, air taxis.
 const ERA_SPEED = ['speed_camels', 'speed_donkeys', 'speed_motorbikes', 'speed_taxis', 'speed_air'];
-const moveSpeed = e => tune[ERA_SPEED[e]];
+const moveSpeed = e => tune[ERA_SPEED[e % EPS]]; // by the era's place in its world: a dhow keeps a camel's pace, a hover pod an air taxi's
 
 // ---- Game state ------------------------------------------------------------------------------
 let scene, state;
@@ -1905,7 +2012,7 @@ function doTap(i) {
     toast('الطريق مسدود'); sfx.blocked(); events.push({ type: 'blocked', id: i });
     return;
   }
-  if (S.gates.length >= nGates()) { toast('المواقف ممتلئة'); state.flashGatesT = state.t; sfx.blocked(); return; }
+  if (S.gates.length >= nGates()) { toast(`${stopW(1)} ممتلئة`); state.flashGatesT = state.t; sfx.blocked(); return; }
   if (!state.counted) { // the first tap makes this an attempt
     const r = logRec(state.level); state.counted = true; state.firstTry = r.attempts === 0;
     r.attempts++; if (state.firstTry) r.firstTryWin = 0; logSave();
@@ -1929,7 +2036,7 @@ function seeOffer(placement) { if (!state.offerSeen[placement]) { state.offerSee
 function askExtra() {
   if (!canTakeExtra() || Ads.busy) return;
   const lv = state.lv;
-  Ads.rewarded('extra_stop', 'موقف إضافي').then(ok => { if (state.lv !== lv) return; if (ok) takeExtra(); else toast('لم يكتمل الإعلان: لا موقف إضافي'); });
+  Ads.rewarded('extra_stop', `${stopW(0)} إضافي`).then(ok => { if (state.lv !== lv) return; if (ok) takeExtra(); else toast(`لم يكتمل الإعلان: لا ${stopW(0)} إضافي`); });
 }
 /** More undos, once per attempt, when the free ones are used up. */
 function canRefillUndo() { return state.undos <= 0 && !state.undoAd && tune.ad_undos > 0 && state.hist.length > 0; }
@@ -1961,7 +2068,7 @@ function takeExtra() {
   state.extra++; state.extraLeft--; state.extraT = state.t; state.gateFree.push(state.t - 1);
   state.pending = ''; scene = 'play'; bgKey = '';
   const r = logRec(state.level); r.extraGates = (r.extraGates || 0) + 1; logSave();
-  sfx.dock(eraNow()); tone(988, 0.12, 'triangle', 0.2, 0.08); toast('موقف إضافي جاهز');
+  sfx.dock(eraNow()); tone(988, 0.12, 'triangle', 0.2, 0.08); toast(`${stopW(0)} إضافي جاهز`);
   events.push({ type: 'extra', level: state.level });
   return true;
 }
@@ -1996,7 +2103,7 @@ function finishLevel() {
 }
 function openEra(e, s = viewSeason) {
   uiEra = e; uiSeason = viewSeason = s; requestEra(e);
-  const L = nextLevel(); eraSel = chapOf(L) === s * ERAS.length + e ? (L - 1) % ERA_LEVELS : 0; scene = 'era'; sfx.ui();
+  const L = nextLevel(); eraSel = chapOf(L) === s * EPS + e % EPS ? (L - 1) % ERA_LEVELS : 0; scene = 'era'; sfx.ui();
 }
 function openUnlock(e, L) {
   unlockEra = e; unlockLevel = L; unlockT = 0; requestEra(e);
@@ -2163,6 +2270,7 @@ function drawParts(under) {
 function puff(x, y, k, rgb, ang = rng() * Math.PI * 2) {
   const mv = ERAS[eraNow()].move, vx = (rng() - 0.5) * 50, vy = (rng() - 0.5) * 50;
   if (mv === 'fly') return fxs(FX.wash, pick(FX.wash.swirl), x, y, vx, vy, 26 * k, 46 * k, 0.6, 0.6, rng() * 6.3, (rng() < 0.5 ? -1 : 1) * 4, true, true);
+  if (mv === 'sail') return fxs(FX.wash, pick(FX.wash.swirl), x, y, vx * 0.6, vy * 0.6, 20 * k, 40 * k, 0.7, 0.55, rng() * 6.3, (rng() < 0.5 ? -1 : 1) * 2, true);
   if (mv === 'drive') return fxs(FX.smoke, pick(FX.smoke.light), x, y, vx, vy - 20, 22 * k, 44 * k, 0.8, 0.75, ang - FX.smoke.wisp + (rng() - 0.5) * 0.6, (rng() - 0.5) * 0.8, true);
   return fxs(FX.dust, pick(FX.dust.frames), x, y, vx, vy, 22 * k, 46 * k, 0.8, 0.85, ang - FX.dust.wisp + (rng() - 0.5) * 0.6, (rng() - 0.5) * 0.6, true);
 }
@@ -2259,7 +2367,7 @@ function drawLoading(e) {
   ctx.strokeStyle = '#e0b06a'; ctx.lineWidth = 6; ctx.lineCap = 'round';
   for (let k = 0; k < 8; k++) { const a = sp + k * Math.PI / 4; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 10, y + Math.sin(a) * 10); ctx.lineTo(x + Math.cos(a) * (R - 6), y + Math.sin(a) * (R - 6)); ctx.stroke(); }
   ctx.fillStyle = '#6b4220'; ell(x, y, 13, 13); ctx.fill();
-  const eras = e >= 0 ? [e] : e === -2 ? ERAS.map((_, k) => k) : [bootEra];
+  const eras = e >= 0 ? [e] : e === -2 ? [0, 1, 2, 3, 4].map(k => FIG_WORLD * EPS + k) : [bootEra];
   rrect(160, 800, 400, 18, 9); ctx.strokeStyle = 'rgba(255,214,150,0.75)'; ctx.lineWidth = 2; ctx.stroke();
   rrect(162, 802, 396 * loadProgress(eras), 14, 7); ctx.fillStyle = '#ffbe3d'; ctx.fill();
   text(E ? 'جارٍ تحميل ' + E.name : 'جارٍ تحميل الرسومات', W / 2, 862, 28, '#eadcf8', 'center', 700);
@@ -2477,16 +2585,16 @@ const SEASON_TIPS = ['زحمة جديدة: اقرأ الطابور قبل أن �
 function tipFor(L) { // seasons after the first say what is new, then fall back on a tip by the level's place in its era
   if (TIPS[L]) return TIPS[L];
   const k = (L - 1) % ERA_LEVELS, E = ERAS[eraOf(L)];
-  if ((L - 1) % SEASON_LEVELS === 0) return `الموسم ${seasonOf(L) + 1}: عدنا إلى القوافل والزحمة أصعب`;
+  if ((L - 1) % SEASON_LEVELS === 0) return `الموسم ${seasonOf(L) + 1}: ${worldNow().name}، والزحمة أصعب`;
   if (k === 0 && state.lv.garages.length) return `${E.garageName}: يخرج ما فيها حين تفرغ الخانتان أمامها`;
-  return SEASON_TIPS[k];
+  return SEASON_TIPS[k].replace('موقفاً', stopW(2));
 }
 function drawBanner() {
   const L = state.level;
   const y = BANNER_Y; // over the bays, empty until the first tap
   ctx.fillStyle = 'rgba(10,12,28,0.92)'; rrect(40, y, 640, 112, 24); ctx.fill();
   ctx.strokeStyle = `rgb(${accent()})`; ctx.lineWidth = 2.5; ctx.stroke();
-  text(tipFor(L), W / 2, y + 38, 30, '#ffffff');
+  textFit(tipFor(L), W / 2, y + 38, 30, 600, '#ffffff');
   text('مرحلة مفحوصة: لها حل مؤكد', W / 2 - 20, y + 82, 26, '#7ef0b0');
   checkMark(W / 2 + 178, y + 82, 26, '#7ef0b0');
   if (state.lv.tier === 1) hardPill(W / 2, y, 1.1); // said before the level starts
@@ -2661,16 +2769,16 @@ function drawOffer() { // the stops are full: one more stop for watching an ad, 
   drawPlay();
   const skip = canSkip(), B = offerBtns(), dy = skip ? -74 : 0; // with the skip row the panel is taller and its top moves up
   panel(skip ? 262 : 330, skip ? 852 : 780);
-  text('المواقف ممتلئة', W / 2, 400 + dy, 54, '#ffb347');
+  text(`${stopW(1)} ممتلئة`, W / 2, 400 + dy, 54, '#ffb347');
   const front = state.tr[state.S.qi], noun = ERAS[eraNow()].noun;
   if (front) {
     text(`أول مسافر بلون ${COLOUR_NAME[front.col]}`, W / 2, 468 + dy, 32, '#e4ecff');
-    text(`ولا ${noun} بلونه عند المواقف`, W / 2, 514 + dy, 32, '#e4ecff');
+    text(`ولا ${noun} بلونه عند ${stopW(1)}`, W / 2, 514 + dy, 32, '#e4ecff');
     frontRider(616 + dy - (skip ? 6 : 0));
   }
-  text('شاهد إعلاناً قصيراً وخذ موقفاً إضافياً', W / 2, B.extra[1] - 36, 28, '#7ef0b0');
+  text(`شاهد إعلاناً قصيراً وخذ ${stopW(2)} إضافياً`, W / 2, B.extra[1] - 36, 28, '#7ef0b0');
   seeOffer('extra_stop');
-  bigButton(...B.extra, 'موقف إضافي', 'primary');
+  bigButton(...B.extra, `${stopW(0)} إضافي`, 'primary');
   drawIcon('gate', B.extra[0] + 400, B.extra[1] + B.extra[3] / 2 + 4, 56, '#ffffff');
   adPill(B.extra[0] + 16, B.extra[1] - 12);
   undoRow(B.undo);
@@ -2685,10 +2793,10 @@ function drawOver() {
   panel(skip ? 316 : 360, skip ? 778 : 690);
   text('عالق', W / 2, 440 + dy, 60, '#ff6b81');
   const front = state.tr[state.S.qi], noun = ERAS[eraNow()].noun;
-  text('كل المواقف مشغولة،', W / 2, 520 + dy, 32, '#e4ecff');
+  text(`كل ${stopW(1)} مشغولة،`, W / 2, 520 + dy, 32, '#e4ecff');
   if (front) {
     text(`وأول مسافر بلون ${COLOUR_NAME[front.col]}`, W / 2, 566 + dy, 32, '#e4ecff');
-    text(`ولا ${noun} بلونه عند المواقف`, W / 2, 612 + dy, 32, '#e4ecff');
+    text(`ولا ${noun} بلونه عند ${stopW(1)}`, W / 2, 612 + dy, 32, '#e4ecff');
     frontRider(700 + dy - (skip ? 12 : 0));
   }
   bigButton(...B.restart, 'أعد المرحلة', 'primary'); // trying again is always free, and never shows an ad
@@ -2729,9 +2837,10 @@ function chevron(x, y, s, dir, col) { // a drawn arrow head: dir 1 points right,
 }
 function seasonBar(vs, y, btns) { // "الموسم 2 من 4" with its two arrows; a season is 25 levels through the five eras
   const n = nSeasons(), cy = y + 32, locked = vs * SEASON_LEVELS + 1 > (save.unlocked || 1);
-  text(`الموسم ${vs + 1} من ${n}`, W / 2 + 92, cy, 32, '#ffffff', 'center', 800);
-  if (locked) padlock(W / 2 - 110, cy - 4, 34, '#d7dde8');
-  else { drawStar(W / 2 - 62, cy - 1, 14, seasonStars(vs) > 0); text(`${seasonStars(vs)} من ${SEASON_LEVELS * 3}`, W / 2 - 84, cy + 1, 24, '#ffe2a8', 'right'); }
+  const xr = btns.prev[0] - 14, xl = btns.next[0] + btns.next[2] + 14; // between the two arrows: the season and its world on the right, its stars on the left
+  text(`الموسم ${vs + 1}: ${WORLDS[worldOf(vs)].name}`, xr, cy, 28, '#ffffff', 'right', 800);
+  if (locked) padlock(xl + 22, cy - 4, 34, '#d7dde8');
+  else { drawStar(xl + 14, cy - 1, 13, seasonStars(vs) > 0); text(`${seasonStars(vs)}/${SEASON_LEVELS * 3}`, xl + 32, cy + 1, 23, '#ffe2a8', 'left'); }
   if (n < 2) return;
   for (const [k, dir, on] of [['prev', 1, vs > 0], ['next', -1, vs < n - 1]]) {
     const b = btns[k]; glassButton(...b, on); chevron(b[0] + b[2] / 2, b[1] + b[3] / 2, 34, dir, on ? '#f4f8ff' : '#5d6878');
@@ -2756,7 +2865,7 @@ function tagPill(x, y, label, bg, fg) {
   text(label, x + w / 2, y + 18, 21, fg, 'center', 800);
 }
 function eraCard(e, vs, on, hot) {
-  const [x, y, w, h] = eraRow(e), E = ERAS[e], cy = y + h / 2, full = ERA_LEVELS * 3, s = eraStars(e, vs), a = lvAt(vs, e, 0);
+  const [x, y, w, h] = eraRow(e), id = eraAt(vs, e), E = ERAS[id], cy = y + h / 2, full = ERA_LEVELS * 3, s = eraStars(e, vs), a = lvAt(vs, e, 0);
   ctx.fillStyle = 'rgba(0,0,0,0.36)'; rrect(x + 2, y + 5, w, h, 20); ctx.fill();
   if (hot) { // the era to play next glows
     ctx.save(); ctx.shadowColor = `rgba(255,211,77,${0.6 + 0.3 * Math.sin(gt * 3)})`; ctx.shadowBlur = 22;
@@ -2764,7 +2873,7 @@ function eraCard(e, vs, on, hot) {
   }
   ctx.save(); rrect(x, y, w, h, 20); ctx.clip();
   ctx.fillStyle = E.base; ctx.fillRect(x, y, w, h);
-  const art = cardArt(e); if (art) ctx.drawImage(art, x, y, ART_W, h);
+  const art = cardArt(id); if (art) ctx.drawImage(art, x, y, ART_W, h);
   const gr = ctx.createLinearGradient(x, 0, x + w, 0);
   gr.addColorStop(0, 'rgba(10,14,32,0.05)'); gr.addColorStop(0.24, 'rgba(10,14,32,0.3)'); gr.addColorStop(0.47, 'rgba(12,16,36,0.97)'); gr.addColorStop(1, 'rgba(18,24,50,0.97)');
   ctx.fillStyle = gr; ctx.fillRect(x, y, w, h);
@@ -2775,7 +2884,7 @@ function eraCard(e, vs, on, hot) {
   // its vehicle, nose up, on a soft disc; a locked era shows it dimmed
   const vx = x + 576, bob = hot ? Math.sin(gt * 2.6) * 3 : 0;
   ctx.fillStyle = on ? `rgba(${E.accent},0.16)` : 'rgba(255,255,255,0.05)'; ell(vx, cy, 48, 48); ctx.fill();
-  if (LOAD[e].ready) { ctx.save(); if (!on) ctx.globalAlpha = 0.3; drawVehShadow(vx, cy + bob, -Math.PI / 2, 2, 46, 0, e); drawVehicle(vx, cy + bob, -Math.PI / 2, 2, 46, e % 5, 0, { era: e, seats: 0 }); ctx.restore(); }
+  if (LOAD[id].ready) { ctx.save(); if (!on) ctx.globalAlpha = 0.3; drawVehShadow(vx, cy + bob, -Math.PI / 2, 2, 46, 0, id); drawVehicle(vx, cy + bob, -Math.PI / 2, 2, 46, e % 5, 0, { era: id, seats: 0 }); ctx.restore(); }
   ctx.fillStyle = on ? `rgb(${E.accent})` : '#5a6272'; ell(x + 616, y + 24, 17, 17); ctx.fill();
   ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
   text(String(e + 1), x + 616, y + 26, 22, on ? '#1b1206' : '#c4cad4', 'center', 800);
@@ -2816,14 +2925,14 @@ function drawTitle() {
   ctx.fillStyle = 'rgba(10,8,30,0.6)'; rrect(28, 398, 664, 712, 26); ctx.fill();
   ctx.strokeStyle = 'rgba(255,214,150,0.45)'; ctx.lineWidth = 2; ctx.stroke();
   // this season's eras: how far the road is open in it (-1: the season is still locked)
-  const vs = viewSeason, open = clamp(chapOf(nextLevel()) - vs * ERAS.length, -1, ERAS.length - 1), cur = chapOf(L) - vs * ERAS.length;
+  const vs = viewSeason, open = clamp(chapOf(nextLevel()) - vs * EPS, -1, EPS - 1), cur = chapOf(L) - vs * EPS;
   seasonBar(vs, 404, SEASON_BTNS);
   const ry = e => eraRow(e)[1] + 58, rx = 616;
   ctx.strokeStyle = 'rgba(255,214,150,0.55)'; ctx.lineWidth = 6; ctx.lineCap = 'round';
   if (open >= 0) { ctx.beginPath(); ctx.moveTo(rx, ry(0)); ctx.lineTo(rx, ry(open)); ctx.stroke(); }
-  ctx.setLineDash([4, 12]); ctx.beginPath(); ctx.moveTo(rx, ry(Math.max(0, open))); ctx.lineTo(rx, ry(ERAS.length - 1)); ctx.stroke(); ctx.setLineDash([]);
+  ctx.setLineDash([4, 12]); ctx.beginPath(); ctx.moveTo(rx, ry(Math.max(0, open))); ctx.lineTo(rx, ry(EPS - 1)); ctx.stroke(); ctx.setLineDash([]);
   const t0 = Math.max(sceneT, listT);
-  for (let e = 0; e < ERAS.length; e++) { // the cards come in one after another
+  for (let e = 0; e < EPS; e++) { // the cards come in one after another
     const u = clamp((clock.now() - t0 - e * 0.05) / 0.3, 0, 1), k = 1 - Math.pow(1 - u, 3);
     ctx.save(); ctx.globalAlpha *= k; ctx.translate((1 - k) * 46, 0);
     eraCard(e, vs, e <= open, e === cur && e <= open && !save.done);
@@ -2851,7 +2960,7 @@ function drawEraScreen() {
   drawBackground('era' + e + ':' + (okImg(E.bgImg) ? 1 : 0), null, e);
   ctx.fillStyle = 'rgba(8,8,20,0.5)'; ctx.fillRect(0, 0, W, H);
   textOutline(E.name, W / 2, 148, E.name.length > 14 ? 50 : 58, '#ffffff', 'rgba(20,10,4,0.9)', 10);
-  text(`الموسم ${uiSeason + 1} · العصر ${e + 1} من ${ERAS.length}`, W / 2, 210, 28, `rgb(${E.accent})`);
+  text(`الموسم ${uiSeason + 1} · العصر ${e % EPS + 1} من ${EPS}`, W / 2, 210, 28, `rgb(${E.accent})`);
   // its two vehicles, named
   ctx.fillStyle = 'rgba(10,10,24,0.62)'; rrect(40, 246, 640, 246, 24); ctx.fill();
   ctx.strokeStyle = `rgba(${E.accent},0.5)`; ctx.lineWidth = 2; ctx.stroke();
@@ -2859,12 +2968,12 @@ function drawEraScreen() {
     drawVehShadow(600, 370, -Math.PI / 2, 2, 104, 0, e); drawVehicle(600, 370, -Math.PI / 2, 2, 104, 1, 0, { era: e, seats: 0 });
     drawVehShadow(130, 370, -Math.PI / 2, 3, 74, 0, e); drawVehicle(130, 370, -Math.PI / 2, 3, 74, 4, 0, { era: e, seats: 0 });
   }
-  text(E.smallName, 470, 340, 30, '#ffffff'); text(`خانتان · ${tune.seats_small} ركاب`, 470, 384, 24, '#dbe6f4', 'center', 700);
-  text(E.bigName, 290, 340, 30, '#ffffff'); text(`3 خانات · ${tune.seats_big} ركاب`, 290, 384, 24, '#dbe6f4', 'center', 700);
-  if ([0, 1, 2, 3, 4].some(k => levelSpec(lvAt(uiSeason, e, k)).nGar > 0)) { text(`في هذا العصر: ${E.garageName}`, W / 2, 436, 24, `rgb(${E.accent})`, 'center', 700); }
+  textFit(E.smallName, 470, 340, 30, 164, '#ffffff'); text(`خانتان · ${tune.seats_small} ركاب`, 470, 384, 24, '#dbe6f4', 'center', 700);
+  textFit(E.bigName, 290, 340, 30, 164, '#ffffff'); text(`3 خانات · ${tune.seats_big} ركاب`, 290, 384, 24, '#dbe6f4', 'center', 700);
+  if ([0, 1, 2, 3, 4].some(k => levelSpec(lvAt(uiSeason, e % EPS, k)).nGar > 0)) { text(`في هذا العصر: ${E.garageName}`, W / 2, 436, 24, `rgb(${E.accent})`, 'center', 700); }
   // the five level tiles, right to left
   for (let k = 0; k < ERA_LEVELS; k++) {
-    const L = lvAt(uiSeason, e, k), [x, y, w, h] = eraTile(k), on = L <= (save.unlocked || 1);
+    const L = lvAt(uiSeason, e % EPS, k), [x, y, w, h] = eraTile(k), on = L <= (save.unlocked || 1);
     glassButton(x, y, w, h, on, k === eraSel && on);
     text('المرحلة', x + w / 2, y + 40, 24, on ? '#dbe6f4' : '#7d8799', 'center', 700);
     text(String(L), x + w / 2, y + 88, 54, on ? '#ffffff' : '#7d8799', 'center', 800);
@@ -2872,10 +2981,10 @@ function drawEraScreen() {
     tierPill(L, x + w / 2, y + 2, 0.95);
     if (!on) { ctx.fillStyle = 'rgba(6,8,18,0.4)'; rrect(x, y, w, h, 18); ctx.fill(); padlock(x + w - 34, y + 34, 36, '#d7dde8'); }
   }
-  const L = lvAt(uiSeason, e, eraSel);
+  const L = lvAt(uiSeason, e % EPS, eraSel);
   if (LOAD[e].ready) bigButton(...ERA_BTNS.play, L <= (save.unlocked || 1) ? `العب المرحلة ${L}` : 'المرحلة مقفلة', L <= (save.unlocked || 1) ? 'primary' : 'secondary');
   else { rrect(160, 950, 400, 18, 9); ctx.strokeStyle = 'rgba(255,214,150,0.75)'; ctx.lineWidth = 2; ctx.stroke(); rrect(162, 952, 396 * loadProgress([e]), 14, 7); ctx.fillStyle = '#ffbe3d'; ctx.fill(); text('جارٍ تحميل الرسومات', W / 2, 1000, 26, '#ffffff'); }
-  text(`نجوم هذا العصر: ${eraStars(e, uiSeason)} من ${ERA_LEVELS * 3}`, W / 2, 1066, 28, '#ffe2a8');
+  text(`نجوم هذا العصر: ${eraStars(e % EPS, uiSeason)} من ${ERA_LEVELS * 3}`, W / 2, 1066, 28, '#ffe2a8');
   if (LOAD[e].ready) for (let c = 0; c < 5; c++) drawRider(244 + c * 58, 1196, c, 82, 1, e, marching(gt, c));
   glassButton(...ERA_BTNS.back); drawIcon('back', ERA_BTNS.back[0] + 38, ERA_BTNS.back[1] + 36, 44, '#f4f8ff');
   glassButton(...ERA_BTNS.mute); drawIcon(muted ? 'mute' : 'sound', ERA_BTNS.mute[0] + 38, ERA_BTNS.mute[1] + 36, 44, '#f4f8ff');
@@ -2892,9 +3001,9 @@ function drawUnlock() {
   ctx.fillStyle = `rgba(6,6,16,${0.85 * (1 - fade)})`; ctx.fillRect(0, 0, W, H);
   const a = clamp(unlockT / 0.4, 0, 1);
   ctx.globalAlpha = a;
-  text(unlockLevel > 1 && (unlockLevel - 1) % SEASON_LEVELS === 0 ? `الموسم ${seasonOf(unlockLevel) + 1}: عدت إلى` : 'انتقلت إلى', W / 2, 200, 44, '#ffffff');
+  text(unlockLevel > 1 && (unlockLevel - 1) % SEASON_LEVELS === 0 ? `الموسم ${seasonOf(unlockLevel) + 1}: ${WORLDS[Math.floor(e / EPS)].back}` : 'انتقلت إلى', W / 2, 200, 44, '#ffffff');
   textOutline(E.name, W / 2, 288, E.name.length > 14 ? 58 : 70, `rgb(${E.accent})`, 'rgba(16,8,2,0.92)', 12);
-  { const s = seasonOf(unlockLevel), a = lvAt(s, e, 0); text(`الموسم ${s + 1} · العصر ${e + 1} من ${ERAS.length} · المراحل ${a}–${a + ERA_LEVELS - 1}`, W / 2, 362, 28, '#ffffff'); }
+  { const s = seasonOf(unlockLevel), a = lvAt(s, e % EPS, 0); text(`الموسم ${s + 1} · العصر ${e % EPS + 1} من ${EPS} · المراحل ${a}–${a + ERA_LEVELS - 1}`, W / 2, 362, 28, '#ffffff'); }
   ctx.globalAlpha = 1;
   if (ready) { // the era's vehicle arrives: walks, drives, or flies in and settles
     const k = easeOut(u), y = lerp(1420, 720, k), c = 168, fly = E.move === 'fly';
@@ -2933,11 +3042,11 @@ function drawStats() {
   }
   text(`محاولات: ${A} · فوز: ${Wn} · عالق: ${St}`, W / 2, 256, 28, '#e4ecff');
   text(`فوز من أول محاولة: ${F} من ${Fp}`, W / 2, 294, 28, '#e4ecff');
-  for (let k = 0; k < ERAS.length; k++) { // one tab per era, right to left
+  for (let k = 0; k < EPS; k++) { // one tab per era, right to left
     const [x, y, w, h] = statTab(k), on = k === statsEra;
-    ctx.fillStyle = on ? `rgba(${ERAS[k].accent},0.9)` : 'rgba(95,220,255,0.1)'; rrect(x, y, w, h, 16); ctx.fill();
+    ctx.fillStyle = on ? `rgba(${ERAS[eraAt(viewSeason, k)].accent},0.9)` : 'rgba(95,220,255,0.1)'; rrect(x, y, w, h, 16); ctx.fill();
     ctx.strokeStyle = on ? '#ffffff' : 'rgba(95,220,255,0.4)'; ctx.lineWidth = 2; ctx.stroke();
-    text(ERAS[k].tab, x + w / 2, y + 28, 24, on ? '#1b1206' : '#e4ecff', 'center', 800);
+    text(ERAS[eraAt(viewSeason, k)].tab, x + w / 2, y + 28, 24, on ? '#1b1206' : '#e4ecff', 'center', 800);
     text(`${lvAt(viewSeason, k, 0)}–${lvAt(viewSeason, k, ERA_LEVELS - 1)}`, x + w / 2, y + 56, 24, on ? '#1b1206' : '#a3b6d0', 'center', 700);
   }
   // the table, right to left: level, attempts, wins, first attempt, best time, undos, extra stops
@@ -2966,7 +3075,7 @@ function drawStats() {
   text('صعبة', W / 2 + 160, ly + 1, 24, '#bfe2f6');
   ctx.fillStyle = '#a8001c'; rrect(W / 2 + 54, ly - 16, 40, 32, 16); ctx.fill(); ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2; ctx.stroke();
   text('صعبة جداً', W / 2 - 16, ly + 1, 24, '#bfe2f6');
-  text(`نجوم ${ERAS[statsEra].name}: ${eraStars(statsEra)} من ${ERA_LEVELS * 3}`, W / 2, ly + 52, 26, '#ffe2a8');
+  text(`نجوم ${ERAS[eraAt(viewSeason, statsEra)].name}: ${eraStars(statsEra)} من ${ERA_LEVELS * 3}`, W / 2, ly + 52, 26, '#ffe2a8');
   text('سجل على هذا الجهاز فقط، لا يُرسل إلى أي مكان', W / 2, 1036, 24, '#a3b6d0', 'center', 700);
   { const a = Ads.totals(); text(`إعلانات (تجريبية): عُرضت ${a.offered} · شوهدت ${a.completed} · أُغلقت ${a.closed}`, W / 2, ly + 96, 24, '#ffd34d'); }
   bigButton(...STATS_BTNS.back, 'رجوع', 'primary');
@@ -2975,17 +3084,19 @@ function drawStats() {
 }
 
 // ---- Figures: every era's vehicles, cover and stop, both rider sets ----------------------------------
+const FIG_WORLD = clamp((Number(params.get('world')) || 1) - 1, 0, WORLDS.length - 1); // the figures page: ?world=2 shows the sea
 function drawFigures() {
   const gr = ctx.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#141026'); gr.addColorStop(1, '#221436');
   ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
   text('الشخصيات · Figures', W / 2, 30, 30, '#ffffff');
   const lab = (s, x, y, c = '#ffffff') => text(s, x, y, 24, c, 'center', 700);
   const C = 76; // the lot's cell at its smallest: every vehicle here is the size it plays at
-  for (let e = 0; e < ERAS.length; e++) {
-    const E = ERAS[e], y0 = 56 + e * 178, cy = y0 + 92;
+  const w0 = FIG_WORLD * EPS;
+  for (let e = w0; e < w0 + EPS; e++) {
+    const E = ERAS[e], y0 = 56 + (e - w0) * 178, cy = y0 + 92;
     ctx.fillStyle = `rgba(${E.accent},0.08)`; rrect(8, y0 + 2, 704, 172, 16); ctx.fill();
     ctx.strokeStyle = `rgba(${E.accent},0.4)`; ctx.lineWidth = 1.5; ctx.stroke();
-    text(`${e + 1} · ${E.name}`, 700, y0 + 18, 24, `rgb(${E.accent})`, 'right', 800);
+    text(`${e - w0 + 1} · ${E.name}`, 700, y0 + 18, 24, `rgb(${E.accent})`, 'right', 800);
     drawVehShadow(664, cy + 4, -Math.PI / 2, 2, C, 0, e); drawVehicle(664, cy + 4, -Math.PI / 2, 2, C, e % 5, 2, { era: e }); // small, 2 cells
     lab(E.smallName, 604, y0 + 160);
     drawVehShadow(494, cy - 8, 0, 3, C, 0, e); drawVehicle(494, cy - 8, 0, 3, C, (e + 1) % 5, 5, { era: e }); // big, 3 cells
@@ -2997,8 +3108,8 @@ function drawFigures() {
     if (E.garage) { drawGarageShape(68, y0 + 64, 64, 2, e, [e % 5, (e + 2) % 5, (e + 4) % 5]); lab(E.garageName, 72, y0 + 122, `rgb(${E.accent})`); }
   }
   const y1 = 56 + 5 * 178;
-  lab('ركاب العصور القديمة', 540, y1 + 14, '#ffe2a8'); lab('ركاب العصر الحديث', 180, y1 + 14, '#bfe2f6');
-  for (let c = 0; c < 5; c++) { drawRider(412 + c * 64, y1 + 118, c, 90, 1, 0); drawRider(52 + c * 64, y1 + 118, c, 90, 1, 4); }
+  lab(WORLDS[FIG_WORLD].riders[0], 540, y1 + 14, '#ffe2a8'); lab(WORLDS[FIG_WORLD].riders[1], 180, y1 + 14, '#bfe2f6');
+  for (let c = 0; c < 5; c++) { drawRider(412 + c * 64, y1 + 118, c, 90, 1, w0); drawRider(52 + c * 64, y1 + 118, c, 90, 1, w0 + 4); }
   hardPill(74, y1 + 160, 0.95); veryHardPill(222, y1 + 160, 0.95);
   lab('الوسوم', 150, y1 + 200);
   drawIcon('gate', 364, y1 + 160, 50, '#f4f8ff'); lab('موقف إضافي', 364, y1 + 200);
@@ -3069,7 +3180,7 @@ function updatePlayWorld(dt) {
     const v = state.vc[i], moving = (v.trip && t >= v.trip.t0 && t < v.trip.t1) || (v.leave && v.leave.kind === 'ground' && t >= v.leave.go && t < v.leave.mv.t1);
     const idle = E.move === 'drive' && !v.trip && !v.gone && !v.parked && t >= v.rollT && canExit(lv, state.S, i) && !state.pending;
     if (!moving && !idle) continue;
-    const period = moving ? (E.move === 'fly' ? 0.1 : E.move === 'walk' ? 0.09 : 0.07) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
+    const period = moving ? (E.move === 'fly' ? 0.1 : E.move === 'walk' ? 0.09 : E.move === 'sail' ? 0.11 : 0.07) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
     if (Math.floor((t + ph) / period) === Math.floor((t - dt + ph) / period)) continue;
     const p = taxiPose(i); if (!p) continue;
     const ca = Math.cos(p.ang), sa = Math.sin(p.ang), back = lv.taxis[i].len * p.cell * 0.5, side = p.cell * 0.28;
@@ -3078,6 +3189,12 @@ function updatePlayWorld(dt) {
     if (E.move === 'fly') { // rotor downwash: a spinning swirl of air under the taxi, now and then a glowing ring
       fxs(FX.wash, pick(FX.wash.swirl), p.x + 4, p.y + 8, -ca * 40, -sa * 40, c * 0.5, c * 0.9 * fx, 0.55, 0.5, rng() * 6.3, 5, true, true);
       if (rng() < 0.18) fxs(FX.wash, pick(FX.wash.ring), p.x + 4, p.y + 8, 0, 0, c * 0.4, c * 1.2 * fx, 0.6, 0.55, rng() * 6.3, 0, true, true);
+      continue;
+    }
+    if (E.move === 'sail') { // foam curls off the stern on both sides and is left behind on the water
+      if (!moving) continue;
+      for (const sd of [-1, 1]) fxs(FX.wash, pick(FX.wash.swirl), bx - sa * side * sd + jit() * 8, by + ca * side * sd + jit() * 8, -ca * 26 + jit() * 16, -sa * 26 + jit() * 16,
+        c * 0.2 * fx, c * 0.5 * fx, 0.8, 0.5, rng() * 6.3, sd * 1.6, true);
       continue;
     }
     if (E.move === 'walk') { // hooves kick up sand: a cloud behind each side, now and then a bigger one
@@ -3194,7 +3311,7 @@ function playInput() {
     if (garageAt(p)) { toast('تخرج المركبة حين تفرغ الخانتان أمام المرآب'); sfx.blocked(); }
   }
 }
-function stepSeason(d) { const v = clamp(viewSeason + d, 0, nSeasons() - 1); if (v === viewSeason) return; viewSeason = v; listT = clock.now(); sfx.ui(); events.push({ type: 'season-view', season: v + 1 }); }
+function stepSeason(d) { const v = clamp(viewSeason + d, 0, nSeasons() - 1); if (v === viewSeason) return; viewSeason = v; listT = clock.now(); queueWorld(eraAt(v, 0), true); onLoaded(); sfx.ui(); events.push({ type: 'season-view', season: v + 1 }); }
 const scenes = {
   figures: {
     update(dt) { state.t += dt; },
@@ -3203,19 +3320,19 @@ const scenes = {
   title: {
     update() {
       if (pressed('Enter') || pressed('Space')) { playLevel(save.done ? 1 : nextLevel()); return; }
-      if (pressed('KeyL')) { scene = 'stats'; statsEra = eraOf(nextLevel()); viewSeason = seasonOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
+      if (pressed('KeyL')) { scene = 'stats'; statsEra = placeOf(nextLevel()); viewSeason = seasonOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
       if (pressed('ArrowRight')) stepSeason(-1); // right to left: the earlier season is on the right
       if (pressed('ArrowLeft')) stepSeason(1);
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...TITLE_BTNS.mute)) { setMuted(!muted); continue; }
         if (location.protocol.startsWith('http') && inRect(p, ...TITLE_BTNS.home)) { location.href = '../../'; return; }
-        if (inRect(p, ...TITLE_BTNS.stats)) { scene = 'stats'; statsEra = eraOf(nextLevel()); viewSeason = seasonOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
+        if (inRect(p, ...TITLE_BTNS.stats)) { scene = 'stats'; statsEra = placeOf(nextLevel()); viewSeason = seasonOf(nextLevel()); statsClearT = -9; sfx.ui(); return; }
         if (inRect(p, ...TITLE_BTNS.start)) { playLevel(save.done ? 1 : nextLevel()); return; }
         if (inRect(p, ...SEASON_BTNS.prev)) { stepSeason(-1); continue; }
         if (inRect(p, ...SEASON_BTNS.next)) { stepSeason(1); continue; }
-        for (let e = 0; e < ERAS.length; e++) if (inRect(p, ...eraRow(e))) {
-          if (viewSeason * ERAS.length + e <= chapOf(nextLevel())) openEra(e, viewSeason); else { sfx.blocked(); events.push({ type: 'era-locked', era: e + 1, season: viewSeason + 1 }); }
+        for (let e = 0; e < EPS; e++) if (inRect(p, ...eraRow(e))) {
+          if (viewSeason * EPS + e <= chapOf(nextLevel())) openEra(eraAt(viewSeason, e), viewSeason); else { sfx.blocked(); events.push({ type: 'era-locked', era: e + 1, season: viewSeason + 1 }); }
           return;
         }
       }
@@ -3224,18 +3341,18 @@ const scenes = {
   },
   era: {
     update() {
-      const e = uiEra, open = k => lvAt(uiSeason, e, k) <= (save.unlocked || 1);
+      const e = uiEra, pl = e % EPS, open = k => lvAt(uiSeason, pl, k) <= (save.unlocked || 1);
       if (pressed('Escape') || pressed('Backspace')) { scene = 'title'; sfx.ui(); return; }
       if (pressed('ArrowRight')) eraSel = Math.max(0, eraSel - 1); // right to left
       if (pressed('ArrowLeft')) eraSel = Math.min(ERA_LEVELS - 1, eraSel + 1);
-      if ((pressed('Enter') || pressed('Space')) && LOAD[e].ready && open(eraSel)) { playLevel(lvAt(uiSeason, e, eraSel)); return; }
+      if ((pressed('Enter') || pressed('Space')) && LOAD[e].ready && open(eraSel)) { playLevel(lvAt(uiSeason, pl, eraSel)); return; }
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...ERA_BTNS.back)) { scene = 'title'; sfx.ui(); return; }
         if (inRect(p, ...ERA_BTNS.mute)) { setMuted(!muted); continue; }
-        if (inRect(p, ...ERA_BTNS.play) && LOAD[e].ready && open(eraSel)) { playLevel(lvAt(uiSeason, e, eraSel)); return; }
+        if (inRect(p, ...ERA_BTNS.play) && LOAD[e].ready && open(eraSel)) { playLevel(lvAt(uiSeason, pl, eraSel)); return; }
         for (let k = 0; k < ERA_LEVELS; k++) if (inRect(p, ...eraTile(k))) {
-          if (open(k) && LOAD[e].ready) { eraSel = k; playLevel(lvAt(uiSeason, e, k)); return; }
+          if (open(k) && LOAD[e].ready) { eraSel = k; playLevel(lvAt(uiSeason, pl, k)); return; }
           if (!open(k)) sfx.blocked();
         }
       }
@@ -3259,13 +3376,13 @@ const scenes = {
     update() {
       if (pressed('Escape') || pressed('Enter') || pressed('Space') || pressed('KeyL') || pressed('Backspace')) { scene = 'title'; sfx.ui(); return; }
       if (pressed('ArrowRight')) statsEra = Math.max(0, statsEra - 1);
-      if (pressed('ArrowLeft')) statsEra = Math.min(ERAS.length - 1, statsEra + 1);
+      if (pressed('ArrowLeft')) statsEra = Math.min(EPS - 1, statsEra + 1);
       let p;
       while ((p = takeTap())) {
         if (inRect(p, ...STATS_BTNS.back)) { scene = 'title'; sfx.ui(); return; }
         if (inRect(p, ...STATS_SEASON.prev)) { stepSeason(-1); continue; }
         if (inRect(p, ...STATS_SEASON.next)) { stepSeason(1); continue; }
-        for (let k = 0; k < ERAS.length; k++) if (inRect(p, ...statTab(k))) { statsEra = k; sfx.ui(); }
+        for (let k = 0; k < EPS; k++) if (inRect(p, ...statTab(k))) { statsEra = k; sfx.ui(); }
         if (inRect(p, ...STATS_BTNS.clear)) {
           if (gt - statsClearT < 3) { logClear(); statsClearT = -9; sfx.undo(); events.push({ type: 'log-cleared' }); }
           else { statsClearT = gt; sfx.ui(); }
@@ -3351,7 +3468,7 @@ const scenes = {
 // "انتقلت إلى" scene draw their own waiting state.
 function waitingFor() {
   if (!titleImg.done) return -1;
-  if (scene === 'figures') { const e = LOAD.findIndex(g => !g.ready); if (e >= 0) { ERAS.forEach((_, k) => requestEra(k)); return -2; } return null; }
+  if (scene === 'figures') { const ids = [0, 1, 2, 3, 4].map(k => FIG_WORLD * EPS + k); if (ids.some(k => !LOAD[k].ready)) { ids.forEach(requestEra); return -2; } return null; }
   if (scene === 'title' || scene === 'stats') return LOAD[bootEra].ready ? null : bootEra;
   if (scene === 'play' || scene === 'over' || scene === 'results') { const e = eraOf(state.level); requestEra(e); return LOAD[e].ready ? null : e; }
   return null;
@@ -3417,7 +3534,7 @@ window.game = {
 {
   const want = Math.floor(Number(params.get('level')) || 0);
   bootEra = eraOf(want >= 1 ? Math.min(want, tune.levels) : nextLevel());
-  loadQueue = ERAS.map((_, k) => (bootEra + 1 + k) % ERAS.length).filter(k => k !== bootEra);
+  queueWorld(bootEra);
   titleImg = getImg('title.jpg');
   requestEra(bootEra);
 }
