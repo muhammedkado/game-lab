@@ -567,14 +567,6 @@ function shadowOf(img) {
   o.globalAlpha = 0.3; o.drawImage(s, pad, pad);
   return { c, pad, w, h };
 }
-// Dreamina's two small AI marks (in the 1080x1920 images' pixels), the same on all six images.
-// Overlays that dim the screen draw these two corners back from the image so they stay visible.
-const MARKS = [[10, 10, 62, 56], [776, 1834, 300, 80]];
-function keepMarks(img) {
-  if (!okImg(img)) return;
-  const k = W / img.naturalWidth;
-  for (const [x, y, w, h] of MARKS) ctx.drawImage(img, x, y, w, h, x * k, y * k, w * k, h * k);
-}
 
 // ---- The look: palette, vehicles, riders, stops ------------------------------------------------
 const PAL = [ // the five colours: vehicles, riders' clothes, stop lights
@@ -1056,8 +1048,7 @@ function bigButton(x, y, w, h, label, kind = 'primary') {
 // together and the hand stays on the lot. Three wide bays sit side by side over the road loop's top
 // edge: a vehicle swings up into its bay sideways, its stop drawn along the bay's top kerb, and
 // leaves along the top road, which runs off both sides of the screen. The lot sits in a road loop
-// with rounded corners below it. An 8x10 lot keeps 71 px cells. Nothing is drawn over Dreamina's
-// two AI marks (the bottom road stays clear of the bottom-right one).
+// with rounded corners below it. An 8x10 lot keeps 71 px cells.
 const XL = 26, XR = 694, YT = 398, YB = 1186;         // the road loop round the lot (centre lines)
 const AV = { x0: 56, x1: 664, y0: 430, y1: 1146 };    // the box a lot may use
 const BAY_Y = 322, BAY_X0 = 60, BAY_W = 600;           // where parked vehicles sit; the bays' span
@@ -2348,7 +2339,7 @@ function drawBanner() {
 // The red banner before a "صعبة جداً" level: it slides in, says so, and goes on a tap or by itself.
 function drawWarn() {
   const u = state.t, k = easeOut(clamp(u / 0.35, 0, 1)), y = 470, h = 300;
-  ctx.fillStyle = `rgba(20,0,6,${0.55 * k})`; ctx.fillRect(0, 0, W, H); keepMarks(ERAS[eraNow()].bgImg);
+  ctx.fillStyle = `rgba(20,0,6,${0.55 * k})`; ctx.fillRect(0, 0, W, H);
   ctx.save(); ctx.translate((1 - k) * -W, 0);
   const gr = ctx.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, '#d21f3c'); gr.addColorStop(1, '#7a0a1c');
   ctx.fillStyle = gr; ctx.fillRect(0, y, W, h);
@@ -2458,9 +2449,9 @@ function moodFace(x, y, r, a) { // a drawn face: smiling when calm, flat, then f
 // ---- Overlays ---------------------------------------------------------------------------------
 // A panel over the lot (results, stuck, the extra-stop offer). It pops in: the lot dims, the panel
 // grows from 90% with a small overshoot. Everything drawn until panelEnd() rides on that pop.
-function panel(y0, h, img) {
+function panel(y0, h) {
   const u = clamp((clock.now() - sceneT) / tune.panel_pop, 0, 1), k = 1 - Math.pow(1 - u, 3);
-  ctx.fillStyle = `rgba(4,6,14,${0.62 * k})`; ctx.fillRect(0, 0, W, H); keepMarks(img);
+  ctx.fillStyle = `rgba(4,6,14,${0.62 * k})`; ctx.fillRect(0, 0, W, H);
   ctx.save();
   const cy = y0 + h / 2, sc = 0.9 + 0.1 * k + 0.035 * Math.sin(u * Math.PI);
   ctx.translate(W / 2, cy); ctx.scale(sc, sc); ctx.translate(-W / 2, -cy); ctx.globalAlpha *= Math.min(1, u * 3);
@@ -2514,7 +2505,7 @@ function skipRow(r) { seeOffer('skip_level'); bigButton(...r, 'تخطَّ الم
 function drawOffer() { // the stops are full: one more stop for watching an ad, once per attempt
   drawPlay();
   const skip = canSkip(), B = offerBtns(), dy = skip ? -74 : 0; // with the skip row the panel is taller and its top moves up
-  panel(skip ? 262 : 330, skip ? 852 : 780, ERAS[eraNow()].bgImg);
+  panel(skip ? 262 : 330, skip ? 852 : 780);
   text('المواقف ممتلئة', W / 2, 400 + dy, 54, '#ffb347');
   const front = state.tr[state.S.qi], noun = ERAS[eraNow()].noun;
   if (front) {
@@ -2536,7 +2527,7 @@ function drawOver() {
   if (canTakeExtra()) { drawOffer(); return; }
   drawPlay();
   const skip = canSkip(), B = overBtns(), dy = skip ? -44 : 0;
-  panel(skip ? 316 : 360, skip ? 778 : 690, ERAS[eraNow()].bgImg);
+  panel(skip ? 316 : 360, skip ? 778 : 690);
   text('عالق', W / 2, 440 + dy, 60, '#ff6b81');
   const front = state.tr[state.S.qi], noun = ERAS[eraNow()].noun;
   text('كل المواقف مشغولة،', W / 2, 520 + dy, 32, '#e4ecff');
@@ -2553,7 +2544,7 @@ function drawOver() {
 const RES_BTNS = { next: [130, 820, 460, 108], again: [130, 946, 460, 92] };
 function drawResults() {
   drawPlay();
-  panel(330, 740, ERAS[eraNow()].bgImg);
+  panel(330, 740);
   const L = state.level, last = L >= tune.levels, seasonEnd = !last && L % SEASON_LEVELS === 0, eraEnd = !last && L % ERA_LEVELS === 0;
   text(last ? 'أنهيت كل المواسم!' : seasonEnd ? `أنهيت الموسم ${seasonOf(L) + 1}!` : eraEnd ? `أنهيت ${ERAS[eraOf(L)].name}!` : 'أحسنت!', W / 2, 410, last || eraEnd ? 46 : 58, '#7ef0b0');
   text('وصل كل المسافرين إلى وجهاتهم', W / 2, 478, 30, '#e4ecff');
@@ -2629,7 +2620,7 @@ function drawTitle() {
   ctx.fillStyle = 'rgba(10,8,30,0.72)'; rrect(28, 966, 664, 248, 24); ctx.fill();
   ctx.strokeStyle = 'rgba(255,214,150,0.35)'; ctx.lineWidth = 2; ctx.stroke();
   CONTROLS.forEach((c, i) => text(c, W / 2, 1000 + i * 45, i < 2 ? 28 : 26, i < 2 ? '#ffffff' : '#ffe2a8', 'center', 700));
-  // the art credit (Dreamina's own marks stay visible in the corners)
+  // the art credit
   ctx.fillStyle = 'rgba(10,8,30,0.72)'; rrect(30, 1226, 300, 42, 21); ctx.fill();
   text('الرسومات: Dreamina AI', 180, 1248, 24, '#f2e8ff', 'center', 700);
   if (location.protocol.startsWith('http')) { glassButton(...TITLE_BTNS.home); drawIcon('home', TITLE_BTNS.home[0] + 38, TITLE_BTNS.home[1] + 36, 46, '#f4f8ff'); }
@@ -2645,7 +2636,7 @@ const eraTile = k => k < 3 ? [480 - k * 220, 516, 200, 176] : [370 - (k - 3) * 2
 function drawEraScreen() {
   const e = uiEra, E = ERAS[e];
   drawBackground('era' + e + ':' + (okImg(E.bgImg) ? 1 : 0), null, e);
-  ctx.fillStyle = 'rgba(8,8,20,0.5)'; ctx.fillRect(0, 0, W, H); keepMarks(E.bgImg);
+  ctx.fillStyle = 'rgba(8,8,20,0.5)'; ctx.fillRect(0, 0, W, H);
   textOutline(E.name, W / 2, 148, E.name.length > 14 ? 50 : 58, '#ffffff', 'rgba(20,10,4,0.9)', 10);
   text(`الموسم ${uiSeason + 1} · العصر ${e + 1} من ${ERAS.length}`, W / 2, 210, 28, `rgb(${E.accent})`);
   // its two vehicles, named
@@ -2686,7 +2677,6 @@ function drawUnlock() {
   ctx.fillStyle = gr; ctx.fillRect(0, 0, W, 560);
   const fade = clamp(unlockT / 0.5, 0, 1);
   ctx.fillStyle = `rgba(6,6,16,${0.85 * (1 - fade)})`; ctx.fillRect(0, 0, W, H);
-  keepMarks(E.bgImg);
   const a = clamp(unlockT / 0.4, 0, 1);
   ctx.globalAlpha = a;
   text(unlockLevel > 1 && (unlockLevel - 1) % SEASON_LEVELS === 0 ? `الموسم ${seasonOf(unlockLevel) + 1}: عدت إلى` : 'انتقلت إلى', W / 2, 200, 44, '#ffffff');
@@ -2714,7 +2704,7 @@ const STATS_SEASON = { prev: [590, 188, 76, 54], next: [54, 188, 76, 54] };
 let statsClearT = -9; // a second tap on "clear" within 3 seconds wipes the log
 function drawStats() {
   drawBackground('title', null, -1);
-  ctx.fillStyle = 'rgba(4,6,14,0.66)'; ctx.fillRect(0, 0, W, H); keepMarks(titleImg);
+  ctx.fillStyle = 'rgba(4,6,14,0.66)'; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = 'rgba(0,0,0,0.4)'; rrect(28, 112, 672, 1080, 30); ctx.fill();
   const gr = ctx.createLinearGradient(0, 104, 0, 1184); gr.addColorStop(0, '#1d2444'); gr.addColorStop(1, '#0d1226');
   ctx.fillStyle = gr; rrect(24, 104, 672, 1080, 30); ctx.fill();
@@ -3188,7 +3178,7 @@ function drawFrame() {
   if (live) state.t = t0;
   gt = g0;
   const fa = 1 - (clock.now() - sceneT) / tune.scene_fade;
-  if (fa > 0 && fadeOn) { ctx.fillStyle = `rgba(8,6,18,${0.6 * fa * fa})`; ctx.fillRect(0, 0, W, H); keepMarks(viewEra >= 0 ? ERAS[viewEra].bgImg : titleImg); } // Dreamina's marks stay visible through the fade
+  if (fa > 0 && fadeOn) { ctx.fillStyle = `rgba(8,6,18,${0.6 * fa * fa})`; ctx.fillRect(0, 0, W, H); }
 }
 let shownScene = '', sceneT = -9, fadeOn = false;
 const FADES = { title: 1, era: 1, stats: 1, play: 1, unlock: 1 }; // the panels over the lot (results, stuck) pop in by themselves

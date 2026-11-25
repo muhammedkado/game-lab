@@ -1,37 +1,39 @@
 # Where each file in assets/ came from. Every image was generated with Dreamina on the owner's account
 # (canvas "Sky Taxi · Game Lab", 2026-11-23). Sprite sheets were cut out with Dreamina's image cutout, sliced
 # locally into one sprite per colour, resized and saved as WebP. Full-size originals: design/sky-taxi-art/.
-# Backgrounds keep Dreamina's AI marks. Riders: the modern set was made at the owner's request (bare heads),
+# Backgrounds: Dreamina's two corner marks (the small "AI" label, the logo) were taken off on 2026-11-26 at the
+# owner's request: tools/clean-marks.js refilled the marks' pixels from the picture around them (sources: the six
+# canvas nodes' 1440x2560 downloads). The title screen keeps the credit to Dreamina AI. Riders: the modern set was made at the owner's request (bare heads),
 # the traditional set is an image-to-image variant of it (robes, bare heads). On 2026-11-24 both sets were
 # redrawn facing the viewer (the line now stands above the stops): image-to-image from the back-view sheets,
 # Seedream 4.7 (4.0 is no longer offered), cut out with Dreamina; full sheets in design/sky-taxi-art/riders_*front-full.png.
 - path: assets/bg-1.jpg
   origin: ai
-  tool: "Dreamina; background"
+  tool: "Dreamina; background; corner marks refilled by tools/clean-marks.js (2026-11-26), scaled to 1080x1920"
   model: "seedream_4.0"
   date: 2026-11-23
   ships: true
 - path: assets/bg-2.jpg
   origin: ai
-  tool: "Dreamina; background"
+  tool: "Dreamina; background; corner marks refilled by tools/clean-marks.js (2026-11-26), scaled to 1080x1920"
   model: "seedream_4.0"
   date: 2026-11-23
   ships: true
 - path: assets/bg-3.jpg
   origin: ai
-  tool: "Dreamina; background"
+  tool: "Dreamina; background; corner marks refilled by tools/clean-marks.js (2026-11-26), scaled to 1080x1920"
   model: "seedream_4.0"
   date: 2026-11-23
   ships: true
 - path: assets/bg-4.jpg
   origin: ai
-  tool: "Dreamina; background"
+  tool: "Dreamina; background; corner marks refilled by tools/clean-marks.js (2026-11-26), scaled to 1080x1920"
   model: "seedream_4.0"
   date: 2026-11-23
   ships: true
 - path: assets/bg-5.jpg
   origin: ai
-  tool: "Dreamina; background"
+  tool: "Dreamina; background; corner marks refilled by tools/clean-marks.js (2026-11-26), scaled to 1080x1920"
   model: "seedream_5.0_lite"
   date: 2026-11-23
   ships: true
@@ -337,7 +339,7 @@
   ships: true
 - path: assets/title.jpg
   origin: ai
-  tool: "Dreamina; background"
+  tool: "Dreamina; background; corner marks refilled by tools/clean-marks.js (2026-11-26), scaled to 1080x1920"
   model: "seedream_5.0_lite"
   date: 2026-11-23
   ships: true
