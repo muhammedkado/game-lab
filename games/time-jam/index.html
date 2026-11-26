@@ -438,12 +438,24 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   /** A vehicle is sent: the animal grunts or brays, the engine starts, the rotors spin up. */
   tap(e, big = false, x = W / 2) {
     const m = ERAS[e].move, pan = (x / W * 2 - 1) * 0.6, n = voiceN;
-    if (m === 'sail') { // a boat casts off: water slaps the hull, then its own voice (rigging, a steam toot, an engine, fans)
-      const k = ERAS[e].snd; rush(0.35, 500, 1500, 0.1);
-      if (k === 'steam') { tone(big ? 196 : 233, 0.24, 'square', 0.045, 0.06); tone(big ? 294 : 349, 0.24, 'square', 0.03, 0.06); }
-      else if (k === 'motor') { if (!play('start', n, { rate: big ? 1.05 : 1.2, vol: 0.4, pan, dur: 1.2 })) sweep(90, 260, 0.3, 'sawtooth', 0.06); }
-      else if (k === 'hover') { if (!play('rotor', n, { rate: big ? 1.1 : 1.3, vol: 0.4, pan, dur: 1.1 })) sweep(160, 520, 0.22, 'sawtooth', 0.06); }
-      else { if (!play('creak', n, { rate: 0.8 + hash(n, 3) * 0.3, vol: 0.3, pan })) tone(180, 0.1, 'triangle', 0.06); tone(big ? 880 : 1175, 0.1, 'sine', 0.04, 0.05); }
+    if (m === 'sail') { // a boat casts off, each in its own voice (recorded: design/sea-sfx); synthesized only until they load
+      const k = ERAS[e].snd, r = 0.94 + hash(n, 3) * 0.12; voiceN++;
+      if (k === 'sail') { // the sail fills with a snap, the old wooden hull creaks
+        if (!play('sail', n, { rate: r, vol: big ? 1 : 0.9, pan })) { rush(0.35, 500, 1500, 0.1); tone(180, 0.1, 'triangle', 0.06); }
+        play('hull', n, { rate: (big ? 0.85 : 1) * r, vol: 0.45, pan, delay: 0.12, dur: 1.3 });
+      } else if (k === 'oar') { // the rowing boat pulls on its oars; the fishing boat's engine chugs off
+        if (big) { if (!play('chug', 0, { rate: r, vol: 0.5, pan, dur: 1.6 })) sweep(60, 120, 0.4, 'square', 0.05); }
+        else if (play('oar', n, { rate: r, vol: 0.6, pan })) play('oar', n + 1, { rate: r * 0.97, vol: 0.5, pan, delay: 0.7 });
+        else rush(0.35, 500, 1500, 0.1);
+      } else if (k === 'steam') { // the steam engine pumps and lets off steam
+        if (!play('chuff', n, { rate: (big ? 0.85 : 1) * r, vol: 0.5, pan, dur: 1.3 })) { tone(big ? 196 : 233, 0.24, 'square', 0.045, 0.06); tone(big ? 294 : 349, 0.24, 'square', 0.03, 0.06); }
+        play('hiss', n, { rate: r, vol: 0.22, pan, delay: 0.15, dur: 0.8 });
+      } else if (k === 'motor') { // the boat motor is started and catches
+        if (!play('outstart', 0, { rate: (big ? 0.88 : 1.08) * r, vol: 0.5, pan, dur: 1.8 })) sweep(90, 260, 0.3, 'sawtooth', 0.06);
+      } else { // the hovercraft's fans spin up over the spray
+        rush(0.35, 500, 1500, 0.1);
+        if (!play('rotor', n, { rate: big ? 1.1 : 1.3, vol: 0.4, pan, dur: 1.1 })) sweep(160, 520, 0.22, 'sawtooth', 0.06);
+      }
       return;
     }
     if (m === 'sled') { // a sled is sent: runners bite the snow, then the team's own voice (yips, sleigh bells, an engine, a glider's hum)
@@ -467,7 +479,12 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   blocked() { tone(140, 0.12, 'square', 0.1); tone(104, 0.2, 'square', 0.09, 0.09); },
   dock(e) { // arriving at a stop: a soft clop and bell, a brake hiss and chime, a landing chime
     const m = ERAS[e].move;
-    if (m === 'sail') { rush(0.3, 700, 1800, 0.08); tone(988, 0.22, 'sine', 0.08, 0.05); tone(1319, 0.3, 'sine', 0.045, 0.12); } // water against the quay, the harbour bell
+    if (m === 'sail') { // water slaps the hull against the quay and the boat creaks; the steamer lets off steam and rings its bell
+      const k = ERAS[e].snd, n = voiceN++;
+      if (!play('lap', n, { rate: 0.95 + hash(n, 5) * 0.1, vol: 0.4 })) { rush(0.3, 700, 1800, 0.08); tone(988, 0.22, 'sine', 0.08, 0.05); tone(1319, 0.3, 'sine', 0.045, 0.12); return; }
+      if (k === 'sail' || k === 'oar') play('hull', n + 2, { rate: 1.05, vol: 0.25, delay: 0.1, dur: 1 });
+      else if (k === 'steam') { play('hiss', 0, { rate: 1.1, vol: 0.2, dur: 0.7 }); play('shipbell', 0, { rate: 1.15, vol: 0.22, delay: 0.2, dur: 1.4 }); }
+    }
     else if (m === 'sled') { rush(0.25, 1400, 500, 0.07); tone(1175, 0.2, 'sine', 0.07, 0.05); tone(1760, 0.28, 'sine', 0.035, 0.11); } // runners scrape to a stop, a small bell
     else if (m === 'walk') { tone(1046, 0.25, 'sine', 0.09, 0.05); tone(1568, 0.3, 'sine', 0.04, 0.09); }
     else if (m === 'drive') { if (!(e === 3 && play('door', 0, { rate: 0.95, vol: 0.5, delay: 0.15 }))) rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.08, 0.08); }
@@ -501,12 +518,24 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   warn() { [110, 110, 98].forEach((f, i) => tone(f, 0.22, 'square', 0.12, i * 0.2)); tone(880, 0.5, 'sawtooth', 0.05, 0.6); },
   go(e, big = false, x = W / 2) { // a full ground vehicle leaves through its stop: a happy call, or a horn and the engine pulling away
     const pan = (x / W * 2 - 1) * 0.6, n = voiceN++;
-    if (ERAS[e].move === 'sail') { // a full boat leaves: a bell, a long steam whistle, a horn, or the fans
-      const k = ERAS[e].snd; rush(0.5, 400, 1600, 0.1, 0.1);
-      if (k === 'steam') { for (const f of big ? [220, 277] : [262, 330]) { tone(f, 0.7, 'square', 0.04); tone(f * 1.006, 0.7, 'sine', 0.05); } }
-      else if (k === 'motor') { if (!play('horn', n, { rate: big ? 0.8 : 0.95, vol: 0.28, pan, dur: 0.5 })) tone(330, 0.25, 'square', 0.05); play('away', 0, { rate: 1.15, vol: 0.35, pan, dur: 1.4, delay: 0.25 }); }
-      else if (k === 'hover') { if (!play('rotor', n, { rate: 1.5, vol: 0.4, pan, dur: 1.2 })) sweep(200, 700, 0.5, 'triangle', 0.05); tone(784, 0.1, 'sine', 0.1, 0.05); }
-      else { tone(1320, 0.4, 'sine', 0.05); tone(1760, 0.5, 'sine', 0.03, 0.12); }
+    if (ERAS[e].move === 'sail') { // a full boat leaves: the ship's bell, oars and gulls, the steam whistle, the motor opening up, the fans
+      const k = ERAS[e].snd, gull = n % 3 === 0; // a gull now and then, not every time
+      if (k === 'sail') {
+        if (!play('shipbell', n, { rate: big ? 0.9 : 1.05, vol: 0.42, pan, dur: 1.8 })) { tone(1320, 0.4, 'sine', 0.05); tone(1760, 0.5, 'sine', 0.03, 0.12); }
+        play('sail', n + 1, { rate: 0.95, vol: 0.85, pan, delay: 0.3 });
+        if (gull) play('gull', n, { vol: 0.22, pan: -pan, delay: 0.7 });
+      } else if (k === 'oar') {
+        if (big) { if (!play('chug', 0, { rate: 1.08, vol: 0.5, pan, dur: 2 })) sweep(60, 120, 0.5, 'square', 0.05); }
+        else if (play('oar', n, { vol: 0.6, pan })) play('oar', n + 1, { rate: 1.03, vol: 0.55, pan, delay: 0.6 });
+        else { tone(1320, 0.4, 'sine', 0.05); tone(1760, 0.5, 'sine', 0.03, 0.12); }
+        if (gull || big) play('gull', n + 1, { vol: 0.24, pan: -pan, delay: 0.5 });
+      } else if (k === 'steam') { // a short blast for the launch, the long one for the steamer, then the paddles churn
+        if (!play('whistle', big ? 1 : 0, { rate: big ? 0.92 : 1.12, vol: 0.5, pan, dur: big ? 2.2 : 1.2 })) { for (const f of big ? [220, 277] : [262, 330]) { tone(f, 0.7, 'square', 0.04); tone(f * 1.006, 0.7, 'sine', 0.05); } }
+        play('paddle', 0, { rate: big ? 0.9 : 1.1, vol: 0.35, pan, delay: big ? 0.9 : 0.5, dur: 1.6 });
+      } else if (k === 'motor') { // a toot of the horn, then the motor opens up and goes
+        if (!play('shiphorn', 0, { rate: big ? 1.2 : 1.45, vol: 0.28, pan, dur: big ? 0.7 : 0.45 })) tone(330, 0.25, 'square', 0.05);
+        if (!play('outaway', 0, { rate: big ? 0.9 : 1.08, vol: 0.5, pan, delay: big ? 0.45 : 0.3, dur: 2.2 })) play('away', 0, { rate: 1.15, vol: 0.35, pan, dur: 1.4, delay: 0.25 });
+      } else { rush(0.5, 400, 1600, 0.1, 0.1); if (!play('rotor', n, { rate: 1.5, vol: 0.4, pan, dur: 1.2 })) sweep(200, 700, 0.5, 'triangle', 0.05); tone(784, 0.1, 'sine', 0.1, 0.05); }
       return;
     }
     if (ERAS[e].move === 'sled') { // a full sled leaves: happy yips, a long shake of bells, a horn and the engine, or the glider's rising hum
@@ -684,7 +713,7 @@ const ERAS = [
   // ---- The second world: the sea and its harbours. The same five steps through time, on water: boats sail
   // (they bob at their berths and leave a wake), the stops are quays, the riders are seafarers.
   { name: 'عصر المراكب الشراعية', tab: 'الشراع', bg: 'sea-1', cardY: 0.72, small: 'dhow', big: 'dhow-big', riders: 'rider-sea-old',
-    stop: 'post', cover: 'cloth', move: 'sail', snd: 'oar', noun: 'مركب', garage: 'stable', garageName: 'بيت المراكب',
+    stop: 'post', cover: 'cloth', move: 'sail', snd: 'sail', noun: 'مركب', garage: 'stable', garageName: 'بيت المراكب',
     smallName: 'مركب شراعي', bigName: 'مركب بشراعين', coverName: 'مغطى بالقماش', stopName: 'أعمدة الرسو',
     accent: '255,206,128', base: '#0f3a40', greyTint: '#cfc6b2',
     lot: { lane: 'rgba(255,244,214,0.4)', mat: 'rgba(6,58,66,0.42)', edge: 'rgba(255,236,190,0.78)', cell: 'rgba(255,255,255,0.07)',
