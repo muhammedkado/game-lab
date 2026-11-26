@@ -46,6 +46,9 @@ const KEYS_HELP = ['الأسهم: اختيار · مسافة: انطلاق · U 
 const HAS_KEYS = !!(window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches); // a phone shows no key list
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
+// ?open=all: the owner's review link. Every level may be opened; progress and the play log go to a save of their
+// own, so the real save is never touched and the plain link is as it was. The app has no way to pass it.
+const OPEN_ALL = params.get('open') === 'all';
 let seed;
 function rng() { // mulberry32; every gameplay random call reads this, never Math.random
   seed = (seed + 0x6D2B79F5) | 0;
@@ -535,9 +538,15 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
 
 // ---- Saved progress and personal bests (the game works without storage) -------------------
 // stars: best stars per level; unlocked: the highest level open; seen: eras whose "انتقلت إلى" scene ran.
-const SAVE_KEY = 'time-jam-save-v1';
+const SAVE_KEY = 'time-jam-save-v1' + (OPEN_ALL ? ':open' : '');
 let save = { stars: [], unlocked: 1, seen: 1 };
-try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && Array.isArray(s.stars)) save = Object.assign(save, s); } catch (e) { /* no storage */ }
+try {
+  let s = JSON.parse(localStorage.getItem(SAVE_KEY));
+  if (!s && OPEN_ALL) s = JSON.parse(localStorage.getItem('time-jam-save-v1')); // the review save starts as a copy of the real one
+  if (s && Array.isArray(s.stars)) save = Object.assign(save, s);
+} catch (e) { /* no storage */ }
+// the review link jumps about, so it keeps the eras whose "انتقلت إلى" scene has run one by one (seen only counts up)
+if (OPEN_ALL && !Array.isArray(save.saw)) save.saw = Array.from({ length: save.seen || 1 }, (_, k) => k);
 // A save from the 25-level game: whoever finished level 25 goes straight on to season 2.
 function migrateSave() {
   const top = CONFIG.levels.value; let last = 0;
@@ -553,7 +562,7 @@ function eraStars(e, s = viewSeason) { let n = 0; for (let k = 0; k < ERA_LEVELS
 
 // ---- Local play log: honest per-level numbers for the owner's playtests, on this device only --
 // An attempt counts from its first vehicle tap; firstTryWin is 1 when the very first attempt was won.
-const LOG_KEY = 'gamelab:time-jam:log';
+const LOG_KEY = 'gamelab:time-jam:log' + (OPEN_ALL ? ':open' : '');
 let playLog = { v: 1, levels: {} };
 try { const s = JSON.parse(localStorage.getItem(LOG_KEY)); if (s && s.levels && typeof s.levels === 'object') playLog = s; } catch (e) { /* no storage */ }
 function logRec(L) {
@@ -1918,6 +1927,8 @@ let viewSeason = 0;                         // the season the title's timeline a
 let unlockEra = 1, unlockLevel = 6, unlockT = 0; // the "انتقلت إلى" scene
 let statsEra = 0;                           // the stats panel's era tab
 const nextLevel = () => Math.min(save.unlocked || 1, tune.levels);
+const reach = () => OPEN_ALL ? tune.levels : (save.unlocked || 1); // the highest level that may be opened
+const sawEra = c => OPEN_ALL ? save.saw.includes(c) : c + 1 <= (save.seen || 1); // has this chapter's opening scene run
 function reset() { // ?level=N starts on that level (a tester's shortcut, like ?seed=)
   const want = Math.floor(Number(params.get('level')) || 0);
   startLevel(want >= 1 ? Math.min(want, tune.levels) : nextLevel());
@@ -2201,12 +2212,13 @@ function openEra(e, s = viewSeason) {
 }
 function openUnlock(e, L) {
   unlockEra = e; unlockLevel = L; unlockT = 0; requestEra(e);
+  if (OPEN_ALL && !save.saw.includes(chapOf(L))) save.saw.push(chapOf(L));
   save.seen = Math.max(save.seen || 1, chapOf(L) + 1); persist(); // seen counts chapters (eras across seasons)
   viewSeason = seasonOf(L);
   scene = 'unlock'; sfx.era(); events.push({ type: 'era-unlock', era: e + 1, season: seasonOf(L) + 1 });
 }
 function playLevel(L) { // from a menu: a new era's first visit shows its "انتقلت إلى" scene first
-  if (chapOf(L) + 1 > (save.seen || 1)) { openUnlock(eraOf(L), L); return; }
+  if (!sawEra(chapOf(L))) { openUnlock(eraOf(L), L); return; }
   startLevel(L); scene = 'play'; sfx.ui();
 }
 
@@ -2959,7 +2971,7 @@ function chevron(x, y, s, dir, col) { // a drawn arrow head: dir 1 points right,
   ctx.beginPath(); ctx.moveTo(x - dir * s * 0.22, y - s * 0.4); ctx.lineTo(x + dir * s * 0.22, y); ctx.lineTo(x - dir * s * 0.22, y + s * 0.4); ctx.stroke();
 }
 function seasonBar(vs, y, btns) { // "الموسم 2 من 4" with its two arrows; a season is 25 levels through the five eras
-  const n = nSeasons(), cy = y + 32, locked = vs * SEASON_LEVELS + 1 > (save.unlocked || 1);
+  const n = nSeasons(), cy = y + 32, locked = vs * SEASON_LEVELS + 1 > reach();
   const xr = btns.prev[0] - 14, xl = btns.next[0] + btns.next[2] + 14; // between the two arrows: the season and its world on the right, its stars on the left
   text(`الموسم ${vs + 1}: ${WORLDS[worldOf(vs)].name}`, xr, cy, 28, '#ffffff', 'right', 800);
   if (locked) padlock(xl + 22, cy - 4, 34, '#d7dde8');
@@ -3048,7 +3060,7 @@ function drawTitle() {
   ctx.fillStyle = 'rgba(10,8,30,0.6)'; rrect(28, 398, 664, 712, 26); ctx.fill();
   ctx.strokeStyle = 'rgba(255,214,150,0.45)'; ctx.lineWidth = 2; ctx.stroke();
   // this season's eras: how far the road is open in it (-1: the season is still locked)
-  const vs = viewSeason, open = clamp(chapOf(nextLevel()) - vs * EPS, -1, EPS - 1), cur = chapOf(L) - vs * EPS;
+  const vs = viewSeason, open = clamp(chapOf(OPEN_ALL ? tune.levels : nextLevel()) - vs * EPS, -1, EPS - 1), cur = chapOf(L) - vs * EPS;
   seasonBar(vs, 404, SEASON_BTNS);
   const ry = e => eraRow(e)[1] + 58, rx = 616;
   ctx.strokeStyle = 'rgba(255,214,150,0.55)'; ctx.lineWidth = 6; ctx.lineCap = 'round';
@@ -3073,6 +3085,10 @@ function drawTitle() {
   const sb = TITLE_BTNS.stats;
   glassButton(...sb); drawIcon('chart', sb[0] + sb[2] - 30, sb[1] + 36, 38, '#f4f8ff');
   text('إحصائياتي', sb[0] + 70, sb[1] + 38, 26, '#ffffff');
+  if (OPEN_ALL) { // the review link says so, between the home button and the stats
+    ctx.fillStyle = 'rgba(255,190,61,0.95)'; rrect(144, 22, 274, 52, 26); ctx.fill();
+    textFit('تجربة: كل المراحل مفتوحة', 281, 49, 22, 250, '#2a1600', 'center', 800);
+  }
 }
 
 // ---- The era screen: its five levels -------------------------------------------------------------
@@ -3096,7 +3112,7 @@ function drawEraScreen() {
   if ([0, 1, 2, 3, 4].some(k => levelSpec(lvAt(uiSeason, e % EPS, k)).nGar > 0)) { text(`في هذا العصر: ${E.garageName}`, W / 2, 436, 24, `rgb(${E.accent})`, 'center', 700); }
   // the five level tiles, right to left
   for (let k = 0; k < ERA_LEVELS; k++) {
-    const L = lvAt(uiSeason, e % EPS, k), [x, y, w, h] = eraTile(k), on = L <= (save.unlocked || 1);
+    const L = lvAt(uiSeason, e % EPS, k), [x, y, w, h] = eraTile(k), on = L <= reach();
     glassButton(x, y, w, h, on, k === eraSel && on);
     text('المرحلة', x + w / 2, y + 40, 24, on ? '#dbe6f4' : '#7d8799', 'center', 700);
     text(String(L), x + w / 2, y + 88, 54, on ? '#ffffff' : '#7d8799', 'center', 800);
@@ -3105,7 +3121,7 @@ function drawEraScreen() {
     if (!on) { ctx.fillStyle = 'rgba(6,8,18,0.4)'; rrect(x, y, w, h, 18); ctx.fill(); padlock(x + w - 34, y + 34, 36, '#d7dde8'); }
   }
   const L = lvAt(uiSeason, e % EPS, eraSel);
-  if (LOAD[e].ready) bigButton(...ERA_BTNS.play, L <= (save.unlocked || 1) ? `العب المرحلة ${L}` : 'المرحلة مقفلة', L <= (save.unlocked || 1) ? 'primary' : 'secondary');
+  if (LOAD[e].ready) bigButton(...ERA_BTNS.play, L <= reach() ? `العب المرحلة ${L}` : 'المرحلة مقفلة', L <= reach() ? 'primary' : 'secondary');
   else { rrect(160, 950, 400, 18, 9); ctx.strokeStyle = 'rgba(255,214,150,0.75)'; ctx.lineWidth = 2; ctx.stroke(); rrect(162, 952, 396 * loadProgress([e]), 14, 7); ctx.fillStyle = '#ffbe3d'; ctx.fill(); text('جارٍ تحميل الرسومات', W / 2, 1000, 26, '#ffffff'); }
   text(`نجوم هذا العصر: ${eraStars(e % EPS, uiSeason)} من ${ERA_LEVELS * 3}`, W / 2, 1066, 28, '#ffe2a8');
   if (LOAD[e].ready) for (let c = 0; c < 5; c++) drawRider(244 + c * 58, 1196, c, 82, 1, e, marching(gt, c));
@@ -3463,7 +3479,7 @@ const scenes = {
         if (inRect(p, ...SEASON_BTNS.prev)) { stepSeason(-1); continue; }
         if (inRect(p, ...SEASON_BTNS.next)) { stepSeason(1); continue; }
         for (let e = 0; e < EPS; e++) if (inRect(p, ...eraRow(e))) {
-          if (viewSeason * EPS + e <= chapOf(nextLevel())) openEra(eraAt(viewSeason, e), viewSeason); else { sfx.blocked(); events.push({ type: 'era-locked', era: e + 1, season: viewSeason + 1 }); }
+          if (viewSeason * EPS + e <= chapOf(OPEN_ALL ? tune.levels : nextLevel())) openEra(eraAt(viewSeason, e), viewSeason); else { sfx.blocked(); events.push({ type: 'era-locked', era: e + 1, season: viewSeason + 1 }); }
           return;
         }
       }
@@ -3472,7 +3488,7 @@ const scenes = {
   },
   era: {
     update() {
-      const e = uiEra, pl = e % EPS, open = k => lvAt(uiSeason, pl, k) <= (save.unlocked || 1);
+      const e = uiEra, pl = e % EPS, open = k => lvAt(uiSeason, pl, k) <= reach();
       if (pressed('Escape') || pressed('Backspace')) { scene = 'title'; sfx.ui(); return; }
       if (pressed('ArrowRight')) eraSel = Math.max(0, eraSel - 1); // right to left
       if (pressed('ArrowLeft')) eraSel = Math.min(ERA_LEVELS - 1, eraSel + 1);
