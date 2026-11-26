@@ -26,6 +26,7 @@ window.CONFIG = {
   hints_free: { value: 1, min: 0, max: 9, step: 1 },     // free hints per level attempt (the button shows a move that still wins)
   hint_ad: { value: 1, min: 0, max: 1, step: 1 },        // after the free ones: 1 a hint for watching an ad, 0 no more hints
   hint_nodes: { value: 120000, min: 5000, max: 400000, step: 5000 }, // how far the hint's search may look before it settles for a guess
+  hint_try: { value: 12000, min: 0, max: 200000, step: 1000 },   // search spent looking for a winning tap that suits the head of the line better than the line's next one (0 = never)
   seats_small: { value: 4, min: 2, max: 4, step: 1 },    // seats on a small vehicle (2 cells): camel, donkey, motorbike, car, air taxi
   seats_big: { value: 8, min: 4, max: 8, step: 1 },      // seats on a big vehicle (3 cells): howdah, cart, tuk-tuk, van, air shuttle
   glow_free: { value: 1, min: 0, max: 2, step: 0.1 },      // a soft light round every vehicle that can leave right now (0: none)

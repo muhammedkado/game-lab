@@ -2032,7 +2032,7 @@ function startLevel(L, again) {
     cursor: -1, kbd: false, tapped: false, bannerT: 0, won: false, winT: 0, prevBest: 0, hint: -1,
     extra: 0, extraLeft: tune.extra_gates, extraT: -9, // the extra stop: one per attempt, for watching an ad
     undoAd: false, offerSeen: {},                       // more undos by ad: once per attempt; which ad buttons were shown
-    hints: tune.hints_free, hintId: -1, hintT: -9, nudgeT: -9, // hints: the free ones of this attempt, the vehicle one points at
+    hints: tune.hints_free, hintLine: null, hintId: -1, hintT: -9, nudgeT: -9, // hints: the free ones of this attempt, the vehicle one points at
     revealed: fullMask(n) - lv.hidden, // vehicles whose colour has been seen (only grows)
     counted: false, firstTry: false, // an attempt is logged from its first vehicle tap
     anger: 0, angryHit: false, calmT: 0, grumbleAt: 0, // the line's patience (riders get cross when vehicles are late)
@@ -2259,18 +2259,33 @@ function askSkip() {
   });
 }
 // ---- The hint: the next move on a winning line, shown on the lot until the next tap -------------------
-/** { id }: a vehicle to send now; { dead: true }: no line wins from here (the search ran to its end);
+/** { id }: a vehicle to send now, proved to win (far: its riders are not at the head of the line);
+ *  { dead: true }: no line wins from here (the search ran to its end);
  *  { id, guess: true }: the search ran out of room, so the vehicle the line needs soonest. */
 function hintMove() {
   const lv = state.lv, S = state.S, NG = nGates();
   if (S.gates.length >= NG) return { dead: true };
-  const rest = lv.solution ? lv.solution.filter(i => bit(S.mask, i)) : null; // the dealer's own line is looked at first
-  const r = solve(lv, tune.hint_nodes, S, null, rest, NG);
-  if (r.ok && r.path.length) return { id: r.path[0] };
-  if (r.nodes <= tune.hint_nodes) return { dead: true };
-  const free = lv.taxis.filter(c => canExit(lv, S, c.id) && !isCovered(lv, S.mask, c.id)); if (!free.length) return { dead: true };
-  let best = free[0]; for (const c of free) if (lv.nextCol[S.qi * 5 + c.colour] < lv.nextCol[S.qi * 5 + best.colour]) best = c;
-  return { id: best.id, guess: true };
+  const near = i => lv.nextCol[S.qi * 5 + lv.taxis[i].colour]; // where its first rider stands; S.qi is the head of the line
+  const guide = state.hintLine || lv.solution; // looked at first: the line of the last hint, or the dealer's own
+  const line = m => guide ? guide.filter(i => bit(m, i)) : null;
+  const r = solve(lv, tune.hint_nodes, S, null, line(S.mask), NG);
+  const free = lv.taxis.filter(c => canExit(lv, S, c.id) && !isCovered(lv, S.mask, c.id)).map(c => c.id).sort((a, b) => near(a) - near(b));
+  if (!(r.ok && r.path.length)) {
+    if (r.nodes <= tune.hint_nodes || !free.length) return { dead: true };
+    return { id: free[0], guess: true };
+  }
+  // That line wins, but its next tap may be for riders far down the line while a vehicle for the rider at the
+  // head would win as well. A player reads that as a wrong hint, so a tap whose riders stand nearer is
+  // preferred, proved to win before it is shown.
+  let path = r.path, room = tune.hint_try; const lost = new Set();
+  for (const i of free) {
+    if (near(i) >= near(path[0]) || room <= 0) break;
+    const T = applyTap(S, i, lv), t = solve(lv, room, T, lost, line(T.mask), NG);
+    room -= t.nodes;
+    if (t.ok) { path = [i, ...t.path]; break; }
+  }
+  state.hintLine = path; // a player who follows the hints stays on one line, and the next hint is found at once
+  return { id: path[0], far: near(path[0]) > S.qi };
 }
 /** The hint button. The first hint of an attempt is free, the next ones are for an ad. When no line wins from
  *  here the honest hint is a step back: it is said at once and costs nothing. */
@@ -2281,7 +2296,8 @@ function askHint() {
   if (h.dead) { toast(state.hist.length ? 'لا حل من هنا: تراجع خطوة' : 'أعد المرحلة'); state.nudgeT = state.t; sfx.blocked(); events.push({ type: 'hint-dead', level: state.level }); return; }
   const show = () => {
     state.hintId = h.id; state.hintT = state.t; sfx.ui(); tone(1319, 0.18, 'sine', 0.1, 0.06);
-    const r = logRec(state.level); r.hints = (r.hints || 0) + 1; logSave(); events.push({ type: 'hint', id: h.id, guess: !!h.guess });
+    if (h.far) toast('حرّك هذه أولاً لتفتح الطريق'); // not the colour at the head of the line: say why
+    const r = logRec(state.level); r.hints = (r.hints || 0) + 1; logSave(); events.push({ type: 'hint', id: h.id, guess: !!h.guess, far: !!h.far });
   };
   if (state.hints > 0) { state.hints--; show(); return; }
   if (!(tune.hint_ad > 0)) { toast('انتهت تلميحات هذه المرحلة'); sfx.blocked(); return; }
