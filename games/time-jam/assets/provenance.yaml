@@ -969,3 +969,453 @@
   model: "seedream_4.7"
   date: 2026-11-26
   ships: true
+- path: assets/snow-1.jpg
+  origin: ai
+  tool: "Dreamina; background (tundra camp at dusk), canvas node node_ar46hjps99; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-2.jpg
+  origin: ai
+  tool: "Dreamina; background (winter village), canvas node node_ye5m0qjc0c; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-3.jpg
+  origin: ai
+  tool: "Dreamina; background (snow depot, 1930), canvas node node_91chm163sp; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-4.jpg
+  origin: ai
+  tool: "Dreamina; background (ski resort), canvas node node_00sf259rjf; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-5.jpg
+  origin: ai
+  tool: "Dreamina; background (ice city at night), canvas node node_bdfme5w441; corner marks refilled by tools/clean-marks.js, scaled to 1080x1920"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dog-sled-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (dog sleds, node node_whe4c5h0jx) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dog-sled-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (dog sleds, node node_whe4c5h0jx) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dog-sled-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (dog sleds, node node_whe4c5h0jx) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dog-sled-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (dog sleds, node node_whe4c5h0jx) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/dog-sled-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (dog sleds, node node_whe4c5h0jx) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/reindeer-sled-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (reindeer sleds, node node_vtyx8bd5x9) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/reindeer-sled-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (reindeer sleds, node node_vtyx8bd5x9) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/reindeer-sled-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (reindeer sleds, node node_vtyx8bd5x9) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/reindeer-sled-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (reindeer sleds, node node_vtyx8bd5x9) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/reindeer-sled-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (reindeer sleds, node node_vtyx8bd5x9) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (one-horse sleighs, node node_8xwazbbs1x) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (one-horse sleighs, node node_8xwazbbs1x) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (one-horse sleighs, node node_8xwazbbs1x) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (one-horse sleighs, node node_8xwazbbs1x) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (one-horse sleighs, node node_8xwazbbs1x) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the blue one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-big-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-horse sleighs, node node_3ckz2a737h) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-big-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-horse sleighs, node node_3ckz2a737h) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-big-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-horse sleighs, node node_3ckz2a737h) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-big-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-horse sleighs, node node_3ckz2a737h) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/horse-sleigh-big-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (two-horse sleighs, node node_3ckz2a737h) + Dreamina cutout, tools/sprite-sheet.js; the five did not come out alike, so the purple one is repainted in the five colours (tools/sprite-sheet.js :from), scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/aerosled-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (propeller sleds, node node_bzqvz1hc2m) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/aerosled-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (propeller sleds, node node_bzqvz1hc2m) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/aerosled-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (propeller sleds, node node_bzqvz1hc2m) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/aerosled-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (propeller sleds, node node_bzqvz1hc2m) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/aerosled-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (propeller sleds, node node_bzqvz1hc2m) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-plough-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow plough trucks, node node_0ek0sr5d3x) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-plough-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow plough trucks, node node_0ek0sr5d3x) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-plough-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow plough trucks, node node_0ek0sr5d3x) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-plough-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow plough trucks, node node_0ek0sr5d3x) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-plough-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow plough trucks, node node_0ek0sr5d3x) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snowmobile-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snowmobiles, node node_hhggkf83sn) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snowmobile-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snowmobiles, node node_hhggkf83sn) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snowmobile-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snowmobiles, node node_hhggkf83sn) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snowmobile-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snowmobiles, node node_hhggkf83sn) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snowmobile-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snowmobiles, node node_hhggkf83sn) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-coach-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (tracked snow coaches, node node_w7fb06z4fe) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-coach-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (tracked snow coaches, node node_w7fb06z4fe) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-coach-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (tracked snow coaches, node node_w7fb06z4fe) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-coach-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (tracked snow coaches, node node_w7fb06z4fe) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-coach-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (tracked snow coaches, node node_w7fb06z4fe) + Dreamina cutout, tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-glider-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow gliders, node node_w4z8cmkvqz) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-glider-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow gliders, node node_w4z8cmkvqz) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-glider-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow gliders, node node_w4z8cmkvqz) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-glider-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow gliders, node node_w4z8cmkvqz) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-glider-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow gliders, node node_w4z8cmkvqz) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-shuttle-red.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow shuttles, node node_qvmsjc628x) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-shuttle-blue.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow shuttles, node node_qvmsjc628x) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-shuttle-green.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow shuttles, node node_qvmsjc628x) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-shuttle-yellow.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow shuttles, node node_qvmsjc628x) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/snow-shuttle-purple.webp
+  origin: ai
+  tool: "Dreamina; sprite sliced from a 5-colour sheet (snow shuttles, node node_qvmsjc628x) + Dreamina cutout, tools/sprite-sheet.js; scraps of cast shadow taken off (:wisp)"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-red.webp
+  origin: ai
+  tool: "Dreamina; standing rider (ski-clothes set, image-to-image from the hoodie set, node node_jk7pwnrj5z); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-blue.webp
+  origin: ai
+  tool: "Dreamina; standing rider (ski-clothes set, image-to-image from the hoodie set, node node_jk7pwnrj5z); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-green.webp
+  origin: ai
+  tool: "Dreamina; standing rider (ski-clothes set, image-to-image from the hoodie set, node node_jk7pwnrj5z); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-yellow.webp
+  origin: ai
+  tool: "Dreamina; standing rider (ski-clothes set, image-to-image from the hoodie set, node node_jk7pwnrj5z); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-purple.webp
+  origin: ai
+  tool: "Dreamina; standing rider (ski-clothes set, image-to-image from the hoodie set, node node_jk7pwnrj5z); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-red.webp
+  origin: ai
+  tool: "Dreamina; standing rider (fur-parka set, image-to-image from the robe set, node node_wxmxe76z7c); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-blue.webp
+  origin: ai
+  tool: "Dreamina; standing rider (fur-parka set, image-to-image from the robe set, node node_wxmxe76z7c); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-green.webp
+  origin: ai
+  tool: "Dreamina; standing rider (fur-parka set, image-to-image from the robe set, node node_wxmxe76z7c); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-yellow.webp
+  origin: ai
+  tool: "Dreamina; standing rider (fur-parka set, image-to-image from the robe set, node node_wxmxe76z7c); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-purple.webp
+  origin: ai
+  tool: "Dreamina; standing rider (fur-parka set, image-to-image from the robe set, node node_wxmxe76z7c); cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; tools/sprite-sheet.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-anim-red.webp
+  origin: ai
+  tool: "Dreamina; ski-clothes set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-anim-blue.webp
+  origin: ai
+  tool: "Dreamina; ski-clothes set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-anim-green.webp
+  origin: ai
+  tool: "Dreamina; ski-clothes set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-anim-yellow.webp
+  origin: ai
+  tool: "Dreamina; ski-clothes set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-anim-purple.webp
+  origin: ai
+  tool: "Dreamina; ski-clothes set, image-to-image from the hoodie set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-anim-red.webp
+  origin: ai
+  tool: "Dreamina; fur-parka set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-anim-blue.webp
+  origin: ai
+  tool: "Dreamina; fur-parka set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-anim-green.webp
+  origin: ai
+  tool: "Dreamina; fur-parka set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-anim-yellow.webp
+  origin: ai
+  tool: "Dreamina; fur-parka set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true
+- path: assets/rider-snow-old-anim-purple.webp
+  origin: ai
+  tool: "Dreamina; fur-parka set, image-to-image from the robe set: pose strip (standing, walking A, walking B, cheering), image-to-image sheets; cut out here by tools/white-matte.js (no Dreamina cutout), each figure taken from the sheet where it came out right (tools/sheet-mix.js), enclosed paper removed (tools/punch-holes.js); steps in design/snow-art/build.sh; packed by tools/rider-anim.js"
+  model: "seedream_4.7"
+  date: 2026-11-26
+  ships: true

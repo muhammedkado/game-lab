@@ -13,6 +13,12 @@ window.CONFIG = {
   boat_swell: { value: 1.7, min: 0.2, max: 5, step: 0.1 },      // how quick the swell is
   boat_heel: { value: 0.035, min: 0, max: 0.12, step: 0.005 },  // a moving boat's heel, radians
   wake_len: { value: 0.34, min: 0, max: 1.5, step: 0.05 },       // the wake behind a moving boat, as a share of its length
+  sled_sway: { value: 0.03, min: 0, max: 0.12, step: 0.005 },   // a moving sled's sway on its runners, radians
+  sled_trot: { value: 0.012, min: 0, max: 0.05, step: 0.002 },  // the bob of a team (dogs, reindeer, horses) pulling it, as a share of its size
+  track_len: { value: 0.55, min: 0, max: 1.5, step: 0.05 },     // the two tracks behind a moving sled, as a share of its length
+  snow_flakes: { value: 44, min: 0, max: 160, step: 4 },        // flakes in the air over a snow world's lot
+  snow_fall: { value: 70, min: 10, max: 300, step: 5 },         // how fast they fall, px a second
+  snow_wind: { value: 14, min: -80, max: 80, step: 2 },         // and drift sideways
 
   // The stops and the rules (round 3: three stops, bigger vehicles, more seats)
   gates: { value: 3, min: 2, max: 5, step: 1 },          // stops along the bottom (the free extra one makes 4)

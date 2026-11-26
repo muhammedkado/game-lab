@@ -175,6 +175,8 @@ function tone(freq, dur, type = 'square', vol = 0.3, delay = 0) {
   g.gain.exponentialRampToValueAtTime(0.001, t + dur);
   o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur + 0.02);
 }
+/** Sleigh bells: a handful of small high bells, shaken n times. */
+function jingle(n, vol, delay = 0) { for (let j = 0; j < n; j++) for (const f of [3100, 3900, 4700]) tone(f * (0.97 + hash(j, f) * 0.06), 0.09, 'sine', vol * (0.6 + hash(f, j) * 0.4), delay + j * 0.075 + hash(j + 3, f) * 0.012); }
 // A pitch glide (rotors, engines) and a filtered noise rush (whoosh, dust), both made here.
 function sweep(f0, f1, dur, type, vol, delay = 0) {
   if (!audio || muted) return;
@@ -244,6 +246,12 @@ const STYLES = [
   { root: 53, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 3, 4, 0, 0, 3, 4, 4], bpm: 104, swing: 0.2, kit: 'funk', lead: 'mallet', bass: 'round', bed: 'keys' },  // steamers: a swung promenade tune
   { root: 57, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 3, 0, 4, 0, 3, 4, 0], bpm: 120, swing: 0, kit: 'pop', lead: 'mallet', bass: 'round', bed: 'stab' },     // speedboats: sunny and quick
   { root: 52, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 6, 5, 6, 0, 6, 5, 4], bpm: 126, swing: 0, kit: 'four', lead: 'synth', bass: 'saw', bed: 'pad' },         // the hover port: a night drive
+  // the snow, in the same order as its eras: bells and plucked strings, the cold kept bright
+  { root: 49, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 0, 5, 0, 0, 3, 6, 0], bpm: 92, swing: 0, kit: 'maqsum', lead: 'mallet', bass: 'pluck', bed: 'drone' },   // dog sleds: a minor tune on bells over a frame drum
+  { root: 55, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 3, 4, 0, 5, 3, 4, 0], bpm: 112, swing: 0.12, kit: 'pop', lead: 'qanun', bass: 'pluck', bed: 'keys' },    // horse sleighs: a village dance on plucked strings
+  { root: 58, scale: [0, 2, 3, 5, 7, 9, 10], prog: [0, 3, 0, 4, 0, 3, 4, 0], bpm: 110, swing: 0.24, kit: 'funk', lead: 'clav', bass: 'round', bed: 'stab' },    // snow ploughs: a swung depot shuffle
+  { root: 54, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 5, 3, 4, 0, 5, 3, 4], bpm: 124, swing: 0, kit: 'pop', lead: 'synth', bass: 'round', bed: 'keys' },       // the ski resort: bright and quick
+  { root: 49, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 5, 3, 6, 0, 5, 2, 4], bpm: 124, swing: 0, kit: 'four', lead: 'mallet', bass: 'saw', bed: 'pad' },        // the ice city: bells over four on the floor
 ];
 const RHYTHMS = [[0, 4, 6, 8, 12, 14], [0, 3, 6, 8, 11, 14], [0, 2, 4, 8, 10, 12], [0, 4, 6, 8, 10, 12, 14], [0, 3, 6, 10, 12], [2, 4, 6, 8, 12, 14]];
 const MU = { bus: null, lp: null, dead: false, t: 0, step: 0, bar: 0, bpm: 100, style: -1, seed: -1, A: null, B: null, I: 0, gain: -1, cut: -1, notes: 0 };
@@ -435,6 +443,15 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
       else { if (!play('creak', n, { rate: 0.8 + hash(n, 3) * 0.3, vol: 0.3, pan })) tone(180, 0.1, 'triangle', 0.06); tone(big ? 880 : 1175, 0.1, 'sine', 0.04, 0.05); }
       return;
     }
+    if (m === 'sled') { // a sled is sent: runners bite the snow, then the team's own voice (yips, sleigh bells, an engine, a glider's hum)
+      const k = ERAS[e].snd; rush(0.3, 900, 2600, 0.07);
+      if (k === 'dogs') { for (const d of big ? [0, 0.16] : [0, 0.13, 0.27]) sweep((big ? 300 : 560) * (0.9 + hash(n, 5 + d * 10) * 0.25), big ? 190 : 300, big ? 0.16 : 0.09, 'sawtooth', 0.05, d); } // the dogs yip; the reindeer grunt lower
+      else if (k === 'bells') { jingle(3, 0.05); if (!voice(1, true, pan, 0.7)) tone(big ? 660 : 880, 0.1, 'triangle', 0.04, 0.05); } // sleigh bells, now and then a whinny
+      else if (k === 'engine') { if (!play('start', n, { rate: big ? 0.8 : 1.1, vol: 0.45, pan, dur: 1.3 })) sweep(70, 200, 0.28, 'sawtooth', 0.07); }
+      else if (k === 'ski') { if (!play('moto', n, { rate: big ? 0.8 : 1.25, vol: 0.42, pan, dur: 1.5 })) sweep(110, 320, 0.25, 'sawtooth', 0.06); }
+      else { sweep(big ? 240 : 320, big ? 620 : 880, 0.3, 'sine', 0.06); tone(big ? 988 : 1319, 0.12, 'sine', 0.04, 0.08); }
+      return;
+    }
     if (m === 'walk') { sfx.step(e, big, x); if (!voice(e, big, pan)) tone(e ? 880 : 1175, 0.12, 'sine', 0.05, 0.04); return; }
     if (m === 'drive') {
       if (e === 2 && play('moto', n, { rate: big ? 0.9 : 1, vol: 0.5, pan, dur: 1.8 })) return;  // a motorbike engine starting and running, the tuk-tuk a bit deeper
@@ -448,6 +465,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   dock(e) { // arriving at a stop: a soft clop and bell, a brake hiss and chime, a landing chime
     const m = ERAS[e].move;
     if (m === 'sail') { rush(0.3, 700, 1800, 0.08); tone(988, 0.22, 'sine', 0.08, 0.05); tone(1319, 0.3, 'sine', 0.045, 0.12); } // water against the quay, the harbour bell
+    else if (m === 'sled') { rush(0.25, 1400, 500, 0.07); tone(1175, 0.2, 'sine', 0.07, 0.05); tone(1760, 0.28, 'sine', 0.035, 0.11); } // runners scrape to a stop, a small bell
     else if (m === 'walk') { tone(1046, 0.25, 'sine', 0.09, 0.05); tone(1568, 0.3, 'sine', 0.04, 0.09); }
     else if (m === 'drive') { if (!(e === 3 && play('door', 0, { rate: 0.95, vol: 0.5, delay: 0.15 }))) rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.08, 0.08); }
     else { tone(784, 0.09, 'sine', 0.18); tone(1175, 0.16, 'sine', 0.14, 0.07); }
@@ -486,6 +504,15 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
       else if (k === 'motor') { if (!play('horn', n, { rate: big ? 0.8 : 0.95, vol: 0.28, pan, dur: 0.5 })) tone(330, 0.25, 'square', 0.05); play('away', 0, { rate: 1.15, vol: 0.35, pan, dur: 1.4, delay: 0.25 }); }
       else if (k === 'hover') { if (!play('rotor', n, { rate: 1.5, vol: 0.4, pan, dur: 1.2 })) sweep(200, 700, 0.5, 'triangle', 0.05); tone(784, 0.1, 'sine', 0.1, 0.05); }
       else { tone(1320, 0.4, 'sine', 0.05); tone(1760, 0.5, 'sine', 0.03, 0.12); }
+      return;
+    }
+    if (ERAS[e].move === 'sled') { // a full sled leaves: happy yips, a long shake of bells, a horn and the engine, or the glider's rising hum
+      const k = ERAS[e].snd; rush(0.45, 800, 2400, 0.08, 0.05);
+      if (k === 'dogs') { for (const d of [0, 0.12, 0.3, 0.42]) sweep((big ? 320 : 600) * (0.9 + hash(n, 7 + d * 10) * 0.3), big ? 200 : 320, 0.1, 'sawtooth', 0.045, d); tone(1320, 0.4, 'sine', 0.04, 0.1); }
+      else if (k === 'bells') { jingle(6, 0.045); voice(1, true, pan, 0.8); }
+      else if (k === 'engine') { if (!play('horn', n, { rate: big ? 0.75 : 0.9, vol: 0.28, pan, dur: 0.5 })) tone(294, 0.3, 'square', 0.05); play('away', 0, { rate: big ? 0.85 : 1, vol: 0.4, pan, dur: 1.5, delay: 0.25 }); }
+      else if (k === 'ski') { if (!play('motogo', n, { rate: big ? 0.85 : 1.2, vol: 0.4, pan, dur: 1.8 })) sweep(120, 420, 0.5, 'sawtooth', 0.06); }
+      else { sweep(260, 980, 0.5, 'sine', 0.06); tone(1568, 0.25, 'sine', 0.04, 0.3); }
       return;
     }
     if (ERAS[e].move === 'walk') { tone(1320, 0.4, 'sine', 0.05); voice(e, big, pan, 0.8); return; }
@@ -687,6 +714,49 @@ const ERAS = [
       cellEdge: 'rgba(100,225,255,0.45)', bay: 'rgba(14,36,74,0.36)', bayEdge: 'rgba(110,225,255,0.52)', dash: true,
       floor: 'rgba(60,110,180,0.26)', floorEdge: 'rgba(110,225,255,0.45)', puff: '200,240,255', print: '200,240,255',
       road: 'rgba(10,34,76,0.6)', roadEdge: 'rgba(90,220,255,0.55)', roadDash: 'rgba(160,240,255,0.8)' } },
+  // ---- The third world: the land of snow. Sleds slide (they sway on their runners, leave two tracks and throw
+  // powder; a team of dogs, reindeer or horses breathes while it waits), snow falls over the lot, the riders are
+  // dressed for the cold.
+  { name: 'عصر زلاجات الكلاب', tab: 'الكلاب', bg: 'snow-1', cardY: 0.74, small: 'dog-sled', big: 'reindeer-sled', riders: 'rider-snow-old',
+    stop: 'post', cover: 'cloth', move: 'sled', snd: 'dogs', noun: 'زلاجة', garage: 'tent', garageName: 'خيمة الزلاجات',
+    smallName: 'زلاجة كلاب', bigName: 'زلاجة رنّة', coverName: 'مغطاة بالقماش', stopName: 'أعمدة الربط',
+    accent: '255,198,120', base: '#1b2148', greyTint: '#c6c8d6',
+    lot: { lane: 'rgba(255,255,255,0.42)', mat: 'rgba(22,28,84,0.4)', edge: 'rgba(255,236,200,0.78)', cell: 'rgba(255,255,255,0.07)',
+      cellEdge: 'rgba(255,244,224,0.42)', bay: 'rgba(22,28,84,0.34)', bayEdge: 'rgba(255,236,200,0.68)', dash: true,
+      floor: 'rgba(214,224,255,0.32)', floorEdge: 'rgba(255,226,180,0.62)', puff: '244,248,255', print: '60,70,150',
+      road: 'rgba(40,52,120,0.42)', roadEdge: 'rgba(255,240,214,0.42)', roadDash: 'rgba(255,255,255,0.5)' } },
+  { name: 'عصر زلاجات الخيل', tab: 'الخيل', bg: 'snow-2', cardY: 0.76, small: 'horse-sleigh', big: 'horse-sleigh-big', riders: 'rider-snow-old',
+    stop: 'stall', cover: 'sack', move: 'sled', snd: 'bells', noun: 'زلاجة', garage: 'stable', garageName: 'إسطبل',
+    smallName: 'زلاجة بحصان', bigName: 'زلاجة بحصانين', coverName: 'مغطاة بالخيش', stopName: 'مظلة القرية',
+    accent: '255,214,150', base: '#2a2c44', greyTint: '#c8c8d0',
+    lot: { lane: 'rgba(255,255,255,0.5)', mat: 'rgba(36,48,96,0.5)', edge: 'rgba(255,244,220,0.85)', cell: 'rgba(255,255,255,0.06)',
+      cellEdge: 'rgba(255,250,236,0.5)', bay: 'rgba(36,48,96,0.42)', bayEdge: 'rgba(255,244,220,0.78)', dash: true,
+      floor: 'rgba(70,84,130,0.3)', floorEdge: 'rgba(120,80,40,0.7)', puff: '255,255,255', print: '70,96,160',
+      road: 'rgba(52,70,124,0.46)', roadEdge: 'rgba(255,246,226,0.5)', roadDash: 'rgba(255,255,255,0.6)' } },
+  { name: 'عصر كاسحات الثلج', tab: 'الكاسحات', bg: 'snow-3', cardY: 0.75, small: 'aerosled', big: 'snow-plough', riders: 'rider-snow',
+    stop: 'tin', cover: 'grey', move: 'sled', snd: 'engine', noun: 'عربة', garage: 'shed', garageName: 'ورشة المحطة',
+    smallName: 'زلاجة بمروحة', bigName: 'كاسحة ثلج', coverName: 'غطاء رمادي', stopName: 'سقف التنك',
+    accent: '255,186,110', base: '#1c2430', greyTint: '#c4c8cc',
+    lot: { lane: 'rgba(255,255,255,0.5)', mat: 'rgba(18,28,48,0.46)', edge: 'rgba(255,232,196,0.8)', cell: 'rgba(255,255,255,0.05)',
+      cellEdge: 'rgba(255,240,214,0.46)', bay: 'rgba(18,28,48,0.38)', bayEdge: 'rgba(255,232,196,0.72)', dash: false,
+      floor: 'rgba(226,232,244,0.34)', floorEdge: 'rgba(200,84,56,0.72)', puff: '246,248,252', print: '50,64,96',
+      road: 'rgba(30,42,66,0.5)', roadEdge: 'rgba(255,236,204,0.5)', roadDash: 'rgba(255,255,255,0.6)' } },
+  { name: 'عصر دراجات الثلج', tab: 'الدراجات', bg: 'snow-4', cardY: 0.77, small: 'snowmobile', big: 'snow-coach', riders: 'rider-snow',
+    stop: 'bay', cover: 'grey', move: 'sled', snd: 'ski', noun: 'عربة', garage: 'garage', garageName: 'كراج المنتجع',
+    smallName: 'دراجة ثلج', bigName: 'حافلة ثلج', coverName: 'غطاء رمادي', stopName: 'موقف المنتجع',
+    accent: '255,160,80', base: '#1c3554', greyTint: '#c2c6cc',
+    lot: { lane: 'rgba(255,255,255,0.55)', mat: 'rgba(16,54,104,0.52)', edge: 'rgba(255,255,255,0.9)', cell: 'rgba(255,255,255,0.06)',
+      cellEdge: 'rgba(255,255,255,0.55)', bay: 'rgba(16,54,104,0.44)', bayEdge: 'rgba(255,255,255,0.82)', dash: false,
+      floor: 'rgba(60,96,150,0.3)', floorEdge: 'rgba(255,150,70,0.8)', puff: '255,255,255', print: '60,110,180',
+      road: 'rgba(24,70,128,0.48)', roadEdge: 'rgba(255,255,255,0.6)', roadDash: 'rgba(255,255,255,0.8)' } },
+  { name: 'عصر زلاجات المستقبل', tab: 'المستقبل', bg: 'snow-5', cardY: 0.75, small: 'snow-glider', big: 'snow-shuttle', riders: 'rider-snow',
+    stop: 'glass', cover: 'charge', move: 'sled', snd: 'glide', noun: 'زلاجة', garage: 'hangar', garageName: 'حظيرة شحن',
+    smallName: 'زلاجة مضيئة', bigName: 'مكوك جليدي', coverName: 'زلاجة تشحن', stopName: 'بوابة زجاج',
+    accent: '120,255,224', base: '#050a1c', greyTint: '#b8c2d0',
+    lot: { lane: 'rgba(120,240,255,0.26)', mat: 'rgba(2,8,30,0.52)', edge: 'rgba(110,240,230,0.62)', cell: 'rgba(40,95,150,0.18)',
+      cellEdge: 'rgba(120,240,240,0.45)', bay: 'rgba(12,30,70,0.38)', bayEdge: 'rgba(120,240,230,0.52)', dash: true,
+      floor: 'rgba(60,110,180,0.26)', floorEdge: 'rgba(120,240,230,0.45)', puff: '214,246,255', print: '140,240,255',
+      road: 'rgba(8,28,70,0.6)', roadEdge: 'rgba(110,240,230,0.55)', roadDash: 'rgba(170,250,255,0.8)' } },
 ];
 // A world is five eras in one place; a season plays one world from its oldest era to its newest. Seasons past the
 // last drawn world take the worlds in turn again, with harder deals (config.js: levels, season_start).
@@ -694,6 +764,7 @@ const EPS = 5; // eras per season
 const WORLDS = [
   { name: 'المدينة والطريق', stop: ['موقف', 'المواقف', 'موقفاً'], back: 'عدت إلى', riders: ['ركاب العصور القديمة', 'ركاب العصر الحديث'] },
   { name: 'البحر والموانئ', stop: ['رصيف', 'الأرصفة', 'رصيفاً'], back: 'أبحرت إلى', riders: ['بحّارة الزمن القديم', 'مسافرو البحر'] },
+  { name: 'بلاد الثلج', stop: ['موقف', 'المواقف', 'موقفاً'], back: 'تزلّجت إلى', riders: ['أهل الثلج القدامى', 'متزلّجو اليوم'], snow: true },
 ];
 // The series: a chapter is one era of one season; a level's era is its season's world and its chapter's place in it.
 const SEASON_LEVELS = ERA_LEVELS * EPS;
@@ -735,6 +806,17 @@ const KIND = {
   'water-taxi': { widen: 1.16, aspect: 0.276, zone: [0.24, 0.8], across: 0.2, cov: [0.03, 0.98] },
   'hover-pod': { widen: 1, aspect: 0.51, zone: [0.16, 0.6], across: 0.15, cov: [0.03, 0.97] },
   'hover-ferry': { widen: 1.06, aspect: 0.342, zone: [0.18, 0.78], across: 0.13, cov: [0.03, 0.97] },
+  // the snow: riders sit on the sled behind its team, in the cab, or under the roof; a cover hides the sled, not the team
+  'dog-sled': { widen: 1.25, aspect: 0.32, zone: [0.5, 0.88], across: 0.2, cov: [0.42, 1.0] },
+  'reindeer-sled': { widen: 1.15, aspect: 0.288, zone: [0.56, 0.92], across: 0.2, cov: [0.4, 1.0] },
+  'horse-sleigh': { widen: 1.3, aspect: 0.285, zone: [0.6, 0.9], across: 0.19, cov: [0.44, 1.0] },
+  'horse-sleigh-big': { widen: 1.12, aspect: 0.3, zone: [0.5, 0.92], across: 0.2, cov: [0.38, 1.0] },
+  'aerosled': { widen: 1.15, aspect: 0.355, zone: [0.26, 0.72], across: 0.15, cov: [0.04, 0.96] },
+  'snow-plough': { widen: 1.1, aspect: 0.318, zone: [0.5, 0.94], across: 0.19, cov: [0.1, 0.98] },
+  'snowmobile': { widen: 1.12, aspect: 0.37, zone: [0.38, 0.8], across: 0.15, cov: [0.03, 0.97] },
+  'snow-coach': { widen: 1.08, aspect: 0.321, zone: [0.2, 0.86], across: 0.17, cov: [0.02, 0.98] },
+  'snow-glider': { widen: 1.2, aspect: 0.315, zone: [0.24, 0.72], across: 0.14, cov: [0.03, 0.97] },
+  'snow-shuttle': { widen: 1.1, aspect: 0.318, zone: [0.2, 0.8], across: 0.13, cov: [0.03, 0.97] },
 };
 
 // ---- The art: Dreamina images in assets/ (provenance.yaml), loaded era by era ---------------------
@@ -954,6 +1036,12 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     if (o.gait != null) { sail = o.gait; sway = tune.boat_heel * Math.sin(sail / 60); }
     else if (!cover) { const ph = gt * tune.boat_swell + cx * 0.031 + cy * 0.017; sway = tune.boat_rock * Math.sin(ph); sc *= 1 + tune.boat_bob * Math.sin(ph * 1.3 + 1); }
   }
+  let sled = null; // a sled: under way it sways on its runners (a team trots) and leaves two tracks; a waiting team breathes, a glider hovers
+  if (E.move === 'sled') {
+    const team = E.snd === 'dogs' || E.snd === 'bells';
+    if (o.gait != null) { sled = o.gait; sway = tune.sled_sway * Math.sin(sled / 46); if (team) sc *= 1 + tune.sled_trot * Math.abs(Math.sin(sled / 17)); }
+    else if (!cover && (team || E.snd === 'glide')) sc *= 1 + (team ? 0.008 : 0.011) * Math.sin(gt * (team ? 2.6 : 2.1) + cx * 0.031 + cy * 0.017);
+  }
   ctx.save(); ctx.translate(cx, cy);
   if (drv != null) ctx.translate(Math.sin(drv * 1.9) * tune.rumble, Math.cos(drv * 2.3) * tune.rumble);
   ctx.rotate(ang + sway); ctx.scale(sc * (o.sqA || 1), sc * (o.sqC || 1));
@@ -978,6 +1066,12 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     const L = h * tune.wake_len, ph = ((sail / 30) % 1) * 6;
     for (const sd of [-1, 1]) { ctx.globalAlpha = a0 * 0.7; ctx.beginPath(); ctx.moveTo(sd * w * 0.28, h * 0.44); ctx.quadraticCurveTo(sd * w * 0.4, h * 0.5 + L * 0.5, sd * w * 0.62, h * 0.5 + L + ph); ctx.stroke(); }
     ctx.globalAlpha = a0;
+  }
+  if (sled != null && o.trail !== false) { // the tracks: two runner lines pressed into the snow behind, fading with distance
+    const L = h * tune.track_len, y0 = h * 0.46, gr = ctx.createLinearGradient(0, y0, 0, y0 + L);
+    gr.addColorStop(0, `rgba(${E.lot.print},0.6)`); gr.addColorStop(1, `rgba(${E.lot.print},0)`);
+    ctx.strokeStyle = gr; ctx.lineWidth = Math.max(2, w * 0.07);
+    for (const sd of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sd * w * 0.36, y0); ctx.lineTo(sd * w * 0.36, y0 + L); ctx.stroke(); }
   }
   if (cover < 1) {
     const rig = walkPh != null && okImg(img) ? WALK_RIG[big ? E.big : E.small] : null;
@@ -1048,9 +1142,9 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
 // (cool for air taxis, warm for road vehicles), a trodden chevron in the dust for animals.
 function facingCue(x, y, dx, dy, c, e) {
   const E = ERAS[e];
-  if (E.move === 'walk' || E.move === 'sail') { // a trodden chevron in the dust; for a boat, a ripple off its bow
+  if (E.move === 'walk' || E.move === 'sail' || E.move === 'sled') { // a trodden chevron in the dust; for a boat, a ripple off its bow; for a sled, one swept in the snow
     const px = -dy, py = dx;
-    ctx.strokeStyle = E.move === 'sail' ? `rgba(${E.lot.puff},0.62)` : E.stop === 'post' ? 'rgba(255,236,196,0.7)' : 'rgba(246,236,216,0.68)'; ctx.lineWidth = Math.max(3, c * 0.05); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = E.move !== 'walk' ? `rgba(${E.lot.puff},0.62)` : E.stop === 'post' ? 'rgba(255,236,196,0.7)' : 'rgba(246,236,216,0.68)'; ctx.lineWidth = Math.max(3, c * 0.05); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (let k = 0; k < 2; k++) {
       const d = c * (0.1 + k * 0.14), s = c * 0.11, bx = x + dx * d, by = y + dy * d;
       ctx.globalAlpha = k ? 0.55 : 1;
@@ -2223,8 +2317,22 @@ const FX = {
   smoke: { file: 'fx-smoke.webp', dark: [0, 1, 2, 4, 5, 8], light: [3, 6, 7, 9, 10], wisp: 2.1 }, // grey exhaust, the wisps trail down-left
   spark: { file: 'fx-spark.webp', star: [0, 1, 2, 10, 11, 12], twinkle: [3, 4, 5], flare: [6, 7, 8, 9] },
   wash: { file: 'fx-wash.webp', ring: [0, 2], swirl: [1, 3, 4, 5, 6, 7], disc: [8, 9] },
+  snow: { frames: [0, 1, 2, 3, 4, 5, 6, 7], make: snowSheet },                             // powder snow: the dust clouds, whitened here
 };
-function fxSheets() { return Object.values(FX).map(k => (k.img = k.img || getImg(k.file))); }
+function fxSheets() { return Object.values(FX).filter(k => k.file).map(k => (k.img = k.img || getImg(k.file))); }
+function snowSheet() { // made once from the dust sheet: the colour taken out, lifted to a cold white, the clouds' own shapes kept
+  const S = FX.snow; if (S.cv) return S.cv;
+  const img = FX.dust.img; if (!okImg(img)) return null;
+  try {
+    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = 'saturation'; g.fillStyle = '#808080'; g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = 'screen'; g.fillStyle = '#b6c8e8'; g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = 'destination-in'; g.drawImage(img, 0, 0);
+    S.cv = c;
+  } catch (err) { S.cv = img; } // a browser without those blends: sand-coloured powder rather than none
+  return S.cv;
+}
 const pick = arr => arr[Math.floor(rng() * arr.length) % arr.length];
 /** Spawn one painted effect sprite. size and grow in logical px; rot the sprite's angle; add = glow (lighter blend). */
 function fxs(sheet, frame, x, y, vx, vy, size, grow, life, a, rot, spin, under, add = false) {
@@ -2253,8 +2361,8 @@ function drawParts(under) {
     if (p.life <= 0 || p.under !== under) continue;
     const u = 1 - p.life / p.max, a = clamp(p.life / p.max, 0, 1) * p.a;
     if (p.kind === 4) { // painted sprite: eases in fast, grows with an ease-out, fades out softly
-      const img = p.sheet.img, sz = p.r + p.grow * (1 - (1 - u) * (1 - u)), al = p.a * Math.min(1, u * 9) * (1 - u * u);
-      if (!okImg(img) || al <= 0.01) continue;
+      const img = p.sheet.make ? p.sheet.make() : okImg(p.sheet.img) ? p.sheet.img : null, sz = p.r + p.grow * (1 - (1 - u) * (1 - u)), al = p.a * Math.min(1, u * 9) * (1 - u * u);
+      if (!img || al <= 0.01) continue;
       ctx.save(); ctx.globalAlpha = al; if (p.add) ctx.globalCompositeOperation = 'lighter';
       ctx.translate(p.x + p.vx * LEAD, p.y + p.vy * LEAD); ctx.rotate(p.rot);
       ctx.drawImage(img, p.frame * FX_SLOT, 0, FX_SLOT, FX_SLOT, -sz / 2, -sz / 2, sz, sz);
@@ -2271,8 +2379,22 @@ function puff(x, y, k, rgb, ang = rng() * Math.PI * 2) {
   const mv = ERAS[eraNow()].move, vx = (rng() - 0.5) * 50, vy = (rng() - 0.5) * 50;
   if (mv === 'fly') return fxs(FX.wash, pick(FX.wash.swirl), x, y, vx, vy, 26 * k, 46 * k, 0.6, 0.6, rng() * 6.3, (rng() < 0.5 ? -1 : 1) * 4, true, true);
   if (mv === 'sail') return fxs(FX.wash, pick(FX.wash.swirl), x, y, vx * 0.6, vy * 0.6, 20 * k, 40 * k, 0.7, 0.55, rng() * 6.3, (rng() < 0.5 ? -1 : 1) * 2, true);
+  if (mv === 'sled') return fxs(FX.snow, pick(FX.snow.frames), x, y, vx * 0.7, vy * 0.7 - 10, 20 * k, 42 * k, 0.75, 0.8, ang - FX.dust.wisp + (rng() - 0.5) * 0.6, (rng() - 0.5) * 0.6, true); // powder snow
   if (mv === 'drive') return fxs(FX.smoke, pick(FX.smoke.light), x, y, vx, vy - 20, 22 * k, 44 * k, 0.8, 0.75, ang - FX.smoke.wisp + (rng() - 0.5) * 0.6, (rng() - 0.5) * 0.8, true);
   return fxs(FX.dust, pick(FX.dust.frames), x, y, vx, vy, 22 * k, 46 * k, 0.8, 0.85, ang - FX.dust.wisp + (rng() - 0.5) * 0.6, (rng() - 0.5) * 0.6, true);
+}
+/** Snow falling over a snow world: flakes that drift down and sway. Where each one is comes from the clock alone,
+ *  so nothing is kept from frame to frame. k thins them out (a menu page wants fewer than the lot). */
+function drawSnow(e, k = 1) {
+  if (!WORLDS[Math.floor(e / EPS)].snow) return;
+  const n = Math.round(tune.snow_flakes * k);
+  ctx.fillStyle = e % EPS === 4 ? '#d6f4ff' : '#ffffff';
+  for (let i = 0; i < n; i++) {
+    const z = hash(i, 71), y = ((hash(i, 72) * (H + 40) + gt * tune.snow_fall * (0.55 + z * 0.9)) % (H + 40)) - 20;
+    const x = (((hash(i, 73) * W + Math.sin(gt * (0.5 + z) + i * 1.7) * (10 + z * 16) + gt * tune.snow_wind * (0.4 + z)) % W) + W) % W;
+    ctx.globalAlpha = 0.35 + z * 0.5; ell(x, y, 1.6 + z * 2.8, 1.6 + z * 2.8); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 }
 function floater(text, x, y, size, col, life = 0.8, rise = 60) { state.floats.push({ text, x, y, size, col, t0: state.t, life, rise }); }
 
@@ -2535,6 +2657,7 @@ function drawPlay() {
   drawQueue();
   if (E.move === 'fly') drawGroup(groups.leave, poses, fills);
   drawParts(false);
+  drawSnow(e);
   drawFloats();
   drawHud();
   // first-level hand, the level banner, the red "صعبة جداً" warning
@@ -2997,6 +3120,7 @@ function drawUnlock() {
   if (ready) drawBackground('era' + e + ':1', null, e); else { ctx.fillStyle = E.base; ctx.fillRect(0, 0, W, H); }
   const gr = ctx.createLinearGradient(0, 0, 0, 560); gr.addColorStop(0, 'rgba(6,6,16,0.8)'); gr.addColorStop(1, 'rgba(6,6,16,0)');
   ctx.fillStyle = gr; ctx.fillRect(0, 0, W, 560);
+  if (ready) drawSnow(e);
   const fade = clamp(unlockT / 0.5, 0, 1);
   ctx.fillStyle = `rgba(6,6,16,${0.85 * (1 - fade)})`; ctx.fillRect(0, 0, W, H);
   const a = clamp(unlockT / 0.4, 0, 1);
@@ -3009,7 +3133,7 @@ function drawUnlock() {
     const k = easeOut(u), y = lerp(1420, 720, k), c = 168, fly = E.move === 'fly';
     const alt = fly ? 0.5 * (1 - k) + 0.04 * Math.sin(unlockT * 3) : 0;
     drawVehShadow(W / 2, y, -Math.PI / 2, 2, c * 0.62, alt, e);
-    drawVehicle(W / 2, y, -Math.PI / 2, 2, c * 0.62, e % 5, 0, { era: e, seats: 0, alt, rotor: fly ? 1 : 0, gait: E.move === 'walk' && u < 1 ? (1420 - y) : null });
+    drawVehicle(W / 2, y, -Math.PI / 2, 2, c * 0.62, e % 5, 0, { era: e, seats: 0, alt, rotor: fly ? 1 : 0, gait: (E.move === 'walk' || E.move === 'sled') && u < 1 ? (1420 - y) : null });
     if (E.move !== 'fly' && u < 1) for (let j = 0; j < 3; j++) { ctx.fillStyle = `rgba(${E.lot.puff},${0.3 * (1 - u)})`; ell(W / 2 + (j - 1) * 30, y + c * 0.55 + j * 14, 18 + j * 6, 12 + j * 4); ctx.fill(); }
   } else {
     rrect(160, 700, 400, 18, 9); ctx.strokeStyle = 'rgba(255,214,150,0.75)'; ctx.lineWidth = 2; ctx.stroke();
@@ -3180,7 +3304,7 @@ function updatePlayWorld(dt) {
     const v = state.vc[i], moving = (v.trip && t >= v.trip.t0 && t < v.trip.t1) || (v.leave && v.leave.kind === 'ground' && t >= v.leave.go && t < v.leave.mv.t1);
     const idle = E.move === 'drive' && !v.trip && !v.gone && !v.parked && t >= v.rollT && canExit(lv, state.S, i) && !state.pending;
     if (!moving && !idle) continue;
-    const period = moving ? (E.move === 'fly' ? 0.1 : E.move === 'walk' ? 0.09 : E.move === 'sail' ? 0.11 : 0.07) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
+    const period = moving ? (E.move === 'fly' ? 0.1 : E.move === 'walk' ? 0.09 : E.move === 'sail' ? 0.11 : E.move === 'sled' ? 0.1 : 0.07) : 1.3, ph = moving ? 0 : hash(i, 5) * period;
     if (Math.floor((t + ph) / period) === Math.floor((t - dt + ph) / period)) continue;
     const p = taxiPose(i); if (!p) continue;
     const ca = Math.cos(p.ang), sa = Math.sin(p.ang), back = lv.taxis[i].len * p.cell * 0.5, side = p.cell * 0.28;
@@ -3195,6 +3319,13 @@ function updatePlayWorld(dt) {
       if (!moving) continue;
       for (const sd of [-1, 1]) fxs(FX.wash, pick(FX.wash.swirl), bx - sa * side * sd + jit() * 8, by + ca * side * sd + jit() * 8, -ca * 26 + jit() * 16, -sa * 26 + jit() * 16,
         c * 0.2 * fx, c * 0.5 * fx, 0.8, 0.5, rng() * 6.3, sd * 1.6, true);
+      continue;
+    }
+    if (E.move === 'sled') { // powder flies off both runners and hangs in the air; an engine adds its exhaust
+      if (!moving) continue;
+      for (const sd of [-1, 1]) fxs(FX.snow, pick(FX.snow.frames), bx - sa * side * sd + jit() * 10, by + ca * side * sd + jit() * 10, -ca * 40 + jit() * 28, -sa * 40 + jit() * 28 - 6,
+        c * 0.24 * fx, c * 0.4 * fx, 0.75, 0.8, p.ang - FX.dust.wisp + jit() * 0.5, jit() * 0.6, true);
+      if ((E.snd === 'engine' || E.snd === 'ski') && rng() < 0.45) fxs(FX.smoke, pick(FX.smoke.light), bx, by, -ca * 50 + jit() * 20, -sa * 50 - 16 + jit() * 14, c * 0.16 * fx, c * 0.4 * fx, 0.8, 0.5, p.ang - FX.smoke.wisp + jit() * 0.5, jit() * 0.6, false);
       continue;
     }
     if (E.move === 'walk') { // hooves kick up sand: a cloud behind each side, now and then a bigger one
