@@ -25,6 +25,7 @@ window.CONFIG = {
   undos: { value: 3, min: 0, max: 9, step: 1 },          // free undos per level
   seats_small: { value: 4, min: 2, max: 4, step: 1 },    // seats on a small vehicle (2 cells): camel, donkey, motorbike, car, air taxi
   seats_big: { value: 8, min: 4, max: 8, step: 1 },      // seats on a big vehicle (3 cells): howdah, cart, tuk-tuk, van, air shuttle
+  seat_style: { value: 1, min: 0, max: 1, step: 1 },     // 1: one number on each vehicle, its free seats, counting down to 0; 0: a ring per seat
   levels: { value: 200, min: 5, max: 200, step: 5 },     // levels in the game: 5 per era, 25 per season (a season is one trip through the five eras)
   // Seasons after the first deal from a later stretch of the table below: season k's 25 levels spread over
   // rows season_start[k]+1 .. 25 (the last entry serves every later season), so each season opens with a
@@ -330,6 +331,8 @@ window.CONFIG = {
   speed_air: { value: 1240, min: 300, max: 3000, step: 20 },       // era 5: air taxis
   trip_ease: { value: 0.26, min: 0.05, max: 0.5, step: 0.01 }, // share of a trip spent speeding up, and again braking
   corner_r: { value: 56, min: 10, max: 120, step: 2 },         // radius of the road's rounded corners
+  river_flow: { value: 46, min: 0, max: 160, step: 2 },        // water worlds: how fast the current carries the glints (px/s)
+  river_glints: { value: 44, min: 0, max: 120, step: 2 },      // and how many glints ride on the river
   approach: { value: 150, min: 80, max: 260, step: 5 },        // length of the S that swings a vehicle into its bay
   bump_time: { value: 0.32, min: 0.1, max: 0.8, step: 0.02 },  // the squash and dock bump on arrival
   bob: { value: 0.02, min: 0, max: 0.15, step: 0.005 },         // how much a walking animal bobs (scale)

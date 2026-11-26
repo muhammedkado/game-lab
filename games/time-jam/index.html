@@ -476,7 +476,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
         }
       } else if (k === 'engine') {
         if (!big) { if (!play('prop', 0, { rate: 1.05 * r, vol: 0.5, pan, dur: 2 })) sweep(70, 200, 0.28, 'sawtooth', 0.07); } // the propeller catches and spins up
-        else { if (!play('dieselstart', 0, { rate: r, vol: 0.55, pan, dur: 2 })) sweep(50, 120, 0.4, 'sawtooth', 0.07); rush(0.5, 300, 900, 0.07, 0.3); } // the plough's diesel starts, the blade drops
+        else { if (!play('dieselstart', 0, { rate: r, vol: 0.8, pan, dur: 2 })) sweep(50, 120, 0.4, 'sawtooth', 0.07); rush(0.5, 300, 900, 0.07, 0.3); } // the plough's diesel starts, the blade drops
       } else if (k === 'ski') { if (!play('moto', n, { rate: big ? 0.8 : 1.25, vol: 0.42, pan, dur: 1.5 })) sweep(110, 320, 0.25, 'sawtooth', 0.06); }
       else if (!big) { // the glider: a quick rising whine over its hover tone
         if (!play('zoom', 0, { rate: 1.9 * r, vol: 0.5, pan, dur: 1.3 })) { sweep(320, 880, 0.3, 'sine', 0.06); tone(1319, 0.12, 'sine', 0.04, 0.08); }
@@ -574,7 +574,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
         else { if (!play('jingles', n, { rate: 0.9, vol: 0.5, pan })) jingle(8, 0.045); play('team', n, { vol: 0.5, pan, delay: 0.1 }); play('horse', n, { rate: 0.92, vol: 0.38, pan: pan - 0.25, delay: 0.15, dur: 1.6 }); play('horse', n + 1, { rate: 1.06, vol: 0.34, pan: pan + 0.25, delay: 0.6, dur: 1.5 }); }
       } else if (k === 'engine') {
         if (!big) { if (!play('propgo', 0, { rate: 1.05, vol: 0.5, pan, dur: 2.4 })) sweep(120, 420, 0.5, 'sawtooth', 0.06); }
-        else if (!play('plough', 0, { rate: 0.97, vol: 0.55, pan, dur: 2.6 })) { tone(294, 0.3, 'square', 0.05); sweep(60, 160, 0.6, 'sawtooth', 0.06); }
+        else if (!play('plough', 0, { rate: 0.97, vol: 0.72, pan, dur: 2.6 })) { tone(294, 0.3, 'square', 0.05); sweep(60, 160, 0.6, 'sawtooth', 0.06); }
       } else if (k === 'ski') { if (!play('motogo', n, { rate: big ? 0.85 : 1.2, vol: 0.4, pan, dur: 1.8 })) sweep(120, 420, 0.5, 'sawtooth', 0.06); }
       else if (!big) { if (!play('whoosh2', 0, { rate: 1.2, vol: 0.7, pan, dur: 2 })) { sweep(260, 980, 0.5, 'sine', 0.06); tone(1568, 0.25, 'sine', 0.04, 0.3); } }
       else { if (!play('shuttle', 0, { rate: 0.82, vol: 0.5, pan, dur: 2.6 })) sweep(200, 760, 0.6, 'sine', 0.06); play('zoom', 0, { rate: 1.1, vol: 0.28, pan, delay: 0.4, dur: 2 }); }
@@ -752,7 +752,8 @@ const ERAS = [
     lot: { lane: 'rgba(255,244,214,0.4)', mat: 'rgba(6,58,66,0.42)', edge: 'rgba(255,236,190,0.78)', cell: 'rgba(255,255,255,0.07)',
       cellEdge: 'rgba(255,244,214,0.4)', bay: 'rgba(6,58,66,0.32)', bayEdge: 'rgba(255,236,190,0.68)', dash: true,
       floor: 'rgba(60,170,170,0.22)', floorEdge: 'rgba(255,236,190,0.6)', puff: '236,252,250', print: '236,252,250',
-      road: 'rgba(8,92,104,0.5)', roadEdge: 'rgba(255,240,205,0.5)', roadDash: 'rgba(255,255,255,0.5)' } },
+      road: 'rgba(8,92,104,0.5)', roadEdge: 'rgba(255,240,205,0.5)', roadDash: 'rgba(255,255,255,0.5)',
+      river: { bank: 'rgba(30,52,44,0.5)', foam: 'rgba(240,252,244,0.7)', water: ['#52b9a2', '#33a090', '#22857f'], glint: '240,255,248' } } },
   { name: 'عصر قوارب الصيد', tab: 'الصيد', bg: 'sea-2', cardY: 0.75, small: 'rowboat', big: 'fishing-boat', riders: 'rider-sea-old',
     stop: 'stall', cover: 'sack', move: 'sail', snd: 'oar', noun: 'قارب', garage: 'stable', garageName: 'بيت القوارب',
     smallName: 'قارب تجديف', bigName: 'قارب صيد', coverName: 'مغطى بالخيش', stopName: 'مظلة الصيادين',
@@ -760,7 +761,8 @@ const ERAS = [
     lot: { lane: 'rgba(230,250,244,0.4)', mat: 'rgba(4,46,54,0.45)', edge: 'rgba(226,246,238,0.75)', cell: 'rgba(255,255,255,0.06)',
       cellEdge: 'rgba(226,246,238,0.4)', bay: 'rgba(4,46,54,0.34)', bayEdge: 'rgba(226,246,238,0.65)', dash: true,
       floor: 'rgba(50,150,150,0.22)', floorEdge: 'rgba(226,246,238,0.55)', puff: '232,250,248', print: '232,250,248',
-      road: 'rgba(6,78,88,0.52)', roadEdge: 'rgba(226,246,238,0.5)', roadDash: 'rgba(255,255,255,0.5)' } },
+      road: 'rgba(6,78,88,0.52)', roadEdge: 'rgba(226,246,238,0.5)', roadDash: 'rgba(255,255,255,0.5)',
+      river: { bank: 'rgba(24,44,44,0.5)', foam: 'rgba(232,250,244,0.7)', water: ['#3fa896', '#238a82', '#166e70'], glint: '232,252,246' } } },
   { name: 'عصر البواخر', tab: 'البواخر', bg: 'sea-3', cardY: 0.74, small: 'steam-launch', big: 'steamer', riders: 'rider-sea',
     stop: 'tin', cover: 'grey', move: 'sail', snd: 'steam', noun: 'باخرة', garage: 'shed', garageName: 'ورشة السفن',
     smallName: 'زورق بخاري', bigName: 'باخرة ركاب', coverName: 'غطاء رمادي', stopName: 'رصيف البواخر',
@@ -768,7 +770,8 @@ const ERAS = [
     lot: { lane: 'rgba(255,236,214,0.42)', mat: 'rgba(4,40,40,0.46)', edge: 'rgba(255,226,196,0.78)', cell: 'rgba(255,255,255,0.05)',
       cellEdge: 'rgba(255,232,206,0.42)', bay: 'rgba(4,40,40,0.34)', bayEdge: 'rgba(255,226,196,0.68)', dash: false,
       floor: 'rgba(46,130,120,0.22)', floorEdge: 'rgba(214,110,70,0.7)', puff: '240,244,240', print: '240,244,240',
-      road: 'rgba(6,66,66,0.55)', roadEdge: 'rgba(255,226,196,0.5)', roadDash: 'rgba(255,255,255,0.55)' } },
+      road: 'rgba(6,66,66,0.55)', roadEdge: 'rgba(255,226,196,0.5)', roadDash: 'rgba(255,255,255,0.55)',
+      river: { bank: 'rgba(30,30,24,0.5)', foam: 'rgba(236,246,236,0.65)', water: ['#35958a', '#1f7a74', '#145f60'], glint: '236,250,242' } } },
   { name: 'عصر اللنشات', tab: 'اللنشات', bg: 'sea-4', cardY: 0.76, small: 'speedboat', big: 'water-taxi', riders: 'rider-sea',
     stop: 'bay', cover: 'grey', move: 'sail', snd: 'motor', noun: 'لنش', garage: 'garage', garageName: 'مرفأ مغطى',
     smallName: 'لنش سريع', bigName: 'تاكسي بحري', coverName: 'غطاء رمادي', stopName: 'رصيف المارينا',
@@ -776,7 +779,8 @@ const ERAS = [
     lot: { lane: 'rgba(255,255,255,0.5)', mat: 'rgba(2,44,74,0.42)', edge: 'rgba(255,255,255,0.85)', cell: 'rgba(255,255,255,0.06)',
       cellEdge: 'rgba(255,255,255,0.5)', bay: 'rgba(2,44,74,0.32)', bayEdge: 'rgba(255,255,255,0.78)', dash: false,
       floor: 'rgba(90,200,235,0.2)', floorEdge: 'rgba(255,255,255,0.7)', puff: '255,255,255', print: '255,255,255',
-      road: 'rgba(4,84,128,0.5)', roadEdge: 'rgba(255,255,255,0.6)', roadDash: 'rgba(255,255,255,0.8)' } },
+      road: 'rgba(4,84,128,0.5)', roadEdge: 'rgba(255,255,255,0.6)', roadDash: 'rgba(255,255,255,0.8)',
+      river: { bank: 'rgba(16,70,104,0.4)', foam: 'rgba(255,255,255,0.8)', water: ['#45d2e8', '#1cb6da', '#0f98c6'], glint: '255,255,255' } } },
   { name: 'عصر الحوّامات', tab: 'الحوّامات', bg: 'sea-5', cardY: 0.75, small: 'hover-pod', big: 'hover-ferry', riders: 'rider-sea',
     stop: 'glass', cover: 'charge', move: 'sail', snd: 'hover', noun: 'حوّامة', garage: 'hangar', garageName: 'حوض الشحن',
     smallName: 'حوّامة صغيرة', bigName: 'عبّارة حوّامة', coverName: 'حوّامة تشحن', stopName: 'بوابة زجاج',
@@ -784,7 +788,8 @@ const ERAS = [
     lot: { lane: 'rgba(110,225,255,0.26)', mat: 'rgba(2,10,28,0.5)', edge: 'rgba(90,220,255,0.62)', cell: 'rgba(40,95,150,0.18)',
       cellEdge: 'rgba(100,225,255,0.45)', bay: 'rgba(14,36,74,0.36)', bayEdge: 'rgba(110,225,255,0.52)', dash: true,
       floor: 'rgba(60,110,180,0.26)', floorEdge: 'rgba(110,225,255,0.45)', puff: '200,240,255', print: '200,240,255',
-      road: 'rgba(10,34,76,0.6)', roadEdge: 'rgba(90,220,255,0.55)', roadDash: 'rgba(160,240,255,0.8)' } },
+      road: 'rgba(10,34,76,0.6)', roadEdge: 'rgba(90,220,255,0.55)', roadDash: 'rgba(160,240,255,0.8)',
+      river: { bank: 'rgba(0,0,0,0.5)', foam: 'rgba(110,226,255,0.7)', water: ['#174474', '#10335e', '#0b2548'], glint: '130,232,255' } } },
   // ---- The third world: the land of snow. Sleds slide (they sway on their runners, leave two tracks and throw
   // powder; a team of dogs, reindeer or horses breathes while it waits), snow falls over the lot, the riders are
   // dressed for the cold.
@@ -1169,7 +1174,8 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
   // seats: empty rings; a rider who boarded shows as shoulders in the colour and a bare dark head,
   // popping in as it lands
   const seats = o.seats != null ? o.seats : (big ? tune.seats_big : tune.seats_small), sr0 = seats ? seatRadiusOf(h, w, K, seats, c) : 0;
-  for (let k = 0; k < seats; k++) {
+  const numbered = tune.seat_style === 1; // one number of free seats instead of a ring per seat
+  for (let k = 0; k < (numbered ? 0 : seats); k++) {
     const sl = seatAt(h, w, K, k, seats), x = sl[1], y = -sl[0];
     const sr = o.pop && o.pop.k === k ? sr0 * (1 + 0.6 * Math.sin(o.pop.u * Math.PI)) : sr0;
     if (k < fill) {
@@ -1208,6 +1214,21 @@ function drawVehicle(cx, cy, ang, len, c, ci, fill, o) {
     }
     ctx.restore();
   }
+  if (numbered && o.count != null && seats && cover < 0.98) { // the free seats, upright over the middle of the seats
+    const d = (0.5 - (K.zone[0] + K.zone[1]) / 2) * h;
+    seatBadge(cx + Math.cos(ang) * d, cy + Math.sin(ang) * d, c, o.count, o.pop ? o.pop.u : null, (1 - cover) * (o.alpha != null ? o.alpha : 1));
+  }
+}
+/** How many seats a vehicle still has, as one number on it: it counts down as riders board and turns green at 0,
+ *  when the vehicle leaves. u (0..1) is the little jump it makes when the number has just changed. */
+function seatBadge(x, y, c, n, u, alpha) {
+  const k = u != null ? 1 + 0.38 * Math.sin(u * Math.PI) : 1, r = clamp(c * 0.21, 13, 24) * k, done = n <= 0;
+  ctx.save(); ctx.globalAlpha *= alpha;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ell(x, y + r * 0.14, r * 1.04, r * 1.04); ctx.fill();
+  ctx.fillStyle = done ? '#22b866' : 'rgba(14,20,38,0.9)'; ell(x, y, r, r); ctx.fill();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, r * 0.14); ctx.stroke();
+  text(String(Math.max(0, n)), x, y + r * 0.06, Math.round(r * 1.36), '#ffffff', 'center', 800);
+  ctx.restore();
 }
 // Facing cues on the ground ahead of a parked vehicle's nose: headlight beams for motor vehicles
 // (cool for air taxis, warm for road vehicles), a trodden chevron in the dust for animals.
@@ -2474,6 +2495,65 @@ function floater(text, x, y, size, col, life = 0.8, rise = 60) { state.floats.pu
 
 // ---- Backgrounds painted once into a cached canvas -----------------------------------------------
 function roadLoop(c2) { rrect(XL, YT, XR - XL, YB - YT, tune.corner_r); }
+// ---- A water world has no road: a river runs round the lot and on off both sides of the screen --------
+/** A point on the loop's centre line, s pixels clockwise from the left end of its top edge, o pixels out toward the bank. */
+function loopAt(s, o = 0) {
+  const r = tune.corner_r, a = XR - XL - 2 * r, b = YB - YT - 2 * r, q = Math.PI * r / 2, L = 2 * (a + b) + 4 * q;
+  s = ((s % L) + L) % L;
+  const arc = (cx, cy, a0, u) => { const th = a0 + u / r; return [cx + Math.cos(th) * (r + o), cy + Math.sin(th) * (r + o)]; };
+  if (s < a) return [XL + r + s, YT - o]; s -= a;
+  if (s < q) return arc(XR - r, YT + r, -Math.PI / 2, s); s -= q;
+  if (s < b) return [XR + o, YT + r + s]; s -= b;
+  if (s < q) return arc(XR - r, YB - r, 0, s); s -= q;
+  if (s < a) return [XR - r - s, YB + o]; s -= a;
+  if (s < q) return arc(XL + r, YB - r, Math.PI / 2, s); s -= q;
+  if (s < b) return [XL - o, YB - r - s]; s -= b;
+  return arc(XL + r, YT + r, Math.PI, s);
+}
+const loopLen = () => 2 * (XR - XL + YB - YT - 4 * tune.corner_r) + 2 * Math.PI * tune.corner_r;
+/** The river, painted once: a wet bank, a rim of foam, water in three depths; then foam that breaks the banks'
+ *  ruled edge and a few long ripples lying still. What moves on it is drawn each frame (drawRiver). */
+function paintRiver(R, stroke, seed) {
+  stroke(76, R.bank); stroke(67, R.foam);
+  const hex = c => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)), w = R.water.map(hex);
+  for (let k = 0; k <= 8; k++) { // from the shallows at the bank to the deep middle, in steps too small to see as stripes
+    const u = k / 8 * 2, i = Math.min(1, Math.floor(u)), f = u - i, c = w[i].map((v, j) => Math.round(v + (w[i + 1][j] - v) * f));
+    stroke(61 - k * 5.5, `rgb(${c})`);
+  }
+  const L = loopLen(), foam = (x, y, k) => { ctx.globalAlpha = 0.35 + hash(k, 5) * 0.45; ell(x, y, 2.5 + hash(k, 6) * 4.5, 1.6 + hash(k, 7) * 2.6, hash(k, 8) * 3.1); ctx.fill(); };
+  ctx.fillStyle = R.foam;
+  for (let k = 0, s = 0; s < L; k++, s += 9 + hash(k, seed) * 14) for (const sd of [-1, 1]) { // both banks of the loop (not where the top edge meets the bays)
+    if (hash(k, sd + 3) < 0.35) continue;
+    const [x, y] = loopAt(s, sd * (29 + hash(k, sd + 11) * 4)); if (sd > 0 && y < YT - 20) continue; foam(x, y, k * 2 + sd);
+  }
+  for (let k = 0, x = -20; x < W + 20; k++, x += 9 + hash(k, seed + 1) * 14) { // the river's far bank, and its near bank outside the loop
+    if (hash(k, 21) >= 0.35) foam(x, YT - 29 - hash(k, 22) * 4, k + 900);
+    if ((x < XL - 30 || x > XR + 30) && hash(k, 23) >= 0.35) foam(x, YT + 29 + hash(k, 24) * 4, k + 1900);
+  }
+  ctx.globalAlpha = 1; ctx.lineCap = 'round'; ctx.strokeStyle = `rgba(${R.glint},0.22)`; ctx.lineWidth = 2;
+  for (let k = 0; k < 46; k++) { // long still ripples, following the water
+    const s = hash(k, seed + 31) * L, o = (hash(k, 32) - 0.5) * 44, n = 22 + hash(k, 33) * 30, [x0, y0] = loopAt(s, o), [x1, y1] = loopAt(s + n / 2, o), [x2, y2] = loopAt(s + n, o);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(2 * x1 - (x0 + x2) / 2, 2 * y1 - (y0 + y2) / 2, x2, y2); ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+}
+/** The river's current, each frame: glints that rise, drift downstream and fade. The water comes in along the top
+ *  from the right and leaves on the left; a branch runs down the right side, along the bottom and back up the left. */
+function drawRiver(e) {
+  const R = ERAS[e].lot.river; if (!R || CHEAP) return;
+  const r = tune.corner_r, top = XR - XL - 2 * r, q = Math.PI * r / 2, B0 = top + q, LB = loopLen() - top - 2 * q, v = tune.river_flow, n = tune.river_glints;
+  ctx.save(); ctx.lineCap = 'round';
+  for (let i = 0; i < n; i++) {
+    const T = 2.4 + hash(i, 41) * 2.2, u = gt / T + hash(i, 42), k = Math.floor(u), ph = u - k, al = Math.sin(Math.PI * ph) * (0.3 + hash(i, 43) * 0.35);
+    const o = (hash(i, k + 44) - 0.5) * 46, len = 12 + hash(i, k + 45) * 20, d = v * (0.7 + hash(i, 46) * 0.6) * ph * T;
+    ctx.strokeStyle = `rgba(${R.glint},${al})`; ctx.lineWidth = 1.6 + hash(i, 47) * 1.6; ctx.beginPath();
+    if (i % 4 === 0) { const x = W + 20 - ((hash(i, k + 48) * (W + 40) + d) % (W + 40)); ctx.moveTo(x, YT + o); ctx.lineTo(x - len, YT + o); } // along the top, right to left
+    else { const s = B0 + ((hash(i, k + 49) * LB + d) % (LB - len)), [x0, y0] = loopAt(s, o), [x1, y1] = loopAt(s + len / 2, o), [x2, y2] = loopAt(s + len, o);
+      ctx.moveTo(x0, y0); ctx.quadraticCurveTo(2 * x1 - (x0 + x2) / 2, 2 * y1 - (y0 + y2) / 2, x2, y2); }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 function paintBackground(lv, e) {
   const E = ERAS[e], S = E.lot;
   ctx.fillStyle = E.base; ctx.fillRect(0, 0, W, H);
@@ -2487,7 +2567,8 @@ function paintBackground(lv, e) {
     ctx.beginPath(); ctx.moveTo(-20, YT); ctx.lineTo(W + 20, YT); ctx.stroke();
     ctx.setLineDash([]);
   };
-  strokeRoad(66, S.roadEdge); strokeRoad(58, S.road); strokeRoad(3, S.roadDash, S.dash ? [10, 14] : [22, 16]);
+  if (S.river) paintRiver(S.river, strokeRoad, lv.L);
+  else { strokeRoad(66, S.roadEdge); strokeRoad(58, S.road); strokeRoad(3, S.roadDash, S.dash ? [10, 14] : [22, 16]); }
   // the lot: a darker mat so every colour reads, cells outlined in the era's paint
   const g = lv.geo, c = g.cell;
   ctx.fillStyle = 'rgba(0,0,0,0.18)'; rrect(g.gx - 8, g.gy - 6, c * lv.cols + 20, c * lv.rows + 20, 16); ctx.fill();
@@ -2587,7 +2668,7 @@ function drawGroup(ids, poses, fills) {
     let flash = t - v.flashT < 0.6 ? 0.55 * (1 - (t - v.flashT) / 0.6) * (0.5 + 0.5 * Math.sin((t - v.flashT) * 30)) : 0;
     const full = t - v.fullT < 0.35 ? 0.7 * (1 - (t - v.fullT) / 0.35) : 0;
     drawVehicle(p.x, p.y, p.ang, cm.len, p.cell, cm.colour, v.fillBase + fills[i], {
-      era: e, alt: p.alt, rotor: p.rotor, flash, white: full, seats: cm.seats, cover: coverOf(i), gait: p.gait, breath: p.breath, alpha: p.alpha, sqA: p.sqA, sqC: p.sqC,
+      era: e, alt: p.alt, rotor: p.rotor, flash, white: full, seats: cm.seats, count: cm.seats - v.fillBase - fills[i], cover: coverOf(i), gait: p.gait, breath: p.breath, alpha: p.alpha, sqA: p.sqA, sqC: p.sqC,
       pop: v.popSeat != null && t - v.popT < 0.25 ? { k: v.popSeat, u: (t - v.popT) / 0.25 } : null,
       glow: p.waiting ? `rgba(255,190,60,${0.55 + 0.3 * Math.sin(t * 7)})` : null,
     });
@@ -2681,6 +2762,7 @@ function drawFloats() {
 function drawPlay() {
   const lv = state.lv, S = state.S, t = state.t, NG = nGates(), e = eraNow(), E = ERAS[e];
   drawBackground('lv' + lv.L + ':' + NG + ':' + e + ':' + (okImg(E.bgImg) ? 1 : 0), lv, e);
+  drawRiver(e);
   // stops glow amber when all but one are taken, red when all are
   const taken = S.gates.length, flashG = t - state.flashGatesT < 0.6, pulse = 0.55 + 0.45 * Math.sin(t * 6);
   const gcol = taken === NG || flashG ? `255,70,95` : taken === NG - 1 ? `255,176,40` : null;
@@ -3299,9 +3381,9 @@ function drawFigures() {
     ctx.fillStyle = `rgba(${E.accent},0.08)`; rrect(8, y0 + 2, 704, 172, 16); ctx.fill();
     ctx.strokeStyle = `rgba(${E.accent},0.4)`; ctx.lineWidth = 1.5; ctx.stroke();
     text(`${e - w0 + 1} · ${E.name}`, 700, y0 + 18, 24, `rgb(${E.accent})`, 'right', 800);
-    drawVehShadow(664, cy + 4, -Math.PI / 2, 2, C, 0, e); drawVehicle(664, cy + 4, -Math.PI / 2, 2, C, e % 5, 2, { era: e }); // small, 2 cells
+    drawVehShadow(664, cy + 4, -Math.PI / 2, 2, C, 0, e); drawVehicle(664, cy + 4, -Math.PI / 2, 2, C, e % 5, 2, { era: e, count: tune.seats_small }); // small, 2 cells
     lab(E.smallName, 604, y0 + 160);
-    drawVehShadow(494, cy - 8, 0, 3, C, 0, e); drawVehicle(494, cy - 8, 0, 3, C, (e + 1) % 5, 5, { era: e }); // big, 3 cells
+    drawVehShadow(494, cy - 8, 0, 3, C, 0, e); drawVehicle(494, cy - 8, 0, 3, C, (e + 1) % 5, 5, { era: e, count: tune.seats_big }); // big, 3 cells
     lab(E.bigName, 494, y0 + 134);
     drawVehShadow(326, cy + 4, Math.PI / 2, 2, 62, 0, e); drawVehicle(326, cy + 4, Math.PI / 2, 2, 62, 2, 0, { era: e, cover: 1 });
     lab(E.coverName, 326, y0 + 160, '#d6dcff');
