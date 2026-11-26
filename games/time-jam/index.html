@@ -42,7 +42,7 @@ const PIXEL = false;
 const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif'; // Almarai: vendor/almarai.css
 const TITLE = 'زحمة الزمن · Time Jam';
 const HOWTO = ['اضغط مركبة طريقها مفتوح لتذهب إلى موقف', 'يركب المسافرون المركبة التي بلون ملابسهم'];
-const KEYS_HELP = ['الأسهم: اختيار · مسافة: انطلاق · U تراجع · R إعادة', 'E موقف إضافي · L إحصائياتي · M صوت · Esc رجوع'];
+const KEYS_HELP = ['الأسهم: اختيار · مسافة: انطلاق · U تراجع · R إعادة', 'H تلميح · E موقف إضافي · M صوت · Esc رجوع'];
 const HAS_KEYS = !!(window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches); // a phone shows no key list
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
@@ -593,6 +593,7 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
   whoosh() { if (!play('liftoff', 0, { rate: 1.1, vol: 0.5 })) rush(0.9, 300, 2600, 0.5); sweep(200, 900, 0.7, 'triangle', 0.04); },
   stuck() { tone(392, 0.2, 'sawtooth', 0.1); tone(330, 0.2, 'sawtooth', 0.1, 0.17); tone(247, 0.45, 'sawtooth', 0.1, 0.34); },
   win() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.28, 'triangle', 0.18, i * 0.09)); },
+  star(k) { const f = [784, 988, 1319][k] || 1319; tone(f, 0.3, 'triangle', 0.2); tone(f * 2, 0.4, 'sine', 0.07, 0.03); tone(f * 3, 0.25, 'sine', 0.03, 0.05); }, // a star lands on the win screen: three rising notes
   era() { [392, 523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.34, 'triangle', 0.14, i * 0.08)); rush(1.2, 200, 3000, 0.25, 0.2); },
   undo() { tone(523, 0.07, 'sine', 0.2); tone(392, 0.1, 'sine', 0.2, 0.06); },
   ui() { tone(880, 0.05, 'sine', 0.16); },
@@ -1427,6 +1428,11 @@ function drawIcon(kind, x, y, s, col) {
   } else if (kind === 'chart') { // three bars on a base line: the play log
     ctx.beginPath(); ctx.moveTo(-s * 0.44, s * 0.38); ctx.lineTo(s * 0.44, s * 0.38); ctx.stroke();
     [[-0.3, 0.3], [0, 0.62], [0.3, 0.44]].forEach(([bx, bh]) => { rrect(s * (bx - 0.1), s * (0.3 - bh), s * 0.2, s * bh, s * 0.04); ctx.fill(); });
+  } else if (kind === 'hint') { // a light bulb with three rays
+    ell(0, -s * 0.06, s * 0.25, s * 0.25); ctx.fill();
+    rrect(-s * 0.12, s * 0.17, s * 0.24, s * 0.1, s * 0.03); ctx.fill(); rrect(-s * 0.08, s * 0.31, s * 0.16, s * 0.08, s * 0.03); ctx.fill();
+    ctx.lineWidth = s * 0.075;
+    for (const a of [-2.36, -1.571, -0.78]) { ctx.beginPath(); ctx.moveTo(Math.cos(a) * s * 0.36, -s * 0.06 + Math.sin(a) * s * 0.36); ctx.lineTo(Math.cos(a) * s * 0.48, -s * 0.06 + Math.sin(a) * s * 0.48); ctx.stroke(); }
   } else if (kind === 'gate') { // a small shelter with a plus: the free extra stop
     ctx.lineWidth = s * 0.09;
     ctx.beginPath(); ctx.moveTo(-s * 0.46, -s * 0.2); ctx.lineTo(-s * 0.1, -s * 0.42); ctx.lineTo(s * 0.26, -s * 0.2); ctx.stroke();
@@ -1501,20 +1507,18 @@ const XL = 26, XR = 694, YT = 398, YB = 1186;         // the road loop round the
 const AV = { x0: 56, x1: 664, y0: 430, y1: 1146 };    // the box a lot may use
 const BAY_Y = 322, BAY_X0 = 60, BAY_W = 600;           // where parked vehicles sit; the bays' span
 const DOOR_Y = 264, DOOR_H = 26;                       // each stop, drawn along its bay's top kerb
-const Q_ROW1 = 250, Q_ROW2 = 182, Q_FRONT_X = 516, Q_GAP = 42, Q_PER_ROW = 12; // riders' feet: row 1 by the stops
+const Q_ROW1 = 250, Q_FRONT_X = 516, Q_GAP = 52, Q_VIS = 10; // the line: one row by the stops, its head on the right; riders' feet, their spacing, how many show
+const Q_STRIP = [28, 114, 512, 44];                           // over the line: how many riders of each colour are still to come
 const BANNER_Y = 296, COMBO_Y = YT + 20;               // the level's tip (over the empty bays); combo words, by the bays
-const BTN = { mute: [56, 12, 76, 72], menu: [142, 12, 76, 72], undo: [530, 12, 82, 72], restart: [624, 12, 82, 72] };
+const BTN = { mute: [56, 12, 76, 72], menu: [142, 12, 76, 72], undo: [530, 12, 82, 72], restart: [624, 12, 82, 72], hint: [552, 176, 150, 74] }; // the hint sits beside the head of the line
 // Stops in use now: the config's stops plus the free extra one once it is taken.
 const nGates = () => tune.gates + (state ? state.extra : 0);
 const bayXn = (slot, n) => BAY_X0 + (BAY_W / n) * (slot + 0.5);
 const bayX = slot => bayXn(slot, nGates());
 const bayCellN = n => Math.min(tune.bay_cell, (BAY_W / n - 14) / (3 * tune.veh_fill)); // a big vehicle fits its bay
 const bayCell = () => bayCellN(nGates());
-function slotPos(k) {
-  if (k < Q_PER_ROW) return [Q_FRONT_X - k * Q_GAP, Q_ROW1];
-  if (k < Q_PER_ROW * 2) return [Q_FRONT_X - (Q_PER_ROW - 1) * Q_GAP + (k - Q_PER_ROW) * Q_GAP, Q_ROW2];
-  return [Q_FRONT_X + Q_GAP, Q_ROW2];
-}
+function slotPos(k) { return [Q_FRONT_X - Math.min(k, Q_VIS) * Q_GAP, Q_ROW1]; } // the rider after the last one shown waits just off the left edge
+const lineH = () => tune.rider_h * tune.line_scale; // a rider's height while it stands in the line
 
 // ---- The level dealer: build, then keep only what the solver can win -----------------------
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
@@ -1718,8 +1722,8 @@ function applyTap(S, i, lv, evs) {
 // shared between searches of one level: states fully searched and found lost. `hint`, when given, is
 // a tap order tried first at each step (the dealer's own way out): the search still checks every
 // tap against the rules, it only looks there first. Each state's vehicles are decoded once per node.
-function solve(lv, limit, start, dead, hint) {
-  const n = lv.taxis.length, Q = lv.queue.length, NG = tune.gates, nx = lv.nextCol, T = lv.taxis;
+function solve(lv, limit, start, dead, hint, ng) { // ng: the stops in use, when the player has taken the extra one
+  const n = lv.taxis.length, Q = lv.queue.length, NG = ng || tune.gates, nx = lv.nextCol, T = lv.taxis;
   const pres = new Uint8Array(n), onl = new Uint8Array(n), hid = new Uint8Array(n);
   for (let i = 0; i < n; i++) hid[i] = bit(lv.hidden, i) ? 1 : 0;
   const seen = new Set(), path = []; let nodes = 0;
@@ -2028,6 +2032,7 @@ function startLevel(L, again) {
     cursor: -1, kbd: false, tapped: false, bannerT: 0, won: false, winT: 0, prevBest: 0, hint: -1,
     extra: 0, extraLeft: tune.extra_gates, extraT: -9, // the extra stop: one per attempt, for watching an ad
     undoAd: false, offerSeen: {},                       // more undos by ad: once per attempt; which ad buttons were shown
+    hints: tune.hints_free, hintId: -1, hintT: -9, nudgeT: -9, // hints: the free ones of this attempt, the vehicle one points at
     revealed: fullMask(n) - lv.hidden, // vehicles whose colour has been seen (only grows)
     counted: false, firstTry: false, // an attempt is logged from its first vehicle tap
     anger: 0, angryHit: false, calmT: 0, grumbleAt: 0, // the line's patience (riders get cross when vehicles are late)
@@ -2053,7 +2058,7 @@ function settle() {
   state.tr = lv.queue.map((col, k) => ({ col, x: null, y: null, vx: 0, vy: 0, gait: 0, cheerT: null, runU: null, startT: null, endT: null, taxi: -1, seat: 0, done: k < S.qi, fx0: 0, fy0: 0 }));
   state.qv = S.qi; state.moves = [];
   for (let k = S.qi; k < Math.min(lv.queue.length, S.qi + 26); k++) { const p = slotPos(k - S.qi); state.tr[k].x = p[0]; state.tr[k].y = p[1]; }
-  state.lastBoard = t - 1; state.gateFree = new Array(nGates() + 1).fill(t - 1); state.busyUntil = t; state.fx = [];
+  state.lastBoard = t - 1; state.boardRun = 0; state.gateFree = new Array(nGates() + 1).fill(t - 1); state.busyUntil = t; state.fx = [];
   clearParts();
 }
 // ---- Scheduling a tap's moves: trips, boarding hops, celebrations and departures ---------------
@@ -2125,7 +2130,10 @@ function schedule(evs) {
       state.busyUntil = Math.max(state.busyUntil, mv.t1);
     } else if (ev.type === 'board') {
       const tr = state.tr[ev.qi], arrive = v.trip ? v.trip.t1 + 0.12 : t;
-      tr.startT = Math.max(state.lastBoard + tune.board_interval, arrive, t);
+      // riders leave the line one at a time, each a little sooner after the one before, while the line keeps flowing
+      const run0 = state.boardRun || 0, gap = Math.max(tune.board_min, tune.board_interval * Math.pow(tune.board_accel, run0));
+      state.boardRun = state.lastBoard + gap >= Math.max(arrive, t) ? run0 + 1 : 1; // it had to wait for its vehicle: the pace starts over
+      tr.startT = Math.max(state.lastBoard + gap, arrive, t);
       const run = Math.max(0.08, Math.abs(bayX(Math.max(0, v.slot)) - Q_FRONT_X) / tune.run_speed); // the run along the kerb
       tr.endT = tr.startT + run + tune.board_flight; tr.runU = run / (run + tune.board_flight); tr.taxi = ev.id; tr.seat = ev.seat;
       state.lastBoard = tr.startT; v.lastBoardEnd = tr.endT;
@@ -2184,7 +2192,7 @@ function toast(s) { state.msg = s; state.msgT = state.t; }
 function doTap(i) {
   const lv = state.lv, S = state.S;
   if (!onLot(lv, S.mask, i) || state.pending) return;
-  state.tapped = true; state.hint = -1;
+  state.tapped = true; state.hint = -1; state.hintId = -1;
   if (!canExit(lv, S, i)) { // blocked: shake it, flash the vehicle in the way
     const v = state.vc[i]; v.shakeT = state.t;
     const cm = lv.taxis[i], [dx, dy] = DIRS[cm.d];
@@ -2250,10 +2258,40 @@ function askSkip() {
     if (eraOf(L + 1) !== eraOf(L)) openUnlock(eraOf(L + 1), L + 1); else { startLevel(L + 1); scene = 'play'; sfx.ui(); }
   });
 }
+// ---- The hint: the next move on a winning line, shown on the lot until the next tap -------------------
+/** { id }: a vehicle to send now; { dead: true }: no line wins from here (the search ran to its end);
+ *  { id, guess: true }: the search ran out of room, so the vehicle the line needs soonest. */
+function hintMove() {
+  const lv = state.lv, S = state.S, NG = nGates();
+  if (S.gates.length >= NG) return { dead: true };
+  const rest = lv.solution ? lv.solution.filter(i => bit(S.mask, i)) : null; // the dealer's own line is looked at first
+  const r = solve(lv, tune.hint_nodes, S, null, rest, NG);
+  if (r.ok && r.path.length) return { id: r.path[0] };
+  if (r.nodes <= tune.hint_nodes) return { dead: true };
+  const free = lv.taxis.filter(c => canExit(lv, S, c.id) && !isCovered(lv, S.mask, c.id)); if (!free.length) return { dead: true };
+  let best = free[0]; for (const c of free) if (lv.nextCol[S.qi * 5 + c.colour] < lv.nextCol[S.qi * 5 + best.colour]) best = c;
+  return { id: best.id, guess: true };
+}
+/** The hint button. The first hint of an attempt is free, the next ones are for an ad. When no line wins from
+ *  here the honest hint is a step back: it is said at once and costs nothing. */
+function askHint() {
+  if (scene !== 'play' || state.pending || state.warn || Ads.busy) return;
+  if (state.hintId >= 0 && onLot(state.lv, state.S.mask, state.hintId)) { state.hintT = state.t; sfx.ui(); return; } // still up: point at it again
+  const h = hintMove();
+  if (h.dead) { toast(state.hist.length ? 'لا حل من هنا: تراجع خطوة' : 'أعد المرحلة'); state.nudgeT = state.t; sfx.blocked(); events.push({ type: 'hint-dead', level: state.level }); return; }
+  const show = () => {
+    state.hintId = h.id; state.hintT = state.t; sfx.ui(); tone(1319, 0.18, 'sine', 0.1, 0.06);
+    const r = logRec(state.level); r.hints = (r.hints || 0) + 1; logSave(); events.push({ type: 'hint', id: h.id, guess: !!h.guess });
+  };
+  if (state.hints > 0) { state.hints--; show(); return; }
+  if (!(tune.hint_ad > 0)) { toast('انتهت تلميحات هذه المرحلة'); sfx.blocked(); return; }
+  const lv = state.lv;
+  Ads.rewarded('hint', 'تلميح').then(ok => { if (state.lv !== lv || scene !== 'play') return; if (ok) show(); else toast('لم يكتمل الإعلان: لا تلميح'); });
+}
 function canTakeExtra() { return state.extraLeft > 0 && state.S.gates.length >= nGates(); }
 function takeExtra() {
   if (!canTakeExtra()) return false;
-  state.extra++; state.extraLeft--; state.extraT = state.t; state.gateFree.push(state.t - 1);
+  state.extra++; state.extraLeft--; state.extraT = state.t; state.gateFree.push(state.t - 1); state.hintId = -1;
   state.pending = ''; scene = 'play'; bgKey = '';
   const r = logRec(state.level); r.extraGates = (r.extraGates || 0) + 1; logSave();
   sfx.dock(eraNow()); tone(988, 0.12, 'triangle', 0.2, 0.08); toast(`${stopW(0)} إضافي جاهز`);
@@ -2265,7 +2303,7 @@ function doUndo() {
   if (state.undos <= 0) { if (canRefillUndo()) askUndos(); else toast('انتهت مرات التراجع'); return false; }
   state.S = JSON.parse(state.hist.pop()); state.undos--; state.undosUsed++;
   { const r = logRec(state.level); r.undos++; logSave(); }
-  state.pending = ''; settle(); sfx.undo(); events.push({ type: 'undo' });
+  state.pending = ''; state.hintId = -1; settle(); sfx.undo(); events.push({ type: 'undo' });
   scene = 'play'; return true;
 }
 function doRestart() { const L = state.level; startLevel(L, true); state.tapped = true; state.hint = -1; scene = 'play'; sfx.ui(); events.push({ type: 'restart', level: L }); }
@@ -2603,7 +2641,7 @@ function paintBackground(lv, e) {
     ctx.strokeStyle = S.bayEdge; ctx.lineWidth = S.dash ? 2 : 3; ctx.stroke(); ctx.setLineDash([]);
   }
   // the conveyor where the line waits: two belts (dark hair reads on their light top)
-  for (const [y0, y1] of [[Q_ROW1 - 64, Q_ROW1 + 4], [Q_ROW2 - 62, Q_ROW2 + 6]]) {
+  for (const [y0, y1] of [[Q_ROW1 - lineH() - 8, Q_ROW1 + 6]]) {
     ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(24, y0 - 2, 520, y1 - y0 + 8, 18); ctx.fill();
     rrect(28, y0, 512, y1 - y0, 16);
     if (E.move === 'fly') { ctx.fillStyle = 'rgba(10,18,34,0.45)'; ctx.fill(); }
@@ -2611,9 +2649,6 @@ function paintBackground(lv, e) {
     ctx.strokeStyle = S.floorEdge; ctx.lineWidth = 2; ctx.stroke();
     for (const ex of [36, 532]) { ctx.fillStyle = S.floorEdge; ell(ex, (y0 + y1) / 2, 7, (y1 - y0) / 2 - 6); ctx.fill(); } // the rollers at each end
   }
-  // the turn between the two belts (left) and the head of the line by the stops (right)
-  ctx.strokeStyle = S.floorEdge; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.arc(28, (Q_ROW1 + Q_ROW2) / 2 - 30, 34, Math.PI * 0.5, Math.PI * 1.5); ctx.stroke();
 }
 function paintTitleBg() {
   ctx.fillStyle = '#1a1438'; ctx.fillRect(0, 0, W, H);
@@ -2677,11 +2712,29 @@ function drawGroup(ids, poses, fills) {
 // A pad under each vehicle on the lot in its colour (grey while covered): a stitched rug for the
 // animals, a painted bay for road vehicles, a lit pad for air taxis. Colour reads at phone size even
 // on the thinnest sprites; the square air taxi sits on its pad, centred, not stretched.
-function drawMat(i, e) {
-  const lv = state.lv, cm = lv.taxis[i], g = lv.geo, c = g.cell, E = ERAS[e], cov = coverOf(i);
+const MAT = [0, 0, 0, 0, 0];
+function matBox(i, out = MAT) { // the pad under vehicle i: x, y, width, height, corner
+  const lv = state.lv, cm = lv.taxis[i], g = lv.geo, c = g.cell;
   let c0 = 99, r0 = 99, c1 = -1, r1 = -1;
   cm.cells.forEach(k => { const q = k % lv.cols, r = Math.floor(k / lv.cols); c0 = Math.min(c0, q); c1 = Math.max(c1, q); r0 = Math.min(r0, r); r1 = Math.max(r1, r); });
-  const ins = c * 0.05, x = g.gx + c0 * c + ins, y = g.gy + r0 * c + ins, w = (c1 - c0 + 1) * c - ins * 2, h = (r1 - r0 + 1) * c - ins * 2, rad = c * 0.16;
+  const ins = c * 0.05;
+  out[0] = g.gx + c0 * c + ins; out[1] = g.gy + r0 * c + ins; out[2] = (c1 - c0 + 1) * c - ins * 2; out[3] = (r1 - r0 + 1) * c - ins * 2; out[4] = c * 0.16;
+  return out;
+}
+/** A soft light round a vehicle that can leave right now: the options show at a glance. It breathes slowly,
+ *  each vehicle in its own time; k > 1 makes it the strong light of a hint. */
+function drawGlow(i, k = 1) {
+  const [x, y, w, h, rad] = matBox(i), c = state.lv.geo.cell, p = (0.62 + 0.38 * Math.sin(gt * 2.4 + i * 1.1)) * tune.glow_free * k;
+  ctx.save(); ctx.lineJoin = 'round';
+  for (const [grow, a] of [[c * 0.13, 0.13], [c * 0.08, 0.22], [c * 0.035, 0.6]]) {
+    ctx.strokeStyle = `rgba(255,255,255,${Math.min(1, a * p)})`; ctx.lineWidth = grow * 2; rrect(x, y, w, h, rad); ctx.stroke();
+  }
+  ctx.fillStyle = `rgba(255,255,255,${Math.min(0.5, 0.13 * p)})`; rrect(x, y, w, h, rad); ctx.fill();
+  ctx.restore();
+}
+function drawMat(i, e) {
+  const lv = state.lv, cm = lv.taxis[i], g = lv.geo, c = g.cell, E = ERAS[e], cov = coverOf(i);
+  const [x, y, w, h, rad] = matBox(i);
   const col = cov > 0.5 ? '#9aa1ad' : PAL[cm.colour].base;
   ctx.globalAlpha = 0.34; ctx.fillStyle = col; rrect(x, y, w, h, rad); ctx.fill();
   ctx.globalAlpha = 0.95; ctx.strokeStyle = col; ctx.lineWidth = Math.max(2.5, c * 0.035); ctx.stroke();
@@ -2784,6 +2837,9 @@ function drawPlay() {
     ctx.beginPath(); ctx.moveTo(b.x0, b.y0); ctx.lineTo(b.x1, b.y1); ctx.stroke(); ctx.setLineDash([]);
   }
   // vehicles on their cells: colour pads, facing cues, then shadows, then the vehicles
+  const canGo = tune.glow_free > 0 && !state.pending && !state.warn && scene === 'play' && S.gates.length < NG; // nothing glows while no stop is free
+  if (canGo) for (const i of groups.grid) if (!poses[i].rolling && i !== state.hintId && canExit(lv, S, i) && !isCovered(lv, S.mask, i)) drawGlow(i);
+  if (state.hintId >= 0 && poses[state.hintId] && poses[state.hintId].phase === 'grid') drawGlow(state.hintId, 2.2);
   for (const i of groups.grid) if (!poses[i].rolling) drawMat(i, e);
   for (const i of groups.grid) { if (poses[i].rolling) continue; const q = gridGeom(i), p = poses[i]; facingCue(p.x + q.dx * (q.L / 2 - lv.geo.cell * 0.06), p.y + q.dy * (q.L / 2 - lv.geo.cell * 0.06), q.dx, q.dy, lv.geo.cell, e); }
   drawGroup(groups.grid, poses, fills);
@@ -2821,6 +2877,11 @@ function drawPlay() {
     const q = gridGeom(state.hint), k = Math.sin(t * 5) * 10;
     drawHand(q.cx + 18 + k * 0.5, q.cy + 16 + k, -0.45);
   }
+  if (state.hintId >= 0 && poses[state.hintId] && poses[state.hintId].phase === 'grid' && scene === 'play') { // a hint asked for: its way out, and a hand on it
+    drawLaneFor(state.hintId);
+    const q = gridGeom(state.hintId), k = Math.sin(t * 5) * 10;
+    drawHand(q.cx + 18 + k * 0.5, q.cy + 16 + k, -0.45);
+  }
   if (!state.warn && t - state.bannerT < 4.2 && !state.tapped) { // gone at the first tap, so the bays are clear to watch
     const a = clamp(Math.min((t - state.bannerT) / 0.3, (4.2 - (t - state.bannerT)) / 0.5), 0, 1);
     ctx.globalAlpha = a; drawBanner(); ctx.globalAlpha = 1;
@@ -2852,7 +2913,7 @@ const TIPS = {
   16: 'عصر التكسي: مرائب وطوابير أطول',
   17: 'سيارة الفان 3 خانات و8 ركاب',
   18: 'لون خامس: خطّط قبل أن تضغط',
-  19: 'ساعة الذروة: لا تترك المسافرين ينتظرون',
+  19: 'ساعة الذروة: خطّط للمواقف قبل أن تضغط',
   20: 'آخر التكسي: أصعب زحمة في المدينة',
   21: 'التاكسي الطائر: المواقف في السماء',
   22: 'تاكسي يشحن: يظهر لونه حين يطير جاره',
@@ -2898,10 +2959,11 @@ function drawWarn() {
 // The line: a conveyor of riders. The belt's slats move as the line shuffles forward; riders who have
 // waited too long get cross (they stamp, steam rises, a red mark shows); boarding riders hop on an arc.
 function drawQueue() {
-  const t = state.t, lv = state.lv, Q = lv.queue.length, RH = tune.rider_h, E = ERAS[eraNow()];
-  // the belt's slats (one path per belt)
+  const t = state.t, lv = state.lv, Q = lv.queue.length, RH = tune.rider_h, RL = lineH(), E = ERAS[eraNow()];
+  drawLeft();
+  // the belt's slats
   ctx.save(); ctx.strokeStyle = E.lot.floorEdge; ctx.globalAlpha = 0.5; ctx.lineWidth = 2;
-  for (const [y0, y1, dirn] of [[Q_ROW1 - 60, Q_ROW1, 1], [Q_ROW2 - 58, Q_ROW2 + 2, -1]]) {
+  for (const [y0, y1, dirn] of [[Q_ROW1 - RL - 4, Q_ROW1 + 2, 1]]) {
     const off = ((state.belt * dirn) % 28 + 28) % 28;
     ctx.beginPath();
     for (let x = 40 + off; x < 530; x += 28) { ctx.moveTo(x, y0 + 4); ctx.lineTo(x, y1 - 4); }
@@ -2909,28 +2971,23 @@ function drawQueue() {
   }
   ctx.restore();
   // riders still waiting, back to front so the front one is on top
-  const last = Math.min(Q, state.qv + Q_PER_ROW * 2), ang = state.anger;
+  const last = Math.min(Q, state.qv + Q_VIS), ang = state.anger;
   for (let k = last - 1; k >= state.qv; k--) {
     const tr = state.tr[k]; if (tr.done || tr.x == null || (tr.startT != null && t >= tr.startT)) continue;
     const near = k - state.qv;
     if (near === 0) { // the front rider: a ring in its colour under its feet
-      ctx.fillStyle = 'rgba(255,255,255,0.28)'; ell(tr.x, tr.y - 2, 30, 10); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.28)'; ell(tr.x, tr.y - 2, 30 * tune.line_scale, 10 * tune.line_scale); ctx.fill();
       ctx.strokeStyle = PAL[tr.col].base; ctx.lineWidth = 3.5; ctx.stroke();
     }
     let sx = 0;
     if (ang > 0.35 && near < 14) sx = Math.sin(t * 23 + k) * 1.5 * (ang - 0.35) / 0.65;
     const rx = tr.x + (tr.vx || 0) * LEAD, ry = tr.y + (tr.vy || 0) * LEAD; // between two steps of the simulation
-    drawRider(rx + sx, ry, tr.col, RH, 1, eraNow(), queueMotion(tr, k, near, t, RH));
+    drawRider(rx + sx, ry, tr.col, RL, 1, eraNow(), queueMotion(tr, k, near, t, RL));
     if (ang > 0.6 && near < 10 && (k * 7) % 3 !== 1) { // steam from cross riders
-      const a = (ang - 0.6) / 0.4, ph = (t * 1.3 + k * 0.37) % 1, hx = tr.x + sx, hy = tr.y - RH - 6;
+      const a = (ang - 0.6) / 0.4, ph = (t * 1.3 + k * 0.37) % 1, hx = tr.x + sx, hy = tr.y - RL - 6;
       ctx.fillStyle = `rgba(250,250,255,${0.85 * a * (1 - ph)})`; ell(hx - 8 + ph * 4, hy - ph * 30, 6 + ph * 9, 6 + ph * 9); ctx.fill(); ell(hx + 9 - ph * 3, hy - 6 - ph * 26, 5 + ph * 8, 5 + ph * 8); ctx.fill();
     }
-    if (ang > 0.8 && near < 6) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ell(tr.x + 15, tr.y - RH - 8, 15, 15); ctx.fill(); angerMark(tr.x + 15, tr.y - RH - 8, 11 + 2 * Math.sin(t * 12 + k)); }
-  }
-  const rest = Q - last;
-  if (rest > 0) {
-    ctx.fillStyle = 'rgba(10,12,26,0.85)'; rrect(548, Q_ROW2 - 52, 70, 44, 22); ctx.fill(); ctx.strokeStyle = `rgba(${accent()},0.8)`; ctx.lineWidth = 2; ctx.stroke();
-    text('+' + rest, 583, Q_ROW2 - 29, 26, '#ffffff');
+    if (ang > 0.8 && near < 6) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ell(tr.x + 15, tr.y - RL - 8, 15, 15); ctx.fill(); angerMark(tr.x + 15, tr.y - RL - 8, 11 + 2 * Math.sin(t * 12 + k)); }
   }
   // riders leaving the head of the line one by one: a run along the kerb in front of the others to the
   // spot over their seat, then a jump down into it. The farther the stop, the longer the run.
@@ -2942,12 +2999,30 @@ function drawQueue() {
     if (u < ur) { // running
       const q = u / ur, d = Math.abs(sx - tr.fx0) * q + 18 * Math.min(1, q * 5), ph = d / tune.run_stride;
       m.f = 1 + (Math.floor(ph) & 1); m.lift = Math.abs(Math.sin(ph * Math.PI)) * 4; m.lean = Math.sign(sx - tr.fx0) * 0.15 * Math.min(1, q * 6, (1 - q) * 6 + 0.3);
-      drawRider(lerp(tr.fx0, sx, q), lerp(tr.fy0, lane, Math.min(1, q * 5)), tr.col, RH, 1, eraNow(), m);
+      drawRider(lerp(tr.fx0, sx, q), lerp(tr.fy0, lane, Math.min(1, q * 5)), tr.col, lerp(RL, RH, Math.min(1, q * 3)), 1, eraNow(), m); // it leaves the line at the line's size
     } else { // the jump into the seat: arms up, shrinking into the vehicle
       const q = (u - ur) / (1 - ur), s = lerp(1, 0.42, q * q);
       m.f = 3; m.lift = Math.sin(q * Math.PI) * tune.hop_h * 0.4 * s;
       drawRider(sx, lerp(lane, sy + RH * 0.2, q), tr.col, RH * s, 1 - Math.max(0, q - 0.85) * 3, eraNow(), m);
     }
+  }
+}
+/** Over the line: how many riders are still to come, and how many of each colour. A colour that is done keeps its
+ *  place with a tick, so the strip never shuffles. Counted when the line moves, not every frame. */
+function drawLeft() {
+  const lv = state.lv, Q = lv.queue.length, [x0, y0, w, h] = Q_STRIP, cy = y0 + h / 2;
+  if (!lv.colsUsed) { const u = [0, 0, 0, 0, 0]; for (const c of lv.queue) u[c] = 1; lv.colsUsed = [0, 1, 2, 3, 4].filter(c => u[c]); }
+  if (state.leftAt !== state.qv) { const n = [0, 0, 0, 0, 0]; for (let k = state.qv; k < Q; k++) n[lv.queue[k]]++; state.left = n; state.leftAt = state.qv; }
+  const cw = Math.min(74, (w - 176) / lv.colsUsed.length), ww = 172 + cw * lv.colsUsed.length; let x = x0 + w - 166;
+  ctx.fillStyle = 'rgba(8,10,24,0.72)'; rrect(x0 + w - ww, y0, ww, h, h / 2); ctx.fill();
+  ctx.strokeStyle = `rgba(${accent()},0.45)`; ctx.lineWidth = 1.5; ctx.stroke();
+  text(`الباقون: ${Q - state.qv}`, x0 + w - 18, cy + 1, 24, '#ffffff', 'right', 800);
+  for (const c of lv.colsUsed) { // right to left, each colour: its dot, then its number
+    const n = state.left[c];
+    ctx.globalAlpha = n ? 1 : 0.45;
+    ctx.fillStyle = PAL[c].base; ell(x - 13, cy, 12, 12); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+    if (n) text(String(n), x - 30, cy + 1, 24, '#ffffff', 'right', 800); else checkMark(x - 44, cy, 16, '#8af7c0');
+    ctx.globalAlpha = 1; x -= cw;
   }
 }
 function angerMark(x, y, s) { // a drawn red cross-vein: a rider who has lost patience
@@ -2960,7 +3035,15 @@ function drawHud() {
   glassButton(...b.mute); drawIcon(muted ? 'mute' : 'sound', b.mute[0] + 38, b.mute[1] + 36, 44, '#f4f8ff');
   glassButton(...b.menu); drawIcon('menu', b.menu[0] + 38, b.menu[1] + 36, 40, '#f4f8ff');
   const refill = canRefillUndo(), canUndo = (state.undos > 0 && state.hist.length > 0) || refill;
-  glassButton(...b.undo, canUndo); drawIcon('undo', b.undo[0] + 36, b.undo[1] + 36, 46, canUndo ? '#f4f8ff' : '#7d8da3');
+  glassButton(...b.undo, canUndo, canUndo && state.t - state.nudgeT < 2.2 && Math.sin(state.t * 9) > -0.3); drawIcon('undo', b.undo[0] + 36, b.undo[1] + 36, 46, canUndo ? '#f4f8ff' : '#7d8da3');
+  { // the hint: free once an attempt, then for an ad
+    const hb = b.hint, on = !state.pending && !state.warn, up = state.hintId >= 0, free = state.hints > 0, ad = !free && tune.hint_ad > 0;
+    glassButton(...hb, on, up);
+    drawIcon('hint', hb[0] + hb[2] - 36, hb[1] + 38, 46, on ? '#ffe27a' : '#7d8da3');
+    text('تلميح', hb[0] + 58, hb[1] + (ad ? 27 : 39), 27, on ? '#ffffff' : '#7d8da3', 'center', 800);
+    if (free) { ctx.fillStyle = '#0b7a4b'; ell(hb[0] + 12, hb[1] + 10, 15, 15); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke(); text(String(state.hints), hb[0] + 12, hb[1] + 11, 22, '#fff'); }
+    else if (ad) { seeOffer('hint'); adPill(hb[0] + 8, hb[1] + 44, 0.7); }
+  }
   if (refill) { seeOffer('undo_refill'); adPill(b.undo[0] + 4, b.undo[1] + 50, 0.72); } // out of undos: more for an ad, said on the button
   else {
     ctx.fillStyle = state.undos > 0 ? '#0b7a4b' : '#a3264d'; ell(b.undo[0] + 70, b.undo[1] + 14, 15, 15); ctx.fill();
@@ -2970,14 +3053,23 @@ function drawHud() {
   glassButton(...b.restart); drawIcon('restart', b.restart[0] + 41, b.restart[1] + 36, 46, '#f4f8ff');
   ctx.fillStyle = 'rgba(8,10,24,0.72)'; rrect(226, 8, 296, 98, 22); ctx.fill();
   ctx.strokeStyle = `rgba(${accent()},0.45)`; ctx.lineWidth = 1.5; ctx.stroke();
-  text(`المرحلة ${lv.L}`, lv.tier === 2 ? 450 : lv.tier ? 440 : 374, 32, lv.tier === 2 ? 28 : 32, '#ffffff');
-  if (lv.tier === 1) hardPill(290, 32, 0.9); else if (lv.tier === 2) veryHardPill(304, 32, 0.8);
-  text(`مسافرون ينتظرون: ${lv.queue.length - state.qv}`, 374, 64, 24, '#dbe6f4', 'center', 700);
-  // the line's patience: green when calm, amber, then red when the riders are cross
-  const a = state.anger, x0 = 266, bw = 236;
-  ctx.fillStyle = 'rgba(255,255,255,0.14)'; rrect(x0, 84, bw, 12, 6); ctx.fill();
-  ctx.fillStyle = a < 0.5 ? '#3fe08f' : a < 0.85 ? '#ffb13d' : '#ff3d55'; rrect(x0, 84, Math.max(12, bw * (1 - a)), 12, 6); ctx.fill();
-  moodFace(248, 90, 11, a);
+  if (tune.patience === 1) { // the line has patience: green when calm, amber, then red when the riders are cross
+    text(`المرحلة ${lv.L}`, lv.tier === 2 ? 450 : lv.tier ? 440 : 374, 32, lv.tier === 2 ? 28 : 32, '#ffffff');
+    if (lv.tier === 1) hardPill(290, 32, 0.9); else if (lv.tier === 2) veryHardPill(304, 32, 0.8);
+    text(`مسافرون ينتظرون: ${lv.queue.length - state.qv}`, 374, 64, 24, '#dbe6f4', 'center', 700);
+    const a = state.anger, x0 = 266, bw = 236;
+    ctx.fillStyle = 'rgba(255,255,255,0.14)'; rrect(x0, 84, bw, 12, 6); ctx.fill();
+    ctx.fillStyle = a < 0.5 ? '#3fe08f' : a < 0.85 ? '#ffb13d' : '#ff3d55'; rrect(x0, 84, Math.max(12, bw * (1 - a)), 12, 6); ctx.fill();
+    moodFace(248, 90, 11, a);
+    return;
+  }
+  // a calm game: the level, and a bar that fills as the line empties (nothing runs out, nothing is lost by waiting)
+  text(`المرحلة ${lv.L}`, lv.tier === 2 ? 450 : lv.tier ? 440 : 374, 40, lv.tier === 2 ? 30 : 36, '#ffffff');
+  if (lv.tier === 1) hardPill(290, 40, 0.9); else if (lv.tier === 2) veryHardPill(304, 40, 0.8);
+  const Q = lv.queue.length, u = Q ? clamp(state.qv / Q, 0, 1) : 0, x0 = 248, bw = 252;
+  state.barU = state.barU == null ? u : state.barU + (u - state.barU) * 0.12; // it glides, never jumps
+  ctx.fillStyle = 'rgba(255,255,255,0.14)'; rrect(x0, 74, bw, 16, 8); ctx.fill();
+  if (state.barU > 0.004) { const gr = ctx.createLinearGradient(x0, 0, x0 + bw, 0); gr.addColorStop(0, '#2fd98a'); gr.addColorStop(1, '#8af7c0'); ctx.fillStyle = gr; rrect(x0, 74, Math.max(16, bw * state.barU), 16, 8); ctx.fill(); }
 }
 function moodFace(x, y, r, a) { // a drawn face: smiling when calm, flat, then frowning with brows when cross
   ctx.fillStyle = a < 0.5 ? '#3fe08f' : a < 0.85 ? '#ffb13d' : '#ff3d55'; ell(x, y, r, r); ctx.fill();
@@ -3083,25 +3175,44 @@ function drawOver() {
   if (skip) skipRow(B.skip);
   panelEnd();
 }
-const RES_BTNS = { next: [130, 820, 460, 108], again: [130, 946, 460, 92] };
+const RES_BTNS = { next: [130, 776, 460, 116], again: [72, 432, 76, 72] }; // one way on; playing it again is the small button in the corner
+const RES_STAR = k => [W / 2 + (k - 1) * 124, 628 - (k === 1 ? 18 : 0)];
+const starLandT = k => state.winT + 0.42 + k * 0.26; // when star k reaches its place
+/** The win: a small panel, the stars flying up into their places one after another, and one big button. */
 function drawResults() {
   drawPlay();
-  panel(330, 740);
-  const L = state.level, last = L >= tune.levels, seasonEnd = !last && L % SEASON_LEVELS === 0, eraEnd = !last && L % ERA_LEVELS === 0;
-  text(last ? 'أنهيت كل المواسم!' : seasonEnd ? `أنهيت الموسم ${seasonOf(L) + 1}!` : eraEnd ? `أنهيت ${ERAS[eraOf(L)].name}!` : 'أحسنت!', W / 2, 410, last || eraEnd ? 46 : 58, '#7ef0b0');
-  text('وصل كل المسافرين إلى وجهاتهم', W / 2, 478, 30, '#e4ecff');
-  for (let k = 0; k < 3; k++) {
-    const pop = clamp((state.t - state.winT - k * 0.25) / 0.3, 0, 1);
-    drawStar(W / 2 + (k - 1) * 116, 580 - (k === 1 ? 16 : 0), 46 * (k < state.stars ? 0.6 + 0.4 * pop : 1), k < state.stars && pop > 0);
+  panel(410, 520);
+  const L = state.level, last = L >= tune.levels, seasonEnd = !last && L % SEASON_LEVELS === 0, eraEnd = !last && L % ERA_LEVELS === 0, t = state.t;
+  textFit(last ? 'أنهيت كل المواسم!' : seasonEnd ? `أنهيت الموسم ${seasonOf(L) + 1}!` : eraEnd ? `أنهيت ${ERAS[eraOf(L)].name}!` : 'أحسنت!', W / 2, 492, 62, 420, '#7ef0b0', 'center', 800);
+  for (let k = 0; k < 3; k++) { const [x, y] = RES_STAR(k); drawStar(x, y, 50, false); } // the three places
+  for (let k = 0; k < state.stars; k++) {
+    const [tx, ty] = RES_STAR(k), fly = 0.4, u = clamp((t - (starLandT(k) - fly)) / fly, 0, 1); if (u <= 0) continue;
+    const q = easeOut(u), x = lerp(W / 2 + (k - 1) * 30, tx, q), y = lerp(1010, ty, q) - Math.sin(u * Math.PI) * 70;
+    const pop = clamp((t - starLandT(k)) / 0.28, 0, 1), sc = lerp(0.35, 1, q) * (1 + 0.3 * Math.sin(pop * Math.PI));
+    ctx.save(); ctx.translate(x, y); ctx.rotate((1 - q) * -2.4); ctx.scale(sc, sc);
+    if (u >= 1) { const gl = ctx.createRadialGradient(0, 0, 8, 0, 0, 92); gl.addColorStop(0, 'rgba(255,220,110,0.5)'); gl.addColorStop(1, 'rgba(255,220,110,0)'); ctx.fillStyle = gl; ell(0, 0, 92, 92); ctx.fill(); }
+    drawStar(0, 0, 50, true); ctx.restore();
+    const v = (t - starLandT(k)) / 0.55; // as it lands, small stars burst out of it and fade
+    if (v > 0 && v < 1) for (let j = 0; j < 9; j++) {
+      const a = j * Math.PI * 2 / 9 + k * 0.5, r = 58 + 92 * easeOut(v), sx = tx + Math.cos(a) * r, sy = ty + Math.sin(a) * r * 0.9;
+      ctx.globalAlpha = (1 - v) * 0.95; starPath(sx, sy, 9 * (1 - v * 0.5)); ctx.fillStyle = j % 2 ? '#fff3c4' : '#ffd34d'; ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
-  const best = save.stars[L - 1] || 0;
-  text(state.stars > state.prevBest ? 'أفضل نتيجة جديدة!' : `أفضل نتيجة: ${best} من 3`, W / 2, 672, 30, '#ffd34d');
-  text(last ? `مجموع النجوم: ${totalStars()} من ${tune.levels * 3}` : seasonEnd ? `نجوم الموسم: ${seasonStars(seasonOf(L))} من ${SEASON_LEVELS * 3}` : `التراجع المستعمل: ${state.undosUsed}`, W / 2, 718, 28, '#e4ecff', 'center', 700);
-  if (state.angryHit) { moodFace(W / 2 + 170, 762, 14, 1); text('غضب المسافرون من التأخير: نجمة أقل', W / 2 - 14, 762, 26, '#ff8a9a', 'center', 700); }
-  bigButton(...RES_BTNS.next, last ? 'القائمة' : seasonEnd ? `إلى الموسم ${seasonOf(L) + 2}` : eraEnd ? 'العصر التالي' : 'المرحلة التالية', eraEnd ? 'gold' : 'primary');
-  if (!last && tierOf(L + 1) === 1) hardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 64, RES_BTNS.next[1], 1); // the next one is hard
-  else if (!last && tierOf(L + 1) === 2) veryHardPill(RES_BTNS.next[0] + RES_BTNS.next[2] - 84, RES_BTNS.next[1], 1);
-  bigButton(...RES_BTNS.again, 'أعد هذه المرحلة', 'secondary');
+  const done = t > starLandT(2) + 0.1, best = state.stars > state.prevBest;
+  if (last) text(`مجموع النجوم: ${totalStars()} من ${tune.levels * 3}`, W / 2, 724, 30, '#ffd34d');
+  else if (seasonEnd) text(`نجوم الموسم: ${seasonStars(seasonOf(L))} من ${SEASON_LEVELS * 3}`, W / 2, 724, 30, '#ffd34d');
+  else if (best && done) text('أفضل نتيجة جديدة!', W / 2, 724, 30, '#ffd34d');
+  if (state.angryHit) text('غضب المسافرون من التأخير: نجمة أقل', W / 2, 724, 26, '#ff8a9a', 'center', 700);
+  { // the way on breathes a little
+    const b = RES_BTNS.next, k = 1 + 0.016 * Math.sin(gt * 3.2), cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(k, k); ctx.translate(-cx, -cy);
+    bigButton(...b, last ? 'القائمة' : seasonEnd ? `إلى الموسم ${seasonOf(L) + 2}` : eraEnd ? 'العصر التالي' : 'التالي', eraEnd ? 'gold' : 'primary');
+    if (!last && tierOf(L + 1) === 1) hardPill(b[0] + b[2] - 64, b[1], 1); // the next one is hard
+    else if (!last && tierOf(L + 1) === 2) veryHardPill(b[0] + b[2] - 84, b[1], 1);
+    ctx.restore();
+  }
+  glassButton(...RES_BTNS.again); drawIcon('restart', RES_BTNS.again[0] + 38, RES_BTNS.again[1] + 36, 44, '#f4f8ff');
   panelEnd();
 }
 
@@ -3434,7 +3545,7 @@ function updatePlayWorld(dt) {
     else if (f.k === 'dock') { // arrival: a dock bump, a ring in the era's light; riders in its colour cheer
       sfx.dock(e); v.arriveT = t; const p = parkPose(f.id);
       { const col = lv.taxis[f.id].colour; let n = 0;
-        for (let k = state.qv; k < Math.min(lv.queue.length, state.qv + Q_PER_ROW * 2) && n < tune.cheer_riders; k++) { const tr = state.tr[k]; if (tr.col === col && tr.startT == null) { tr.cheerT = t + 0.05 + n * 0.07; n++; } } }
+        for (let k = state.qv; k < Math.min(lv.queue.length, state.qv + Q_VIS) && n < tune.cheer_riders; k++) { const tr = state.tr[k]; if (tr.col === col && tr.startT == null) { tr.cheerT = t + 0.05 + n * 0.07; n++; } } }
       spawn(2, p.x, p.y, 0, 0, 30, 0.5, E.accent, 0, true, 50);
       for (let j = 0; j < 5; j++) { const a = j * Math.PI * 2 / 5 + rng(); puff(p.x + Math.cos(a) * p.cell * 0.45, p.y + Math.sin(a) * p.cell * 0.35, 1.3, E.lot.puff, a); }
     }
@@ -3505,7 +3616,7 @@ function updatePlayWorld(dt) {
   // the line shuffles forward on its conveyor
   while (state.qv < lv.queue.length) { const tr = state.tr[state.qv]; if (tr.done || (tr.startT != null && t >= tr.startT)) state.qv++; else break; }
   let moved = false;
-  for (let k = state.qv; k < Math.min(lv.queue.length, state.qv + Q_PER_ROW * 2 + 1); k++) {
+  for (let k = state.qv; k < Math.min(lv.queue.length, state.qv + Q_VIS + 1); k++) {
     const tr = state.tr[k]; const sp = slotPos(k - state.qv), tx = sp[0], ty = sp[1];
     if (tr.x == null) { const p = slotPos(k - state.qv + 1); tr.x = p[0]; tr.y = p[1]; }
     const dx = tx - tr.x, dy = ty - tr.y, ee = Math.min(1, dt * tune.queue_ease);
@@ -3526,7 +3637,7 @@ function updatePlayWorld(dt) {
   stepParts(dt);
   if (state.floats.length && t - state.floats[0].t0 > 2) state.floats = state.floats.filter(f => t - f.t0 < f.life);
   // the line's patience: once play has begun, riders get cross while nothing comes for them
-  if (scene === 'play' && state.tapped && !state.pending && !state.warn && state.S.qi < lv.queue.length) {
+  if (tune.patience === 1 && scene === 'play' && state.tapped && !state.pending && !state.warn && state.S.qi < lv.queue.length) {
     const idle = t - Math.max(state.lastBoardT || 0, state.lastTapT || 0);
     if (t > state.busyUntil && idle > tune.patience_grace) {
       const before = state.anger;
@@ -3582,6 +3693,7 @@ function playInput() {
   if (pressed('Escape')) { openEra(eraNow()); return; }
   if (pressed('KeyU')) doUndo();
   if (pressed('KeyR')) { doRestart(); return; }
+  if (pressed('KeyH')) askHint();
   if (pressed('ArrowLeft')) moveCursor(-1, 0);
   if (pressed('ArrowRight')) moveCursor(1, 0);
   if (pressed('ArrowUp')) moveCursor(0, -1);
@@ -3597,6 +3709,7 @@ function playInput() {
     if (inRect(p, ...BTN.menu)) { openEra(eraNow()); return; }
     if (inRect(p, ...BTN.undo)) { doUndo(); continue; }
     if (inRect(p, ...BTN.restart)) { doRestart(); return; }
+    if (inRect(p, ...BTN.hint)) { askHint(); continue; }
     const i = taxiAt(p);
     if (i >= 0) { state.kbd = false; state.cursor = i; doTap(i); continue; }
     if (garageAt(p)) { toast('تخرج المركبة حين تفرغ الخانتان أمام المرآب'); sfx.blocked(); }
@@ -3733,7 +3846,10 @@ const scenes = {
   results: {
     update(dt) {
       state.t += dt; updatePlayWorld(dt);
-      if (!state.prefetched && state.t - state.winT > 1.1 && state.level < tune.levels) { state.prefetched = true; dealLevel(state.level + 1); } // dealt now, while the stars rest
+      if (!state.prefetched && state.t - state.winT > 1.3 && state.level < tune.levels) { state.prefetched = true; dealLevel(state.level + 1); } // dealt now, while the stars rest
+      for (let k = state.starsIn || 0; k < state.stars && state.t >= starLandT(k); k++) { // a star reaches its place: its own note (the sparks are drawn with it)
+        state.starsIn = k + 1; sfx.star(k);
+      }
       const L = state.level, go = () => {
         if (L >= tune.levels) { scene = 'title'; sfx.ui(); }
         else if (eraOf(L + 1) !== eraOf(L)) openUnlock(eraOf(L + 1), L + 1);

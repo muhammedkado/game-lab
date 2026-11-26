@@ -15,6 +15,7 @@
 //   undo_refill    rewarded   when the free undos are used up: more undos, once per level attempt
 //   stuck_undo     rewarded   stuck screens: take back the last move, when the free undos are used up
 //   skip_level     rewarded   after several stuck screens on one level: move on to the next level
+//   hint           rewarded   during play: the next move of a line that still wins, after the attempt's free hint
 //   between_levels interstitial  only after a win, on "next level": never after a loss, never on restart,
 //                               never before the win screen, never before a new era's opening scene
 window.ADS_SETUP = {

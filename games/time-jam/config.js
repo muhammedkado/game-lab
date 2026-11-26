@@ -23,8 +23,12 @@ window.CONFIG = {
   // The stops and the rules (round 3: three stops, bigger vehicles, more seats)
   gates: { value: 3, min: 2, max: 5, step: 1 },          // stops along the bottom (the free extra one makes 4)
   undos: { value: 3, min: 0, max: 9, step: 1 },          // free undos per level
+  hints_free: { value: 1, min: 0, max: 9, step: 1 },     // free hints per level attempt (the button shows a move that still wins)
+  hint_ad: { value: 1, min: 0, max: 1, step: 1 },        // after the free ones: 1 a hint for watching an ad, 0 no more hints
+  hint_nodes: { value: 120000, min: 5000, max: 400000, step: 5000 }, // how far the hint's search may look before it settles for a guess
   seats_small: { value: 4, min: 2, max: 4, step: 1 },    // seats on a small vehicle (2 cells): camel, donkey, motorbike, car, air taxi
   seats_big: { value: 8, min: 4, max: 8, step: 1 },      // seats on a big vehicle (3 cells): howdah, cart, tuk-tuk, van, air shuttle
+  glow_free: { value: 1, min: 0, max: 2, step: 0.1 },      // a soft light round every vehicle that can leave right now (0: none)
   seat_style: { value: 1, min: 0, max: 1, step: 1 },     // 1: one number on each vehicle, its free seats, counting down to 0; 0: a ring per seat
   levels: { value: 200, min: 5, max: 200, step: 5 },     // levels in the game: 5 per era, 25 per season (a season is one trip through the five eras)
   // Seasons after the first deal from a later stretch of the table below: season k's 25 levels spread over
@@ -309,6 +313,7 @@ window.CONFIG = {
   reveal_time: { value: 0.4, min: 0.1, max: 1, step: 0.05 },   // seconds for a cover to slide off
   fly_gap: { value: 8, min: 0, max: 40, step: 2 },         // logical px kept between vehicles on the road
 
+  patience: { value: 0, min: 0, max: 1, step: 1 },         // 0: a calm game, nothing is lost by taking your time; 1: the line loses patience (below)
   // The line's patience: riders get cross when nothing comes for them (one star less, never a loss)
   patience_time: { value: 16, min: 4, max: 60, step: 1 },  // seconds of waiting from calm to cross
   patience_grace: { value: 3, min: 0, max: 10, step: 0.5 }, // seconds after the last tap or boarding before patience runs down
@@ -320,7 +325,8 @@ window.CONFIG = {
   veh_fill_w: { value: 0.94, min: 0.6, max: 1.1, step: 0.01 },// a sprite's width as a share of a cell
   squeeze_min: { value: 0.82, min: 0.6, max: 1, step: 0.02 }, // the most a too-wide sprite is narrowed before it is drawn shorter
   bay_cell: { value: 66, min: 40, max: 72, step: 1 },         // vehicle cell size at the stops (a big one must fit its bay)
-  rider_h: { value: 62, min: 40, max: 66, step: 1 },          // rider height in the line
+  rider_h: { value: 62, min: 40, max: 66, step: 1 },          // rider height on the way to a seat
+  line_scale: { value: 1.24, min: 1, max: 1.4, step: 0.02 },   // riders standing in the line are this much bigger (one row of ten)
 
   // The trip to the stop (logical px, px per second, seconds)
   // trip speed to the stop, logical px per second: every era quicker than the one before
@@ -357,7 +363,9 @@ window.CONFIG = {
   roll_time: { value: 0.45, min: 0.1, max: 1.2, step: 0.05 },  // a garage vehicle rolling out onto its strip
 
   // Boarding and leaving
-  board_interval: { value: 0.12, min: 0.04, max: 0.5, step: 0.01 }, // gap between riders leaving the line, one at a time
+  board_interval: { value: 0.12, min: 0.04, max: 0.5, step: 0.01 }, // gap between riders leaving the line, one at a time (the first of a run)
+  board_accel: { value: 0.86, min: 0.6, max: 1, step: 0.01 },       // each next rider of a run leaves this much sooner (1: a steady pace)
+  board_min: { value: 0.045, min: 0.02, max: 0.3, step: 0.005 },    // but never closer together than this
   board_flight: { value: 0.24, min: 0.08, max: 0.8, step: 0.02 },   // a rider's jump from the kerb down into its seat
   hop_h: { value: 70, min: 0, max: 200, step: 5 },                  // how high that jump arcs
   // Riders in motion (round 4): they walk up the line, run along the kerb to their vehicle and jump in
@@ -372,11 +380,11 @@ window.CONFIG = {
   panel_pop: { value: 0.26, min: 0.02, max: 1, step: 0.02 },        // a panel over the lot (results, stuck) pops in (s)
   squash: { value: 0.06, min: 0, max: 0.2, step: 0.01 },            // how much each landing rider squashes the vehicle
   combo_window: { value: 2, min: 0.5, max: 5, step: 0.1 },          // full vehicles this close together build a combo ("رائع!", "ممتاز!")
-  depart_delay: { value: 0.16, min: 0, max: 1, step: 0.02 },        // pause before a full vehicle celebrates
-  celebrate_time: { value: 0.36, min: 0, max: 1, step: 0.02 },      // its bounce of joy before it drives off
+  depart_delay: { value: 0.06, min: 0, max: 1, step: 0.02 },        // pause before a full vehicle celebrates
+  celebrate_time: { value: 0.22, min: 0, max: 1, step: 0.02 },      // its bounce of joy before it drives off
   leave_boost: { value: 1.15, min: 0.5, max: 2.5, step: 0.05 },   // a full ground vehicle leaves this much quicker than its era's trip speed
-  spin_time: { value: 0.3, min: 0.05, max: 1, step: 0.05 },         // air taxi rotors spinning up before lift-off
-  rise_time: { value: 0.45, min: 0.1, max: 1.5, step: 0.05 },       // the air taxi's rise at its stop
+  spin_time: { value: 0.2, min: 0.05, max: 1, step: 0.05 },         // air taxi rotors spinning up before lift-off
+  rise_time: { value: 0.35, min: 0.1, max: 1.5, step: 0.05 },       // the air taxi's rise at its stop
   fly_speed: { value: 1000, min: 300, max: 2500, step: 50 },        // a full air taxi climbing away
   queue_ease: { value: 12, min: 3, max: 30, step: 1 },              // how fast the line shuffles forward
   unlock_time: { value: 1.4, min: 0.4, max: 3, step: 0.1 },         // the new era's vehicle arriving on the "انتقلت إلى" screen
