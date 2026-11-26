@@ -19,16 +19,19 @@
 <body>
 <canvas id="game"></canvas>
 <script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
-<script src="config.js"></script>
+<script src="config.js?v=16bc1c04"></script>
+<script src="levels.js?v=19ce5262"></script>
 <script>
 'use strict';
 // Attar (عطّار): pour layered scented oils between glass flasks until each holds one scent.
-// Every level is dealt only when an A* solver over canonical states finds a solution; that
-// solution's length is the par, and the same solver gives the hint and spots dead ends.
+// Every level was solved by the A* solver below before it was kept (the 96 levels are baked in
+// levels.js by tools/attar-levels.js; the daily flask is dealt live); that solution's length is
+// the par, and the same solver gives the hint and spots dead ends.
 
 // ---- Built to be checked ----------------------------------------------------------------
 const params = new URLSearchParams(location.search);
-const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const LATER = { veil_extra: 2, idle_nudge: 25 }; // knobs added in round 3: a browser still holding the older config.js must not break
+const tune = new Proxy({}, { get: (_, k) => (CONFIG[k] || { value: LATER[k] }).value }); // live: tune.speed is CONFIG.speed.value
 const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
 const W = 720, H = 1280;        // logical size: portrait phone
 const PIXEL = false;
@@ -36,6 +39,8 @@ const FONT = 'Almarai, "SF Arabic", "Geeza Pro", "Noto Sans Arabic", Tahoma, san
 const TITLE = 'عطّار · Attar';
 const CONTROLS = ['اضغط قارورة لترفعها، ثم اضغط أخرى لتسكب', 'الأسهم والمسافة · U تراجع · H تلميح · R إعادة'];
 // keys also: D the daily flask and S the stats on the title, E the free small flask when stuck
+const TOUCH = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (_) { return false; } })(); // a phone: no key line on the title
+const OPEN_ALL = params.get('open') === 'all'; // the review link: every level open, kept in its own save
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
 let seed;
@@ -59,9 +64,9 @@ function fit() { // fills the window at any size and pixel ratio
   canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
   canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
   ctx.setTransform(r, 0, 0, r, 0, 0); ctx.imageSmoothingEnabled = true;
-  bgCache = null;
+  bgCache = {};
 }
-let bgCache = null;
+let bgCache = {}; // one painted wall per souk
 addEventListener('resize', fit); fit();
 const ARABIC = /[؀-ۿ]/;
 function setFont(size, weight = '') { ctx.font = `${weight} ${size}px ${FONT}`; }
@@ -114,7 +119,7 @@ function startAudio() {
       out.connect(ac.destination); audio = { ac, out };
     } catch (_) { return; }
   }
-  if (audio.ac.state === 'suspended') audio.ac.resume();
+  if (audio.ac.state === 'suspended') { const p = audio.ac.resume(); if (p && p.catch) p.catch(() => {}); } // a device with no sound out must not raise an error
 }
 function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; store.set('muted', m); }
 addEventListener('tune', () => setMuted(muted));
@@ -127,26 +132,61 @@ function tone(freq, dur, type = 'square', vol = 0.3, delay = 0, slide = 0) {
   g.gain.exponentialRampToValueAtTime(0.001, t + dur);
   o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur + 0.02);
 }
+let noiseBuf = null;
+/** A band of filtered noise sliding from f0 to f1: the body of a pour. Made here, no audio file. */
+function noise(dur, f0, f1, vol, delay = 0, q = 4) {
+  if (!audio || muted) return;
+  try {
+    const ac = audio.ac;
+    if (!noiseBuf) { // one second of noise from a small generator of its own (sound only, not gameplay)
+      noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+      const d = noiseBuf.getChannelData(0); let s = 22222;
+      for (let i = 0; i < d.length; i++) { s = (s * 16807) % 2147483647; d[i] = s / 1073741823.5 - 1; }
+    }
+    const t = ac.currentTime + delay, src = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = noiseBuf; src.loop = true;
+    bp.type = 'bandpass'; bp.Q.value = q; bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.05);
+    g.gain.setValueAtTime(vol, t + Math.max(0.06, dur - 0.09)); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(bp).connect(g).connect(audio.out); src.start(t); src.stop(t + dur + 0.03);
+  } catch (_) {}
+}
+function buzz(ms) { try { if (!muted && navigator.vibrate) navigator.vibrate(ms); } catch (_) {} } // phones that can: a short tap in the hand
 const sfx = {
   lift() { tone(620, 0.07, 'sine', 0.12, 0, 120); },
   drop() { tone(420, 0.07, 'sine', 0.1, 0, -100); },
-  pour(n) { const d = tune.pour_time; for (let k = 0; k < 4 + n * 2; k++) tone(260 + ((k * 73) % 120) + k * 14, 0.07, 'sine', 0.09, d * 0.32 + k * 0.045, 80); },
+  /** n layers into a flask that goes from a to b full (0 to 1): the pitch climbs as the flask fills, as a real one does. */
+  pour(n, a = 0, b = 1) {
+    const d = tune.pour_time, t0 = d * 0.3, len = Math.max(0.16, d * 0.47);
+    noise(len, 420 + 700 * a, 520 + 1250 * b, 0.18, t0, 5);
+    noise(len, 1900, 2500, 0.035, t0, 1.2);
+    for (let k = 0; k < 3 + n * 2; k++) tone(250 + 160 * a + ((k * 73) % 110) + k * 16, 0.07, 'sine', 0.075, t0 + 0.02 + k * 0.045, 80);
+  },
   seal(delay) { tone(1047, 0.35, 'triangle', 0.14, delay); tone(1568, 0.45, 'sine', 0.09, delay + 0.06); tone(2093, 0.5, 'sine', 0.05, delay + 0.12); },
   nope() { tone(150, 0.12, 'square', 0.07); },
   hint() { tone(880, 0.1, 'triangle', 0.13); tone(1175, 0.16, 'triangle', 0.1, 0.07); },
   win() { [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.35, 'triangle', 0.16, i * 0.1)); },
   ui() { tone(440, 0.05, 'triangle', 0.1); },
   extra() { tone(740, 0.12, 'sine', 0.12); tone(988, 0.16, 'triangle', 0.1, 0.08); tone(1319, 0.22, 'sine', 0.07, 0.16); },
+  unlock(delay = 0) { noise(0.09, 3200, 1100, 0.16, delay, 1.5); tone(392, 0.12, 'triangle', 0.12, delay + 0.05); tone(784, 0.3, 'sine', 0.1, delay + 0.13); },
+  star(k) { const f = [784, 988, 1319][k] || 784; tone(f, 0.28, 'triangle', 0.15); tone(f * 2, 0.36, 'sine', 0.06, 0.03); },
+  page() { tone(520, 0.05, 'sine', 0.09, 0, 60); },
 };
 
 // ---- Storage: unlocked level and best per level; the game works without it -------------
-const store = {
-  get(k, d) { try { const v = localStorage.getItem('attar:' + k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
-  set(k, v) { try { localStorage.setItem('attar:' + k, JSON.stringify(v)); } catch (_) {} },
+const SAVE = OPEN_ALL ? 'attar-review:' : 'attar:';
+const store = { // read once, then kept in memory: the title draws from it every frame
+  mem: {},
+  get(k, d) {
+    if (k in this.mem) return this.mem[k];
+    let v = d; try { const s = localStorage.getItem(SAVE + k); if (s !== null) v = JSON.parse(s); } catch (_) {}
+    return this.mem[k] = v;
+  },
+  set(k, v) { this.mem[k] = v; try { localStorage.setItem(SAVE + k, JSON.stringify(v)); } catch (_) {} },
 };
 muted = store.get('muted', false);
 
-// ---- Look: the nine scents ---------------------------------------------------------------
+// ---- Look: the twelve scents (nine from the start; one more arrives in the third, fourth and fifth souk) ----
 const SCENT = [
   { c: '#c8325a', hi: '#f4869f', n: 'ورد', em: 'rose', dark: false },
   { c: '#e8891c', hi: '#ffc574', n: 'عنبر', em: 'drop', dark: false },
@@ -157,8 +197,12 @@ const SCENT = [
   { c: '#34419f', hi: '#8190f0', n: 'نيلة', em: 'crescent', dark: false },
   { c: '#8a4fb4', hi: '#c99aee', n: 'مسك', em: 'pod', dark: false },
   { c: '#ff8768', hi: '#ffc6b4', n: 'مرجان', em: 'coral', dark: true },
+  { c: '#2cc3d6', hi: '#b9f4fb', n: 'كافور', em: 'crystal', dark: true },
+  { c: '#96c62b', hi: '#def58f', n: 'ريحان', em: 'sprig', dark: true },
+  { c: '#9aa7b8', hi: '#e6ecf3', n: 'بخور', em: 'smoke', dark: true },
 ];
-const CH = 'abcdefghi';
+const BASE_SCENTS = 9; // the daily flask keeps to the first nine
+const CH = 'abcdefghijkl';
 const ci = ch => ch.charCodeAt(0) - 97;
 function hash01(a, b = 0) { // decoration only (grain, glints): not gameplay
   let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35);
@@ -171,24 +215,32 @@ function hash01(a, b = 0) { // decoration only (grain, glints): not gameplay
 // T1: one flask may be the free small flask (index SMALL): it holds fewer layers, never seals,
 // and must be empty at the end. SMALL is -1 while dealing and whenever there is none.
 let SMALL = -1;
+// R3: one flask may be wax-sealed (index LOCK): nothing pours from it or into it until LOCK_NEED
+// flasks are finished. LOCK is -1 when the level has none. Being locked is read from the state alone.
+let LOCK = -1, LOCK_NEED = 0;
 const smallCap = cap => Math.max(1, Math.min(tune.extra_layers, cap - 1));
 const roomOf = (st, j, cap) => (j === SMALL ? smallCap(cap) : cap) - st[j].length;
 function topRun(f) { const t = f[f.length - 1]; let n = 1; while (n < f.length && f[f.length - 1 - n] === t) n++; return n; }
 function isSealed(f, cap) { return f.length === cap && topRun(f) === cap; }
+function sealedCount(st, cap) { let n = 0; for (const f of st) if (isSealed(f, cap)) n++; return n; }
+const isLocked = (st, cap) => LOCK >= 0 && LOCK < st.length && sealedCount(st, cap) < LOCK_NEED;
 /** Pour rule: the top run moves onto the same scent or into an empty flask, as far as space allows. */
 function canPour(st, i, j, cap) {
   if (i === j) return false;
   const a = st[i], b = st[j];
   if (!a.length || roomOf(st, j, cap) <= 0 || isSealed(a, cap)) return false;
+  if ((i === LOCK || j === LOCK) && isLocked(st, cap)) return false;
   return !b.length || b[b.length - 1] === a[a.length - 1];
 }
 const pourAmount = (st, i, j, cap) => Math.min(topRun(st[i]), roomOf(st, j, cap));
 function applyPour(st, i, j, n) { const s = st.slice(), a = st[i]; s[i] = a.slice(0, a.length - n); s[j] = st[j] + a.slice(a.length - n); return s; }
 const isSolved = (st, cap) => st.every(f => !f.length || isSealed(f, cap));
-function stateKey(st) { // flask order ignored (the small flask keeps its own place)
-  if (SMALL < 0 || SMALL >= st.length) return st.slice().sort().join(',');
-  const s = st.slice(), m = s.splice(SMALL, 1)[0];
-  return s.sort().join(',') + '|' + m;
+function stateKey(st) { // flask order ignored (the small flask and the wax-sealed one keep their own places)
+  const sm = SMALL >= 0 && SMALL < st.length, lk = LOCK >= 0 && LOCK < st.length;
+  if (!sm && !lk) return st.slice().sort().join(',');
+  const rest = [];
+  for (let i = 0; i < st.length; i++) if (!(sm && i === SMALL) && !(lk && i === LOCK)) rest.push(st[i]);
+  return rest.sort().join(',') + (lk ? '#' + st[LOCK] : '') + (sm ? '|' + st[SMALL] : '');
 }
 function hScore(st) { // layer runs minus scents: each pour can lower it by at most one
   let seg = 0; const seen = new Set();
@@ -197,12 +249,12 @@ function hScore(st) { // layer runs minus scents: each pour can lower it by at m
 }
 function legalMoves(st, cap) { const out = []; for (let i = 0; i < st.length; i++) for (let j = 0; j < st.length; j++) if (canPour(st, i, j, cap)) out.push([i, j]); return out; }
 function solverMoves(st, cap) { // legal moves minus the pointless ones (sound for proving dead ends)
-  const out = [];
+  const out = [], locked = isLocked(st, cap) ? LOCK : -1;
   for (let i = 0; i < st.length; i++) {
-    const a = st[i]; if (!a.length || isSealed(a, cap)) continue;
+    const a = st[i]; if (!a.length || i === locked || isSealed(a, cap)) continue;
     const run = topRun(a), t = a[a.length - 1], triedEmpty = [false, false];
     for (let j = 0; j < st.length; j++) {
-      if (i === j) continue; const b = st[j], room = roomOf(st, j, cap);
+      if (i === j || j === locked) continue; const b = st[j], room = roomOf(st, j, cap);
       if (room <= 0) continue;
       if (!b.length) {
         const kind = j === SMALL ? 1 : 0; // empty flasks of one size are alike; the small one is not like the rest
@@ -253,74 +305,101 @@ function solveAny(st, cap, w, nodeCap) { // the hint and the dealer: near-shorte
   if (!r.found && !r.exhausted) r = solve(st, cap, Math.max(3, w * 2), nodeCap);
   return r;
 }
-/** A trap: one or two pours from the start (the second into the last empty flask) reach a proven dead end. */
-function hasTrap(st, cap) {
-  const seen = new Set();
-  const dead = s => {
-    if (s.some(f => !f.length)) return false;
-    const k = stateKey(s); if (seen.has(k)) return false; seen.add(k);
-    const r = solve(s, cap, 3, tune.dead_nodes); return !r.found && r.exhausted; // the same test the game runs after a pour
-  };
-  for (const [i, j] of legalMoves(st, cap)) {
-    const s1 = applyPour(st, i, j, pourAmount(st, i, j, cap));
-    if (dead(s1)) return true;
-    for (const [i2, j2] of legalMoves(s1, cap)) {
-      if (s1[j2].length) continue;
-      if (dead(applyPour(s1, i2, j2, pourAmount(s1, i2, j2, cap)))) return true;
-    }
-  }
-  return false;
-}
 
 // ---- Levels ------------------------------------------------------------------------------
-const LEVELS = 12;
-// level 0 is the daily flask (T3): its own scent count and veil, normal flasks
-const isNarrow = lv => lv > 0 && lv >= tune.narrow_from && (lv - tune.narrow_from) % tune.narrow_every === 0;
-const isVeiled = lv => lv === 0 ? tune.daily_veil > 0 : lv >= tune.veil_from;
-const capOf = lv => isNarrow(lv) ? tune.narrow_capacity : tune.capacity;
-const scentsOf = lv => lv === 0 ? tune.daily_scents : tune['scents_' + Math.min(LEVELS, lv)];
+// The levels are baked (levels.js, written by tools/attar-levels.js): eight souks of twelve.
+// Only the daily flask (level 0) is dealt here, live, and proven by the solver before it is shown.
+const PER = 12; // levels in a souk: one page of tiles on the title
+const DATA = (window.LEVEL_DATA || []).map(d => {
+  const st = d.s.split(','), cap = Math.max(...st.map(f => f.length));
+  return { st, cap, par: d.p, veil: d.v || 0, hard: !!d.h, lock: d.lock || null, empties: st.filter(f => !f.length).length };
+});
+const LEVELS = DATA.length;
+// Each souk has its own wall: [top, bottom, panel, panel, grain, arch line] and the arch's shape.
+const SOUKS = [
+  { city: 'دمشق', souk: 'سوق البزورية', arch: 'round', wall: ['#24140b', '#170c06', 'rgba(80,45,22,0.22)', 'rgba(60,32,15,0.18)', 'rgba(140,85,45,0.16)', 'rgba(210,150,80,0.16)'] },
+  { city: 'حلب', souk: 'سوق المدينة', arch: 'pointed', wall: ['#221c15', '#13100b', 'rgba(104,90,66,0.20)', 'rgba(74,63,46,0.16)', 'rgba(176,154,116,0.13)', 'rgba(224,200,150,0.17)'] },
+  { city: 'القدس', souk: 'سوق العطارين', arch: 'round', wall: ['#2c200f', '#1a1208', 'rgba(126,92,40,0.20)', 'rgba(96,68,28,0.16)', 'rgba(204,162,90,0.13)', 'rgba(240,200,120,0.18)'] },
+  { city: 'القاهرة', souk: 'خان الخليلي', arch: 'pointed', wall: ['#0f2325', '#081315', 'rgba(30,92,94,0.22)', 'rgba(20,68,72,0.18)', 'rgba(92,172,166,0.13)', 'rgba(232,184,96,0.18)'] },
+  { city: 'بغداد', souk: 'سوق الشورجة', arch: 'keel', wall: ['#171b3a', '#0b0d20', 'rgba(52,60,134,0.22)', 'rgba(38,44,104,0.18)', 'rgba(124,134,214,0.13)', 'rgba(232,192,112,0.18)'] },
+  { city: 'إسطنبول', souk: 'السوق المصري', arch: 'round', wall: ['#2d1017', '#18080c', 'rgba(124,38,52,0.22)', 'rgba(92,26,40,0.18)', 'rgba(204,104,114,0.12)', 'rgba(236,192,112,0.18)'] },
+  { city: 'فاس', souk: 'سوق العطارين', arch: 'horseshoe', wall: ['#10271c', '#08150e', 'rgba(30,104,68,0.22)', 'rgba(22,76,52,0.18)', 'rgba(92,184,132,0.12)', 'rgba(236,196,112,0.18)'] },
+  { city: 'مسقط', souk: 'سوق مطرح', arch: 'keel', wall: ['#271231', '#140919', 'rgba(98,50,124,0.22)', 'rgba(72,34,94,0.18)', 'rgba(174,122,204,0.12)', 'rgba(240,200,120,0.18)'] },
+];
+const PAGES = Math.max(1, Math.min(SOUKS.length, Math.ceil(LEVELS / PER)));
+const soukOf = lv => Math.max(0, Math.min(PAGES - 1, Math.floor((lv - 1) / PER)));
 function dateKey(d = new Date()) { return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
 function dayBefore(k) { const d = new Date(Math.floor(k / 10000), Math.floor(k / 100) % 100 - 1, k % 100); d.setDate(d.getDate() - 1); return dateKey(d); }
+const wallOf = lv => lv === 0 ? dateKey() % PAGES : soukOf(lv); // the daily flask visits a different souk each day
+/** What makes a level its kind, for the line under its name and for the first-time notes. */
+function kindsOf(d) {
+  const out = [];
+  if (d.lock) out.push('lock');
+  if (d.empties === 1) out.push('tight');
+  if (d.cap > tune.capacity) out.push('tall');
+  if (d.cap < tune.capacity) out.push('narrow');
+  if (d.veil === 2) out.push('veil');
+  if (d.veil === 1) out.push('mist');
+  for (const c of new Set(d.st.join(''))) if (ci(c) >= BASE_SCENTS) out.push('scent' + c);
+  return out;
+}
+const FIRST_AT = {}; // kind -> the first level that has it: that level explains it
+DATA.forEach((d, n) => { for (const k of kindsOf(d)) if (!(k in FIRST_AT)) FIRST_AT[k] = n + 1; });
+const flasksWord = n => n === 1 ? 'قارورة واحدة' : n === 2 ? 'قارورتين' : `${n} قوارير`;
+/** The note a level opens with: the lesson of a new kind first, then a new scent, a new souk, a hard level. */
+function introMsg(lv) {
+  const d = DATA[lv - 1], first = k => FIRST_AT[k] === lv;
+  if (lv === 1) return 'ارفع قارورة، ثم اسكب فوق العطر نفسه أو في قارورة فارغة';
+  if (first('lock')) return `قارورة مختومة بالشمع: تنفتح بعد أن تكمل ${flasksWord(d.lock[1])}`;
+  if (first('tight')) return 'رف ضيق: قارورة فارغة واحدة فقط، فكّر قبل أن تسكب';
+  if (first('tall')) return 'قوارير طويلة: كل واحدة تتسع لخمس طبقات';
+  if (first('narrow')) return 'قوارير ضيقة: كل واحدة تتسع لثلاث طبقات فقط';
+  if (first('veil')) return 'ضباب داكن يحجب بعض الطبقات حتى تصل إلى الأعلى';
+  if (first('mist')) return 'ضباب خفيف: يحجب الطبقات السفلى فقط';
+  for (const c of new Set(d.st.join(''))) if (first('scent' + c)) return `عطر جديد على الرف: ${SCENT[ci(c)].n}`;
+  if (lv > 1 && (lv - 1) % PER === 0) return `وصلت إلى ${SOUKS[soukOf(lv)].city}: ${SOUKS[soukOf(lv)].souk}`;
+  if (d.hard) return 'مستوى صعب: الهدف أطول من المعتاد، خذ وقتك';
+  if (d.lock) return `القارورة المختومة تنفتح بعد أن تكمل ${flasksWord(d.lock[1])}`;
+  return null;
+}
 /** T3: the daily streak; it counts while the last daily win was today or yesterday. */
 function streakNow() { const s = store.get('streak', { last: 0, n: 0, best: 0 }), t = dateKey(); return { ...s, n: s.last === t || s.last === dayBefore(t) ? s.n : 0, today: s.last === t }; }
-const emptiesOf = lv => lv === 1 ? tune.first_empties : tune.empties;
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-/** One deal attempt for a level: shuffled layers, kept only when the solver proves it solvable. */
-function dealAttempt(lv, tries) {
-  const k = scentsOf(lv), cap = capOf(lv);
-  const kinds = lv === 1 ? [0, 1] : shuffle([...Array(SCENT.length).keys()]).slice(0, k);
+/** One deal attempt for the daily flask: shuffled layers, kept only when the solver proves it solvable. */
+function dealAttempt() {
+  const k = Math.min(BASE_SCENTS, tune.daily_scents), cap = tune.capacity;
+  const kinds = shuffle([...Array(BASE_SCENTS).keys()]).slice(0, k);
   const pool = []; for (const c of kinds) for (let n = 0; n < cap; n++) pool.push(CH[c]);
   shuffle(pool);
   const st = [];
   for (let f = 0; f < k; f++) st.push(pool.slice(f * cap, (f + 1) * cap).join(''));
-  for (let e = 0; e < emptiesOf(lv); e++) st.push('');
-  if (st.some(f => f.length && topRun(f) >= cap - (lv > 2 || lv === 0 ? 1 : 0))) return null; // nothing (almost) done at the start
+  for (let e = 0; e < tune.empties; e++) st.push('');
+  if (st.some(f => f.length && topRun(f) >= cap - 1)) return null; // nothing (almost) done at the start
   const r = solveAny(st, cap, 1, tune.solver_nodes);
   if (!r.found) return null;
-  if (lv === 1 && r.path.length !== tune.first_par && tries < 400) return null;
-  if (lv >= 3 && lv <= tune.trap_levels && tries < 200 && !hasTrap(st, cap)) return null;
-  return { st, par: r.path.length, cap };
+  return { st, par: r.path.length, cap, veil: tune.daily_veil > 0 ? 2 : 0, hard: r.path.length >= tune.hard_par, lock: null };
 }
 
 // ---- Layout -------------------------------------------------------------------------------
 const B = {
   mute: { x: 624, y: 16, w: 80, h: 80 }, menu: { x: 16, y: 16, w: 80, h: 80 }, home: { x: 16, y: 16, w: 80, h: 80 },
   undo: { x: 492, y: 1112, w: 196, h: 128 }, hint: { x: 262, y: 1112, w: 196, h: 128 }, restart: { x: 32, y: 1112, w: 196, h: 128 },
-  start: { x: 296, y: 672, w: 394, h: 112 }, daily: { x: 30, y: 672, w: 250, h: 112 },
+  start: { x: 296, y: 640, w: 394, h: 104 }, daily: { x: 30, y: 640, w: 250, h: 104 },
+  pgNext: { x: 30, y: 762, w: 84, h: 84 }, pgPrev: { x: 606, y: 762, w: 84, h: 84 }, // Arabic pages turn leftwards
   next: { x: 150, y: 820, w: 420, h: 106 }, again: { x: 210, y: 946, w: 300, h: 88 },
   sUndo: { x: 380, y: 640, w: 230, h: 100 }, sRestart: { x: 110, y: 640, w: 230, h: 100 },
   sExtra: { x: 100, y: 612, w: 520, h: 112 },
   stats: { x: 528, y: 16, w: 80, h: 80 }, back: { x: 220, y: 1172, w: 280, h: 86 },
 };
-const TILE = k => ({ x: 70 + (k % 4) * 150, y: 812 + Math.floor(k / 4) * 128, w: 130, h: 110 });
+const TILE = k => ({ x: 70 + (3 - k % 4) * 150, y: 862 + Math.floor(k / 4) * 116, w: 130, h: 102 }); // a souk's twelve tiles, first on the right
 /** Flask geometry and positions for n flasks of a capacity: one shelf up to 6, else two; flask `small` is the small one (T1). */
 function makeLayout(n, cap, small = -1) {
   const rows = n <= 6 ? 1 : 2;
   const per = rows === 1 ? [n] : [Math.ceil(n / 2), Math.floor(n / 2)];
-  const narrow = cap < tune.capacity;
-  const w0 = rows === 1 ? Math.min(124, (W - 60) / n - 26) : 86;
+  const narrow = cap < tune.capacity, tall = cap > tune.capacity;
+  const w0 = rows === 1 ? Math.min(124, (W - 60) / n - 26) : per[0] > 7 ? 74 : per[0] > 6 ? 80 : 86;
   const w = w0 * (narrow ? 0.8 : 1);
-  const layerH = rows === 1 ? Math.round(Math.min(82, w0 * 0.68)) : 50;
+  const layerH = rows === 1 ? Math.round(Math.min(82, w0 * 0.68) * (tall ? 0.86 : 1)) : tall ? 42 : 50; // tall flasks: thinner layers, so the shelf still fits
   const neckW = w * 0.46, neckH = rows === 1 ? Math.round(w0 * 0.46) : 38, shH = w * 0.3;
   const bodyH = cap * layerH + 12, totalH = neckH + shH + bodyH;
   const shelfY = rows === 1 ? [860] : [612, 982];
@@ -364,14 +443,22 @@ function reset() {
     cursor: 0, kbd: false, lay: null, plan: null, msg: null, winAt: 0, stars: 0, best: null, btnDown: null,
     shake: [], score: 0, gained: '', allDone: false,
     daily: false, time: 0, hard: false, extraUsed: false, extraOk: null, streak: 0,
+    veil: 0, lock: null, lockAt: -1, seen: [], bursts: [], sparks: [], idle: 0, soukDone: false,
+    resAt: 0, starsShown: 0, s3: 0, s2: 0, press: null, log: null,
   };
-  SMALL = -1;
+  SMALL = -1; LOCK = -1; LOCK_NEED = 0;
 }
+let titlePage = -1; // the souk page the title shows; -1: the one being played
 /** S1: the local play log, per level (L<n>) and daily (D<date>): attempts, wins, best pours and time, hints. No network. */
-const LOG_KEY = 'gamelab:attar:log';
+const LOG_KEY = OPEN_ALL ? 'gamelab:attar-review:log' : 'gamelab:attar:log';
 const playLog = {
-  read() { try { const v = JSON.parse(localStorage.getItem(LOG_KEY)); if (v && v.rows) return v; } catch (_) {} return { v: 1, seq: 0, rows: {} }; },
-  write(L) { try { localStorage.setItem(LOG_KEY, JSON.stringify(L)); } catch (_) {} },
+  mem: null,
+  read() {
+    if (this.mem) return this.mem;
+    try { const v = JSON.parse(localStorage.getItem(LOG_KEY)); if (v && v.rows) return this.mem = v; } catch (_) {}
+    return this.mem = { v: 1, seq: 0, rows: {} };
+  },
+  write(L) { this.mem = L; try { localStorage.setItem(LOG_KEY, JSON.stringify(L)); } catch (_) {} },
   /** Changes the current level's row with fn(row) and saves it. */
   row(fn) {
     const L = this.read(), key = state.daily ? 'D' + dateKey() : 'L' + state.level;
@@ -380,50 +467,66 @@ const playLog = {
     fn(r); r.q = ++L.seq; this.write(L);
   },
 };
-const unlocked = () => Math.min(LEVELS, store.get('unlocked', 1));
+/** The highest open level. A save from the 12-level game that had finished level 12 opens level 13. */
+function unlocked() {
+  if (OPEN_ALL) return LEVELS;
+  const u = Math.max(1, store.get('unlocked', 1) | 0), best = store.get('best', {});
+  return Math.max(1, Math.min(LEVELS, best[u] ? u + 1 : u));
+}
+function starsIn(from, to) { const best = store.get('best', {}); let n = 0; for (let lv = from; lv <= to; lv++) if (best[lv]) n += best[lv].stars; return n; }
 function startLevel(lv) {
   state.level = lv; state.daily = lv === 0; state.phase = 'deal'; state.anim = null; state.sel = -1; state.hint = null; state.msg = null; state.lay = null;
-  SMALL = -1;
-  seed = lv === 0 ? (Math.imul(dateKey(), 2654435761) | 0) || 1  // T3: the same daily flask for everyone today
-    : ((Number(params.get('seed')) || CONFIG.seed) * 9973 + lv * 7919) | 0;
-  state.dealer = { lv, tries: 0 };
+  SMALL = -1; LOCK = -1; LOCK_NEED = 0;
   events.push({ type: 'deal', level: lv });
+  if (lv === 0) { // T3: the same daily flask for everyone today
+    seed = (Math.imul(dateKey(), 2654435761) | 0) || 1;
+    state.dealer = { tries: 0 };
+    return;
+  }
+  const d = DATA[lv - 1];
+  loadDeal({ st: d.st, par: d.par, cap: d.cap, veil: d.veil, hard: d.hard, lock: d.lock });
 }
 function dealStep() {
   const d = state.dealer;
   for (let k = 0; k < 2; k++) {
     d.tries++;
-    const r = dealAttempt(d.lv, d.tries);
+    const r = dealAttempt();
     if (r) { loadDeal(r); return; }
   }
 }
 function loadDeal(r) {
   const lv = state.level;
-  state.start = r.st.slice(); state.cap = r.cap; state.par = r.par;
-  state.lay = makeLayout(r.st.length, r.cap);
-  state.dealer = null; bgCache = null;
+  state.start = r.st.slice(); state.cap = r.cap; state.par = r.par; state.veil = r.veil; state.lock = r.lock;
+  LOCK = r.lock ? r.lock[0] : -1; LOCK_NEED = r.lock ? r.lock[1] : 0;
+  state.dealer = null;
   state.cursor = 0;
-  state.hard = r.par >= tune.hard_par; // S2: said before the first pour
+  state.hard = r.hard; // S2: said before the first pour
+  state.seen = r.st.map(f => [...f].map(() => false));
   restartLevel(true);
   playLog.row(q => { q.a++; });
-  state.msg = lv === 1 ? 'ارفع قارورة، ثم اسكب فوق العطر نفسه أو في قارورة فارغة'
-    : lv === 0 ? (state.hard ? 'عطر اليوم صعب: الهدف أطول، وله حل مؤكد' : 'عطر اليوم: يتغير كل يوم، وله حل مؤكد')
-    : lv === tune.veil_from ? 'ضباب داكن يحجب بعض الطبقات حتى تصل إلى الأعلى'
-    : isNarrow(lv) && lv === tune.narrow_from ? 'قوارير ضيقة: كل واحدة تتسع لثلاث طبقات فقط'
-    : state.hard ? 'مستوى صعب: الهدف أطول من المعتاد، خذ وقتك'
-    : null;
+  state.msg = lv === 0 ? (state.hard ? 'عطر اليوم صعب: الهدف أطول، وله حل مؤكد' : 'عطر اليوم: يتغير كل يوم، وله حل مؤكد') : introMsg(lv);
   events.push({ type: 'dealt', level: lv, par: r.par, hard: state.hard });
 }
+/** R1: the top run of a flask is always in view: what you see on top is what will pour. */
+function unveilTop(f, hd) { if (f.length) for (let k = f.length - topRun(f); k < f.length; k++) hd[k] = false; }
+/** R1: a layer once seen stays seen for this visit to the level, through undo and restart. */
+function markSeen() {
+  state.seen.forEach((row, i) => { const hd = state.hidden[i]; for (let k = 0; k < row.length; k++) if (k >= hd.length || !hd[k]) row[k] = true; });
+}
 function restartLevel(fresh) {
-  const lv = state.level;
   SMALL = -1; state.lay = makeLayout(state.start.length, state.cap); // a restart puts the level back as dealt
   state.extraUsed = false; state.extraOk = null; state.time = 0;
   if (!fresh) playLog.row(q => { q.a++; });
   state.st = state.start.slice();
-  state.hidden = state.st.map(f => [...f].map((_, k) => isVeiled(lv) && k < f.length - 1));
+  const half = Math.floor(state.cap / 2); // the light veil hides the lower half, the dark one all but the top
+  state.hidden = state.st.map((f, i) => [...f].map((_, k) => (state.veil === 2 || (state.veil === 1 && k < half)) && !state.seen[i][k]));
+  state.st.forEach((f, i) => unveilTop(f, state.hidden[i]));
+  markSeen();
   state.moves = 0; state.undo = []; state.sel = -1; state.anim = null; state.hint = null; state.hintUsed = false;
   state.sealedAt = state.st.map(f => isSealed(f, state.cap) ? 0 : -1);
+  state.lockAt = LOCK >= 0 && !isLocked(state.st, state.cap) ? 0 : -1;
   state.phase = 'play'; state.stuck = false; state.dead = false; state.plan = null; state.winAt = 0;
+  state.bursts = []; state.sparks = []; state.idle = 0;
   if (!fresh) { sfx.ui(); state.msg = null; }
   updatePlan();
 }
@@ -435,6 +538,11 @@ function tapFlask(f) {
   if (state.phase !== 'play') return;
   state.msg = state.level === 1 ? state.msg : null;
   const cap = state.cap;
+  if (f === LOCK && isLocked(state.st, cap)) { // R3: the wax says how many finished flasks it still waits for
+    sfx.nope(); state.shake.push({ f, t: state.t });
+    state.msg = `مختومة بالشمع: أكمل ${flasksWord(LOCK_NEED - sealedCount(state.st, cap))} لتنفتح`;
+    return;
+  }
   if (state.sel < 0) {
     if (!state.st[f].length || isSealed(state.st[f], cap)) { sfx.nope(); state.shake.push({ f, t: state.t }); return; }
     state.sel = f; sfx.lift(); return;
@@ -455,12 +563,13 @@ function pour(i, j) {
   const hd = state.hidden.map(a => a.slice());
   hd[i].splice(hd[i].length - n, n);
   for (let k = 0; k < n; k++) hd[j].push(false);
-  if (hd[i].length) hd[i][hd[i].length - 1] = false; // a layer that reaches the top is unveiled
-  state.hidden = hd;
-  state.moves++; state.sel = -1; state.hint = null;
+  unveilTop(state.st[i], hd[i]); // what reaches the top is unveiled, with the rest of its run
+  state.hidden = hd; markSeen();
+  state.moves++; state.sel = -1; state.hint = null; state.idle = 0;
   const side = Math.sign(state.lay.pos[j].x - state.lay.pos[i].x) || 1;
   state.anim = { i, j, c, n, t: 0, side };
-  sfx.pour(n); events.push({ type: 'pour', i, j, n });
+  const room = j === SMALL ? smallCap(cap) : cap;
+  sfx.pour(n, st[j].length / room, (st[j].length + n) / room); events.push({ type: 'pour', i, j, n });
   afterChange(true);
   return true;
 }
@@ -468,9 +577,20 @@ function afterChange(poured) {
   const cap = state.cap, delay = poured ? tune.pour_time * 0.78 : 0;
   state.st.forEach((f, k) => {
     const s = isSealed(f, cap);
-    if (s && state.sealedAt[k] < 0) { state.sealedAt[k] = state.t + delay; sfx.seal(delay); events.push({ type: 'seal', f: k }); }
+    if (s && state.sealedAt[k] < 0) {
+      state.sealedAt[k] = state.t + delay; sfx.seal(delay); events.push({ type: 'seal', f: k });
+      if (poured) state.bursts.push({ f: k, t: state.t + delay + tune.stopper_time * 0.8 }); // sparks when the stopper lands
+    }
     if (!s) state.sealedAt[k] = -1;
   });
+  if (LOCK >= 0) { // R3: the wax breaks the moment enough flasks are finished, and is back after an undo
+    const open = !isLocked(state.st, cap);
+    if (open && state.lockAt < 0) {
+      state.lockAt = state.t + delay + 0.3; sfx.unlock(delay + 0.3); events.push({ type: 'unlock' });
+      state.msg = 'انكسر الشمع: القارورة مفتوحة الآن';
+    }
+    if (!open) state.lockAt = -1;
+  }
   state.stuck = false; state.dead = false;
   if (isSolved(state.st, cap)) { state.winAt = state.t + delay + 0.9; state.phase = 'won'; return; }
   if (!legalMoves(state.st, cap).length) {
@@ -511,13 +631,15 @@ function addExtraFlask() {
 }
 function undo() {
   const u = state.undo.pop(); if (!u || state.phase === 'won') return;
-  finishAnim(); state.st = u.st; state.hidden = u.hidden; state.moves = u.moves; state.sel = -1; state.hint = null;
+  finishAnim(); state.st = u.st; state.moves = u.moves; state.sel = -1; state.hint = null; state.idle = 0;
+  state.hidden = u.hidden.map((a, i) => a.map((h, k) => h && !(state.seen[i] && state.seen[i][k]))); // R1: what was seen stays seen
+  state.bursts = [];
   sfx.drop(); afterChange(false);
 }
 function useHint() {
   if (state.phase !== 'play') return;
   const r = solveAny(state.st, state.cap, tune.hint_weight, tune.hint_nodes);
-  state.hintUsed = true; playLog.row(q => { q.h++; });
+  state.hintUsed = true; state.idle = 0; playLog.row(q => { q.h++; });
   if (r.found && r.path.length) {
     state.hint = { i: r.path[0][0], j: r.path[0][1], t: state.t }; sfx.hint();
     state.cursor = state.sel === r.path[0][0] ? r.path[0][1] : r.path[0][0];
@@ -526,10 +648,12 @@ function useHint() {
 }
 function finishLevel() {
   const extra = state.moves - state.par;
-  // T2: gentler stars: 3 up to par+star3_extra, 2 up to par+star2_extra
-  let stars = extra <= tune.star3_extra ? 3 : extra <= Math.max(tune.star2_extra, tune.star3_extra) ? 2 : 1;
+  // T2: gentler stars: 3 up to par+star3_extra, 2 up to par+star2_extra. R1: a veiled level allows veil_extra more.
+  const slack = state.veil ? tune.veil_extra : 0;
+  state.s3 = tune.star3_extra + slack; state.s2 = Math.max(tune.star2_extra, tune.star3_extra) + slack;
+  let stars = extra <= state.s3 ? 3 : extra <= state.s2 ? 2 : 1;
   if (state.hintUsed) stars = Math.min(stars, 2);
-  state.stars = stars;
+  state.stars = stars; state.soukDone = false;
   const secs = Math.floor(state.time);
   if (state.daily) { // T3: the daily's best and the streak
     const key = 'daily:' + dateKey(), old = store.get(key, null);
@@ -546,10 +670,12 @@ function finishLevel() {
     state.best = bests[state.level]; store.set('best', bests);
     if (state.level < LEVELS) store.set('unlocked', Math.max(unlocked(), state.level + 1));
     state.allDone = state.level >= LEVELS;
+    state.soukDone = state.level % PER === 0 || state.allDone;
   }
   playLog.row(q => { q.w++; if (!q.f) q.f = q.a || 1; q.bm = q.bm == null ? state.moves : Math.min(q.bm, state.moves); q.bt = q.bt == null ? secs : Math.min(q.bt, secs); });
   state.gained = `${stars}`; state.score = stars;
-  sfx.win(); events.push({ type: 'win', level: state.level, stars });
+  sfx.win(); buzz(30); events.push({ type: 'win', level: state.level, stars });
+  state.resAt = state.t; state.starsShown = 0; state.sparks = []; state.bursts = [];
   scene = 'results';
 }
 
@@ -567,7 +693,59 @@ function drawEmblem(kind, x, y, s, col) {
   else if (kind === 'crescent') { ctx.beginPath(); ctx.arc(0, 0, s * 0.42, Math.PI * 0.3, Math.PI * 1.7); ctx.arc(s * 0.16, -s * 0.02, s * 0.32, Math.PI * 1.55, Math.PI * 0.45, true); ctx.closePath(); ctx.fill(); }
   else if (kind === 'pod') { ctx.beginPath(); ctx.moveTo(0, -s * 0.46); ctx.quadraticCurveTo(s * 0.42, 0, 0, s * 0.46); ctx.quadraticCurveTo(-s * 0.42, 0, 0, -s * 0.46); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, -s * 0.3); ctx.lineTo(0, s * 0.3); ctx.stroke(); }
   else if (kind === 'coral') { ctx.beginPath(); ctx.moveTo(0, s * 0.46); ctx.lineTo(0, 0); ctx.lineTo(-s * 0.26, -s * 0.24); ctx.lineTo(-s * 0.3, -s * 0.46); ctx.moveTo(0, 0); ctx.lineTo(s * 0.22, -s * 0.2); ctx.lineTo(s * 0.34, -s * 0.44); ctx.moveTo(-s * 0.26, -s * 0.24); ctx.lineTo(-s * 0.06, -s * 0.42); ctx.moveTo(s * 0.22, -s * 0.2); ctx.lineTo(s * 0.06, -s * 0.38); ctx.stroke(); }
+  else if (kind === 'crystal') { ctx.beginPath(); for (let k = 0; k < 3; k++) { const a = Math.PI / 2 + k * Math.PI / 3, cx = Math.cos(a) * s * 0.46, cy = Math.sin(a) * s * 0.46; ctx.moveTo(-cx, -cy); ctx.lineTo(cx, cy); } ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, s * 0.13, 0, Math.PI * 2); ctx.fill(); }
+  else if (kind === 'sprig') { ctx.beginPath(); ctx.moveTo(0, s * 0.46); ctx.lineTo(0, -s * 0.12); ctx.stroke(); for (const [dx, dy, r] of [[0, -0.27, 0], [-0.21, 0.06, -0.95], [0.21, 0.06, 0.95]]) { ctx.save(); ctx.translate(dx * s, dy * s); ctx.rotate(r); ctx.beginPath(); ctx.ellipse(0, 0, s * 0.11, s * 0.21, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore(); } }
+  else if (kind === 'smoke') { ctx.beginPath(); ctx.moveTo(-s * 0.12, s * 0.44); ctx.bezierCurveTo(s * 0.42, s * 0.2, -s * 0.46, -s * 0.02, s * 0.04, -s * 0.2); ctx.bezierCurveTo(s * 0.32, -s * 0.3, s * 0.12, -s * 0.48, -s * 0.08, -s * 0.4); ctx.stroke(); }
   ctx.restore();
+}
+/** R3: the red wax on a sealed-off flask: a cap over the mouth, a cord, and a seal showing how many finished flasks it waits for. */
+function drawWax(g, left, age) { // age < 0: whole; otherwise seconds since it broke (it lifts off and fades)
+  const k = age < 0 ? 0 : Math.min(1, age / 0.45); if (k >= 1) return;
+  ctx.save(); ctx.globalAlpha = 1 - k; ctx.translate(0, -k * 70); ctx.rotate(k * 0.25);
+  const nw = g.neckW / 2, top = -12, bot = g.neckH * 0.62;
+  const wg = ctx.createLinearGradient(-nw - 10, 0, nw + 10, 0); wg.addColorStop(0, '#7a1510'); wg.addColorStop(0.4, '#d9463a'); wg.addColorStop(1, '#84170f');
+  ctx.fillStyle = wg; ctx.beginPath();
+  ctx.moveTo(-nw - 9, top + 8); ctx.quadraticCurveTo(-nw - 9, top, -nw, top); ctx.lineTo(nw, top); ctx.quadraticCurveTo(nw + 9, top, nw + 9, top + 8);
+  ctx.lineTo(nw + 9, bot - 6); ctx.quadraticCurveTo(nw + 7, bot + 8, nw + 1, bot - 4); // the drips
+  ctx.quadraticCurveTo(nw * 0.3, bot + 16, 0, bot - 2); ctx.quadraticCurveTo(-nw * 0.5, bot + 10, -nw - 2, bot - 5); ctx.quadraticCurveTo(-nw - 8, bot + 4, -nw - 9, bot - 8);
+  ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#4e0b07'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,200,180,0.55)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-nw - 3, top + 6); ctx.lineTo(-nw - 3, bot - 14); ctx.stroke();
+  const r = Math.max(15, Math.min(24, g.w * 0.26)), cy = g.neckH + g.shH + r + 8;
+  ctx.strokeStyle = '#d9b46a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-nw * 0.5, bot - 4); ctx.lineTo(-2, cy - r + 3); ctx.moveTo(nw * 0.5, bot - 4); ctx.lineTo(2, cy - r + 3); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.arc(1.5, cy + 3, r + 2, 0, Math.PI * 2); ctx.fill();
+  const sg = ctx.createRadialGradient(-r * 0.3, cy - r * 0.3, 2, 0, cy, r + 3); sg.addColorStop(0, '#e2594b'); sg.addColorStop(1, '#8a1810');
+  ctx.fillStyle = sg; ctx.beginPath();
+  for (let q = 0; q < 24; q++) { const a = q * Math.PI / 12, rad = r + (q % 2 ? 2.5 : 0); ctx.lineTo(Math.cos(a) * rad, cy + Math.sin(a) * rad); }
+  ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#4e0b07'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,205,185,0.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, cy, r - 5, 0, Math.PI * 2); ctx.stroke();
+  if (left > 0) text(String(left), 0, cy + 1, Math.round(r * 1.15), '#ffe9d6', 'center', 'bold');
+  ctx.restore();
+}
+/** Gold sparks: a burst where a stopper lands and around each star on the results card. Decoration only. */
+let sparkN = 0;
+function burst(x, y, n, col, speed = 1) {
+  for (let k = 0; k < n; k++) {
+    const id = ++sparkN, a = hash01(id, 1) * Math.PI * 2, v = (130 + hash01(id, 2) * 230) * speed;
+    state.sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 120 * speed, age: 0, life: 0.55 + hash01(id, 3) * 0.5, r: 5 + hash01(id, 4) * 6, col: k % 3 ? '#ffe08a' : col });
+  }
+}
+function stepSparks(dt) {
+  for (const b of state.bursts) if (state.t >= b.t) {
+    b.done = true; const f = state.st[b.f];
+    if (f && f.length && state.lay) { const P = flaskPose(b.f); burst(P.x, P.y - 14, CHEAP ? 6 : 14, SCENT[ci(f[0])].hi); buzz(12); }
+  }
+  state.bursts = state.bursts.filter(b => !b.done);
+  for (const q of state.sparks) { q.age += dt; q.vy += 620 * dt; q.x += q.vx * dt; q.y += q.vy * dt; }
+  state.sparks = state.sparks.filter(q => q.age < q.life);
+}
+function drawSparks() {
+  for (const q of state.sparks) {
+    const k = 1 - q.age / q.life, r = q.r * (0.4 + 0.6 * k);
+    ctx.globalAlpha = Math.min(1, k * 1.6); ctx.fillStyle = q.col; ctx.beginPath();
+    for (let n = 0; n < 8; n++) { const a = n * Math.PI / 4 + q.age * 3, rad = n % 2 ? r * 0.36 : r; ctx.lineTo(q.x + Math.cos(a) * rad, q.y + Math.sin(a) * rad); }
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 }
 /** A gold stopper (faceted dome with a finial). */
 function drawStopper(nw, s) {
@@ -675,6 +853,10 @@ function drawFlask(g, x, y, angle, layers, o = {}) {
     const bounce = k < 1 ? 0 : 0;
     ctx.save(); ctx.translate(0, -(1 - e) * 130 + bounce); drawStopper(nw, g.neckW * 0.95); ctx.restore();
   }
+  if (o.wax) { // R3: sealed off with wax: dimmed until it opens
+    if (o.wax.age < 0) { ctx.fillStyle = 'rgba(12,6,3,0.3)'; ctx.fill(g.outer); }
+    drawWax(g, o.wax.left, o.wax.age);
+  }
   ctx.restore();
 }
 /** A pointing hand (index finger down), tip at (x, y). */
@@ -747,6 +929,7 @@ function iconVial(x, y, s, c) { // the free small flask: a short round vial with
   ctx.beginPath(); ctx.moveTo(x - s * 0.3, y + s * 0.12); ctx.bezierCurveTo(x - s * 0.28, y + s * 0.36, x + s * 0.28, y + s * 0.36, x + s * 0.3, y + s * 0.12); ctx.closePath(); ctx.fill();
   rr(x - s * 0.16, y - s * 0.5, s * 0.32, s * 0.1, s * 0.04); ctx.fill();
 }
+function iconChevron(x, y, s, c, dir) { ctx.strokeStyle = c; ctx.lineWidth = s * 0.14; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(x - dir * s * 0.12, y - s * 0.3); ctx.lineTo(x + dir * s * 0.16, y); ctx.lineTo(x - dir * s * 0.12, y + s * 0.3); ctx.stroke(); ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'; }
 function iconCheck(x, y, s, c) { ctx.strokeStyle = c; ctx.lineWidth = s * 0.14; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(x - s * 0.3, y); ctx.lineTo(x - s * 0.08, y + s * 0.22); ctx.lineTo(x + s * 0.32, y - s * 0.24); ctx.stroke(); ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'; }
 /** S2: the small honest 'صعبة' pill, centred at (x, y). */
 function badgeW(h = 40) { setFont(24, 'bold'); ctx.direction = 'rtl'; const w = Math.max(h * 2.2, ctx.measureText('صعبة').width + 34); ctx.direction = 'ltr'; return w; }
@@ -784,30 +967,37 @@ function drawButton(b, label, icon, on = false, pulse = 0, enabled = true) {
 }
 
 // ---- Drawing: the shop ---------------------------------------------------------------------
-function drawWall() { // dark walnut panels with grain (cached)
-  if (!bgCache) {
+function drawWall(n = 0) { // the souk's wall: painted panels with grain and a carved arch (cached, one per souk)
+  const key = Math.max(0, Math.min(SOUKS.length - 1, n | 0)), pal = SOUKS[key].wall;
+  if (!bgCache[key]) {
     const S = Math.min(2, Math.max(1, VIEW_R)), off = document.createElement('canvas');
     off.width = Math.ceil(W * S); off.height = Math.ceil(H * S);
     const c2 = off.getContext('2d'); c2.scale(S, S);
-    const g = c2.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#24140b'); g.addColorStop(1, '#170c06');
+    const g = c2.createLinearGradient(0, 0, 0, H); g.addColorStop(0, pal[0]); g.addColorStop(1, pal[1]);
     c2.fillStyle = g; c2.fillRect(0, 0, W, H);
     for (let p = 0; p < 6; p++) {
       const x = p * 120;
-      c2.fillStyle = p % 2 ? 'rgba(80,45,22,0.22)' : 'rgba(60,32,15,0.18)'; c2.fillRect(x, 0, 120, H);
+      c2.fillStyle = p % 2 ? pal[2] : pal[3]; c2.fillRect(x, 0, 120, H);
       c2.strokeStyle = 'rgba(0,0,0,0.45)'; c2.lineWidth = 3; c2.beginPath(); c2.moveTo(x, 0); c2.lineTo(x, H); c2.stroke();
-      c2.strokeStyle = 'rgba(140,85,45,0.16)'; c2.lineWidth = 1.4;
+      c2.strokeStyle = pal[4]; c2.lineWidth = 1.4;
       for (let k = 0; k < 7; k++) {
         const gx = x + 12 + hash01(p, k) * 96; c2.beginPath(); c2.moveTo(gx, 0);
         for (let yy = 0; yy <= H; yy += 64) c2.lineTo(gx + Math.sin(yy / 90 + p + k) * 6 + hash01(p * 7 + k, yy) * 3, yy);
         c2.stroke();
       }
     }
-    // carved arch niche behind the shelves
-    c2.strokeStyle = 'rgba(210,150,80,0.16)'; c2.lineWidth = 5;
-    c2.beginPath(); c2.moveTo(40, H); c2.lineTo(40, 330); c2.quadraticCurveTo(40, 230, W / 2, 200); c2.quadraticCurveTo(W - 40, 230, W - 40, 330); c2.lineTo(W - 40, H); c2.stroke();
-    bgCache = off;
+    // the carved arch behind the shelves, in the souk's own shape
+    c2.strokeStyle = pal[5]; c2.lineWidth = 5; c2.beginPath();
+    const kind = SOUKS[key].arch;
+    if (kind === 'pointed') { c2.moveTo(40, H); c2.lineTo(40, 340); c2.bezierCurveTo(40, 240, 230, 205, W / 2, 150); c2.bezierCurveTo(W - 230, 205, W - 40, 240, W - 40, 340); c2.lineTo(W - 40, H); }
+    else if (kind === 'keel') { c2.moveTo(40, H); c2.lineTo(40, 340); c2.bezierCurveTo(40, 235, 300, 262, W / 2, 162); c2.bezierCurveTo(W - 300, 262, W - 40, 235, W - 40, 340); c2.lineTo(W - 40, H); }
+    else if (kind === 'horseshoe') { c2.moveTo(64, H); c2.lineTo(64, 400); c2.bezierCurveTo(-8, 300, 130, 196, W / 2, 196); c2.bezierCurveTo(W - 130, 196, W + 8, 300, W - 64, 400); c2.lineTo(W - 64, H); }
+    else { c2.moveTo(40, H); c2.lineTo(40, 330); c2.quadraticCurveTo(40, 230, W / 2, 200); c2.quadraticCurveTo(W - 40, 230, W - 40, 330); c2.lineTo(W - 40, H); }
+    c2.stroke();
+    for (const k in bgCache) if (Object.keys(bgCache).length > 1) { bgCache[k].width = bgCache[k].height = 0; delete bgCache[k]; } // keep two walls at most: phones are short of canvas memory
+    bgCache[key] = off;
   }
-  ctx.drawImage(bgCache, 0, 0, W, H);
+  ctx.drawImage(bgCache[key], 0, 0, W, H);
 }
 function drawShelf(y) {
   ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(20, y + 30, W - 40, 26);
@@ -851,8 +1041,8 @@ function flaskPose(k) { // where flask k's mouth is and how far it tilts
   for (const s of state.shake) if (s.f === k) { const age = state.t - s.t; if (age < 0.3) x += Math.sin(age * 60) * 7 * (1 - age / 0.3); }
   return { x, y, ang };
 }
-function drawShop() {
-  drawWall();
+function drawShop(sparks = true) {
+  drawWall(wallOf(state.level));
   drawLamp(W / 2, 46, 64, state.t);
   const lay = state.lay; if (!lay) return;
   for (const y of lay.shelfY) drawShelf(y);
@@ -870,7 +1060,8 @@ function drawShop() {
     if (state.sel === k) glow = 'rgba(255,236,170,0.85)';
     const sealT = state.sealedAt[k];
     const stopper = sealT >= 0 && state.t >= sealT ? state.t - sealT : -1;
-    drawFlask(geo(k), pose.x, pose.y, pose.ang, flaskLayers(k), { glow, stopper, t: state.t, small: P.small });
+    const wax = k === LOCK && state.lock ? { left: LOCK_NEED - sealedCount(state.st, state.cap), age: state.lockAt < 0 ? -1 : state.t - state.lockAt } : null;
+    drawFlask(geo(k), pose.x, pose.y, pose.ang, flaskLayers(k), { glow, stopper, t: state.t, small: P.small, wax });
     if (stopper >= 0 && state.st[k].length) drawWisp(pose.x, pose.y - lay.g.neckW * 0.95, SCENT[ci(state.st[k][0])].hi, state.t + k, Math.min(1, stopper / 0.8));
     if (state.kbd && state.cursor === k && state.phase === 'play') {
       ctx.fillStyle = '#ffe08a'; const cy = lay.shelfY[P.row] + 50;
@@ -893,6 +1084,7 @@ function drawShop() {
       ctx.lineCap = 'butt';
     }
   }
+  if (sparks) drawSparks();
 }
 function guideTarget() { // what the drawn hand points at: the hint, or level 1's next move
   const m = state.hint ? [state.hint.i, state.hint.j] : state.plan;
@@ -910,10 +1102,15 @@ function drawGuide() {
 function drawHud() {
   drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
   drawButton(B.menu, '', iconGrid);
-  text(state.daily ? 'عطر اليوم' : `المستوى ${state.level}`, W / 2, 150, 40, '#ffe7b6', 'center', 'bold');
-  if (state.phase !== 'deal' && state.hard) drawBadge(W / 2 + 170, 150); // S2: shown before the first pour
+  const title = state.daily ? 'عطر اليوم' : `${SOUKS[soukOf(state.level)].city} · المستوى ${state.level}`;
+  text(title, W / 2, 150, 40, '#ffe7b6', 'center', 'bold');
+  if (state.phase !== 'deal' && state.hard) { // S2: shown before the first pour, after the name
+    setFont(40, 'bold'); ctx.direction = 'rtl'; const tw = ctx.measureText(title).width; ctx.direction = 'ltr';
+    drawBadge(Math.max(8 + badgeW() / 2, W / 2 - tw / 2 - 16 - badgeW() / 2), 150);
+  }
   if (state.phase !== 'deal') {
-    const note = isNarrow(state.level) ? ' · قوارير ضيقة' : '';
+    const d = state.daily ? null : DATA[state.level - 1];
+    const note = !d ? '' : d.cap < tune.capacity ? ' · قوارير ضيقة' : d.cap > tune.capacity ? ' · قوارير طويلة' : d.empties === 1 ? ' · رف ضيق' : '';
     text(`السكبات ${state.moves} · الهدف ${state.par}${note}`, W / 2, 196, 28, '#e9d3a8');
   }
 }
@@ -921,7 +1118,12 @@ function drawBanner() {
   let msg = state.msg, warn = false;
   if (state.dead && !state.stuck) { msg = 'طريق مسدود: لا حل من هنا، تراجع خطوة'; warn = true; }
   if (!msg || state.phase === 'deal') return;
-  const lines = wrap(msg, 27, W - 100, 'bold'), two = lines.length > 1;
+  let lines = wrap(msg, 27, W - 100, 'bold');
+  if (lines.length === 2) { // two lines: break them near the middle, never one word alone on the second
+    setFont(27, 'bold'); ctx.direction = 'rtl'; const full = ctx.measureText(msg).width; ctx.direction = 'ltr';
+    const even = wrap(msg, 27, Math.min(W - 100, full * 0.56 + 30), 'bold'); if (even.length === 2) lines = even;
+  }
+  const two = lines.length > 1;
   const x = 30, y = state.lay && state.lay.rows === 2 ? (two ? 1016 : 1022) : 940, w = W - 60, h = two ? 90 : 76;
   ctx.fillStyle = 'rgba(0,0,0,0.35)'; rr(x + 2, y + 5, w, h, 18); ctx.fill();
   ctx.fillStyle = warn ? '#5a1e14' : '#3a2412'; rr(x, y, w, h, 18); ctx.fill();
@@ -958,7 +1160,8 @@ function drawStuck() {
 function drawControls() {
   const pulse = (state.dead || state.stuck) ? 0.45 + 0.45 * Math.sin(state.t * 7) : 0;
   drawButton(B.undo, 'تراجع', iconUndo, false, pulse, state.undo.length > 0);
-  drawButton(B.hint, 'تلميح', iconBulb, false, 0, state.phase === 'play');
+  const nudge = tune.idle_nudge > 0 && state.idle > tune.idle_nudge && state.phase === 'play' && !state.stuck ? 0.25 + 0.25 * Math.sin(state.t * 4) : 0;
+  drawButton(B.hint, 'تلميح', iconBulb, false, nudge, state.phase === 'play'); // a quiet glow after a long pause: help is free
   drawButton(B.restart, 'إعادة', iconRestart, false, state.stuck ? pulse : 0);
 }
 
@@ -974,93 +1177,132 @@ function flaskAt(p) {
 const buttonAt = (p, list) => { for (const k of list) if (inRect(p, B[k])) return k; return null; };
 function handleMute(ev) { if (ev.type === 'down' && inRect(ev, B.mute)) { setMuted(!muted); return true; } return false; }
 function goPlay(lv) { reset(); scene = 'play'; startLevel(lv); } // lv 0: the daily flask
-function toTitle() { const t = state.t; reset(); state.t = t; scene = 'title'; }
+function toTitle() { const t = state.t, lv = state.level, daily = state.daily; reset(); state.t = t; if (!daily) titlePage = soukOf(lv); scene = 'title'; }
+function turnPage(d) { const q = Math.max(0, Math.min(PAGES - 1, titlePage + d)); if (q !== titlePage) { titlePage = q; sfx.page(); } }
+let titleGeo = null; // the title shelf's flask shape, made once
+const firstPage = () => OPEN_ALL ? 0 : soukOf(unlocked()); // the title opens on the souk being played (the review link: on the first)
 const scenes = {
   figures: {
     update(dt) { state.t += dt; },
     draw() {
       drawWall(); drawLamp(W / 2, 40, 50, state.t);
       text('أشكال اللعبة', W / 2, 150, 40, '#ffe7b6', 'center', 'bold');
-      const g = makeLayout(10, tune.capacity).g, gn = makeLayout(10, tune.narrow_capacity).g, S = 0.62, t = state.t;
-      const cell = k => ({ x: 82 + (k % 5) * 139, y: 290 + Math.floor(k / 5) * 350 });
-      const label = (k, s2) => { const c = cell(k); text(s2, c.x, c.y + g.totalH * S + 44, 24, '#f6e3bd', 'center', 'bold'); };
-      const flask = (k, gg, ang, layers, o) => { const c = cell(k); ctx.save(); ctx.translate(c.x, c.y); ctx.scale(S, S); drawFlask(gg, 0, gg === gn ? g.totalH - gn.totalH : 0, ang, layers, o); ctx.restore(); };
-      for (let k = 0; k < 9; k++) {
+      const lay = makeLayout(10, tune.capacity), g = lay.g, gn = makeLayout(10, tune.narrow_capacity).g, gt = makeLayout(10, tune.capacity + 1).g, S = 0.5, t = state.t;
+      const cell = k => ({ x: 70 + (k % 6) * 116, y: 236 + Math.floor(k / 6) * 262 });
+      const label = (k, s2) => { const c = cell(k); text(s2, c.x, c.y + g.totalH * S + 40, 24, '#f6e3bd', 'center', 'bold'); };
+      const flask = (k, gg, ang, layers, o) => { const c = cell(k); ctx.save(); ctx.translate(c.x, c.y); ctx.scale(S, S); drawFlask(gg, 0, g.totalH - gg.totalH, ang, layers, o); ctx.restore(); };
+      for (let k = 0; k < SCENT.length; k++) {
         const layers = []; for (let q = 0; q < 4; q++) layers.push({ c: k, amt: 1 });
         flask(k, g, 0, layers, { stopper: 1, t });
         const c = cell(k); drawWisp(c.x, c.y - g.neckW * 0.95 * S, SCENT[k].hi, t + k, 1);
-        drawEmblem(SCENT[k].em, c.x, c.y + g.totalH * S + 82, 26, SCENT[k].hi);
+        drawEmblem(SCENT[k].em, c.x, c.y + g.totalH * S + 74, 24, SCENT[k].hi);
         label(k, SCENT[k].n);
       }
-      flask(9, g, 0, [{ c: 2, amt: 1, hidden: true }, { c: 3, amt: 1, hidden: true }, { c: 0, amt: 1 }], { t }); label(9, 'طبقة محجوبة');
-      flask(10, gn, 0, [{ c: 5, amt: 1 }, { c: 7, amt: 1 }, { c: 5, amt: 1 }], { t }); label(10, 'قارورة ضيقة');
-      flask(11, g, 0.42, [{ c: 1, amt: 2 }, { c: 6, amt: 1 }], { t }); label(11, 'سكب');
-      flask(12, g, 0, [], { glow: 'rgba(255,210,90,0.9)', t }); label(12, 'تلميح');
-      const c13 = cell(13); drawHand(c13.x, c13.y + 120, 100, t); label(13, 'اليد');
-      const c14 = cell(14); drawLamp(c14.x, c14.y + 30, 60, t); label(14, 'القنديل');
+      flask(12, g, 0, [{ c: 2, amt: 1, hidden: true }, { c: 3, amt: 1, hidden: true }, { c: 0, amt: 1 }], { t }); label(12, 'محجوبة');
+      flask(13, gn, 0, [{ c: 5, amt: 1 }, { c: 7, amt: 1 }, { c: 5, amt: 1 }], { t }); label(13, 'ضيقة');
+      flask(14, gt, 0, [{ c: 9, amt: 1 }, { c: 10, amt: 1 }, { c: 11, amt: 1 }, { c: 4, amt: 1 }, { c: 9, amt: 1 }], { t }); label(14, 'طويلة');
+      flask(15, g, 0, [{ c: 6, amt: 1 }, { c: 1, amt: 1 }], { t, wax: { left: 2, age: -1 } }); label(15, 'مختومة');
+      flask(16, g, 0.42, [{ c: 1, amt: 2 }, { c: 6, amt: 1 }], { t }); label(16, 'سكب');
+      flask(17, g, 0, [], { glow: 'rgba(255,210,90,0.9)', t }); label(17, 'تلميح');
+      const c18 = cell(18); drawHand(c18.x, c18.y + 110, 90, t); label(18, 'اليد');
+      const c19 = cell(19); drawLamp(c19.x, c19.y + 30, 52, t); label(19, 'القنديل');
+      SOUKS.forEach((sk, k) => { ctx.save(); ctx.translate(286 + k * 52, 1050); ctx.scale(0.064, 0.064); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip(); drawWall(k); ctx.restore(); });
+      text('جدران الأسواق', 492, 1160, 24, '#f6e3bd', 'center', 'bold');
     },
   },
   title: {
     update(dt) {
       state.t += dt;
+      if (titlePage < 0) titlePage = firstPage();
       if (pressed('Enter') || pressed('Space')) goPlay(unlocked());
       else if (pressed('KeyD')) goPlay(0);
       else if (pressed('KeyS')) scene = 'stats';
+      else if (pressed('ArrowLeft')) turnPage(1);
+      else if (pressed('ArrowRight')) turnPage(-1);
     },
     pointer(ev) {
       if (handleMute(ev)) return;
-      const tiles = [...Array(LEVELS).keys()];
-      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['start', 'daily', 'stats', 'home'])] || null; return; }
-      if (ev.type !== 'up') return;
-      state.btnDown = null;
-      const k = buttonAt(ev, ['start', 'daily', 'stats', 'home']);
-      if (k === 'start') { goPlay(unlocked()); return; }
-      if (k === 'daily') { goPlay(0); return; }
-      if (k === 'stats') { sfx.ui(); scene = 'stats'; return; }
-      if (k === 'home' && location.protocol.startsWith('http')) { location.href = '../../'; return; }
-      for (const n of tiles) if (inRect(ev, TILE(n)) && n + 1 <= unlocked()) { goPlay(n + 1); return; }
+      if (titlePage < 0) titlePage = firstPage();
+      const btns = ['start', 'daily', 'stats', 'home', 'pgNext', 'pgPrev'];
+      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, btns)] || null; state.press = { x: ev.x, y: ev.y }; return; }
+      const was = state.btnDown, from = state.press; state.btnDown = null; state.press = null;
+      if (ev.type !== 'up' || !from) return;
+      // a sideways drag over the tiles turns the page (Arabic: the next souk comes from the left)
+      const dx = ev.x - from.x;
+      if (from.y > 750 && Math.abs(dx) > 70 && Math.abs(dx) > 2 * Math.abs(ev.y - from.y)) { turnPage(dx > 0 ? 1 : -1); return; }
+      const k = buttonAt(ev, btns);
+      if (k && B[k] === was) {
+        if (k === 'start') goPlay(unlocked());
+        else if (k === 'daily') goPlay(0);
+        else if (k === 'stats') { sfx.ui(); scene = 'stats'; }
+        else if (k === 'pgNext') turnPage(1);
+        else if (k === 'pgPrev') turnPage(-1);
+        else if (k === 'home' && location.protocol.startsWith('http')) location.href = '../../';
+        return;
+      }
+      for (let n = 0; n < PER; n++) {
+        const lv = titlePage * PER + n + 1, r = TILE(n);
+        if (lv > LEVELS || !inRect(ev, r) || !inRect(from, r)) continue;
+        if (lv <= unlocked()) goPlay(lv); else sfx.nope();
+        return;
+      }
     },
     draw() {
-      const t = state.t;
-      drawWall(); drawLamp(W / 2, 40, 60, t);
-      text('عطّار', W / 2, 205, 120, '#ffe2a6', 'center', 'bold');
-      text('Attar', W / 2, 280, 38, '#e2c58f', 'center');
+      const t = state.t, lv = unlocked(), page = titlePage < 0 ? firstPage() : titlePage, sk0 = SOUKS[page];
+      drawWall(page); drawLamp(W / 2, 40, 60, t);
+      text('عطّار', W / 2, 192, 116, '#ffe2a6', 'center', 'bold');
+      text('Attar', W / 2, 264, 36, '#e2c58f', 'center');
       // a small shelf of sealed flasks
-      drawShelf(630);
-      const g = makeLayout(10, tune.capacity).g;
+      drawShelf(600);
+      const g = titleGeo || (titleGeo = makeLayout(10, tune.capacity).g);
       [0, 4, 6, 1, 5].forEach((c, k) => {
         const x = 150 + k * 105, layers = []; for (let q = 0; q < 4; q++) layers.push({ c, amt: 1 });
-        const s = 0.72; ctx.save(); ctx.translate(x, 630 - g.totalH * s); ctx.scale(s, s);
+        const s = 0.72; ctx.save(); ctx.translate(x, 600 - g.totalH * s); ctx.scale(s, s);
         drawFlask(g, 0, 0, 0, layers, { stopper: 1, t }); drawWisp(0, -g.neckW * 0.95, SCENT[c].hi, t + k, 0.6);
         ctx.restore();
       });
-      const lv = unlocked();
       drawButton(B.start, lv > 1 ? `تابع: المستوى ${lv}` : 'ابدأ', null, true);
       // T3: the daily flask and its streak
       const sk = streakNow(), db = B.daily, dy = db.y + (state.btnDown === db ? 3 : 0);
       drawButton(db, '', null);
-      text('عطر اليوم', db.x + db.w / 2 + (sk.today ? 18 : 0), dy + 40, 32, '#fbeed2', 'center', 'bold');
-      if (sk.today) iconCheck(db.x + 40, dy + 40, 40, '#8fe0a0');
-      text(sk.n ? `سلسلة الأيام: ${sk.n}` : 'ابدأ سلسلة أيام', db.x + db.w / 2, dy + 82, 24, '#e9c98a', 'center', 'bold');
-      const bests = store.get('best', {}), rows = playLog.read().rows;
-      for (let n = 0; n < LEVELS; n++) {
-        const r = TILE(n), open = n + 1 <= lv, b = bests[n + 1];
+      text('عطر اليوم', db.x + db.w / 2 + (sk.today ? 18 : 0), dy + 37, 32, '#fbeed2', 'center', 'bold');
+      if (sk.today) iconCheck(db.x + 40, dy + 37, 40, '#8fe0a0');
+      text(sk.n ? `سلسلة الأيام: ${sk.n}` : 'ابدأ سلسلة أيام', db.x + db.w / 2, dy + 77, 24, '#e9c98a', 'center', 'bold');
+      // the souk on this page: its name, its stars, and the arrows (Arabic pages turn leftwards)
+      const first = page * PER + 1, last = Math.min(LEVELS, first + PER - 1), reached = lv >= first;
+      text(`${sk0.city} · ${sk0.souk}`, W / 2, 786, 34, '#ffe2a6', 'center', 'bold');
+      text(reached ? `السوق ${page + 1} من ${PAGES} · النجوم ${starsIn(first, last)} من ${(last - first + 1) * 3}` : `السوق ${page + 1} من ${PAGES} · يفتح بعد المستوى ${first - 1}`,
+        W / 2, 828, 24, '#e9d3a8', 'center', 'bold');
+      drawButton(B.pgNext, '', (x, y, s, c) => iconChevron(x, y, s, c, -1), false, 0, page < PAGES - 1);
+      drawButton(B.pgPrev, '', (x, y, s, c) => iconChevron(x, y, s, c, 1), false, 0, page > 0);
+      const bests = store.get('best', {});
+      for (let n = 0; n < PER && first + n <= LEVELS; n++) {
+        const num = first + n, r = TILE(n), open = num <= lv, b = bests[num], now = num === lv && !b;
+        ctx.fillStyle = 'rgba(0,0,0,0.3)'; rr(r.x + 1, r.y + 4, r.w, r.h, 16); ctx.fill();
         ctx.fillStyle = open ? '#4a2a14' : '#2a1810'; rr(r.x, r.y, r.w, r.h, 16); ctx.fill();
-        ctx.strokeStyle = open ? '#c9963e' : 'rgba(201,150,62,0.3)'; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.strokeStyle = now ? `rgba(255,222,130,${0.75 + 0.25 * Math.sin(t * 4)})` : open ? '#c9963e' : 'rgba(201,150,62,0.3)'; ctx.lineWidth = now ? 4 : 2.5; ctx.stroke();
         if (open) {
-          text(String(n + 1), r.x + r.w / 2, r.y + 40, 38, '#ffe7b6', 'center', 'bold');
-          for (let s = 0; s < 3; s++) drawStar(r.x + r.w / 2 + (s - 1) * 30, r.y + 84, 12, b && s < b.stars);
-        } else iconLock(r.x + r.w / 2, r.y + r.h / 2, 56, 'rgba(201,150,62,0.55)');
+          text(String(num), r.x + r.w / 2, r.y + 37, 36, '#ffe7b6', 'center', 'bold');
+          for (let q = 0; q < 3; q++) drawStar(r.x + r.w / 2 + (1 - q) * 30, r.y + 77, 12, b && q < b.stars);
+        } else iconLock(r.x + r.w / 2, r.y + r.h / 2, 52, 'rgba(201,150,62,0.55)');
       }
-      for (let n = 0; n < LEVELS; n++) { // S2: a level once dealt as hard says so on its tile (drawn last, over the gaps)
-        const q = rows['L' + (n + 1)], r = TILE(n);
-        if (q && q.hard && n + 1 <= lv) drawBadge(r.x + r.w - 30, r.y + 2, 30);
+      for (let n = 0; n < PER && first + n <= LEVELS; n++) { // S2: a hard level says so on its tile (drawn last, over the gaps)
+        const num = first + n, r = TILE(n);
+        if (DATA[num - 1].hard && num <= lv) drawBadge(r.x + 30, r.y + 2, 30);
       }
-      CONTROLS.forEach((c, i) => text(c, W / 2, 1214 + i * 36, 25, '#e9d3a8'));
+      for (let q = 0; q < PAGES; q++) { // one dot per souk, first on the right
+        const x = W / 2 + ((PAGES - 1) / 2 - q) * 28, on = q === page;
+        ctx.fillStyle = on ? '#ffd877' : q <= soukOf(lv) ? 'rgba(233,201,138,0.55)' : 'rgba(233,201,138,0.22)';
+        ctx.beginPath(); ctx.arc(x, 1222, on ? 7 : 5, 0, Math.PI * 2); ctx.fill();
+      }
+      text(TOUCH ? CONTROLS[0] : CONTROLS[1], W / 2, 1256, 25, '#e9d3a8');
       drawButton(B.mute, '', (x, y, s, c) => iconSpeaker(x, y, s, c, muted));
       drawButton(B.stats, '', iconChart);
       text('إحصائياتي', B.stats.x + B.stats.w / 2, B.stats.y + B.stats.h + 22, 24, '#e9d3a8', 'center', 'bold');
-      if (location.protocol.startsWith('http')) drawButton(B.home, '', iconHouse);
+      const http = location.protocol.startsWith('http');
+      if (http) drawButton(B.home, '', iconHouse);
+      drawStar(http ? 134 : 44, 56, 17, true); // every star earned, of every star there is
+      text(`${starsIn(1, LEVELS)} / ${LEVELS * 3}`, http ? 160 : 70, 58, 28, '#ffe7b6', 'left', 'bold');
     },
   },
   stats: { // S1: what this device logged, nothing more
@@ -1082,10 +1324,11 @@ const scenes = {
       state.t += dt;
       state.shake = state.shake.filter(s => state.t - s.t < 0.3);
       if (state.phase === 'deal') { dealStep(); return; }
+      stepSparks(dt);
       if (state.anim) { state.anim.t += dt; if (state.anim.t >= tune.pour_time) state.anim = null; }
       if (state.hint && state.t - state.hint.t > tune.hint_time) state.hint = null;
       if (state.phase === 'won') { if (state.t >= state.winAt && !state.anim) finishLevel(); return; }
-      if (!state.stuck) state.time += dt; // S1: the play log's time (not shown in play)
+      if (!state.stuck) { state.time += dt; state.idle += dt; } // S1: the play log's time (not shown in play); idle: time since the last pour
       if (pressed('KeyE')) addExtraFlask();
       const n = state.st.length, lay = state.lay;
       if (pressed('ArrowRight')) { state.kbd = true; state.cursor = (state.cursor + 1) % n; }
@@ -1138,34 +1381,45 @@ const scenes = {
   },
   results: {
     update(dt) {
-      state.t += dt;
+      state.t += dt; stepSparks(dt);
+      const age = state.t - state.resAt; // the stars land one by one, each with its chime and sparks
+      while (state.starsShown < state.stars && age >= 0.35 + state.starsShown * 0.32) {
+        const k = state.starsShown++; sfx.star(k); burst(W / 2 + (1 - k) * 118, 526, CHEAP ? 5 : 12, '#fff2c0', 0.8);
+      }
       if (pressed('Enter') || pressed('Space') || pressed('KeyN')) nextLevel();
-      if (pressed('KeyR')) { scene = 'play'; restartLevel(false); }
-      if (pressed('Escape')) toTitle();
+      else if (pressed('KeyR')) { scene = 'play'; restartLevel(false); }
+      else if (pressed('Escape')) toTitle();
     },
     pointer(ev) {
       if (handleMute(ev)) return;
+      if (ev.type === 'down') { state.btnDown = B[buttonAt(ev, ['next', 'again'])] || null; return; }
+      const was = state.btnDown; state.btnDown = null;
       if (ev.type !== 'up') return;
-      const k = buttonAt(ev, ['next', 'again']);
-      if (k === 'next') nextLevel(); else if (k === 'again') { scene = 'play'; restartLevel(false); }
+      const k = buttonAt(ev, ['next', 'again']); if (!k || B[k] !== was) return;
+      if (k === 'next') nextLevel(); else { scene = 'play'; restartLevel(false); }
     },
     draw() {
-      drawShop(); drawHud();
+      drawShop(false); drawHud();
       ctx.fillStyle = 'rgba(15,8,4,0.55)'; ctx.fillRect(0, 0, W, H);
-      const x = 60, y = 330, w = W - 120, h = 730;
+      const x = 60, y = 330, w = W - 120, h = 730, age = state.t - state.resAt;
+      const here = SOUKS[soukOf(state.level)], more = !state.daily && !state.allDone;
       ctx.fillStyle = 'rgba(0,0,0,0.4)'; rr(x + 4, y + 10, w, h, 30); ctx.fill();
       ctx.fillStyle = '#3a2412'; rr(x, y, w, h, 30); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 4; ctx.stroke();
-      text(state.daily ? 'اكتمل عطر اليوم' : state.allDone ? 'أكملت رف العطّار كله' : `اكتمل المستوى ${state.level}`, W / 2, y + 76, 44, '#ffe2a6', 'center', 'bold');
+      text(state.daily ? 'اكتمل عطر اليوم' : state.allDone ? 'أكملت كل الأسواق' : state.soukDone ? `أكملت ${here.souk}` : `اكتمل المستوى ${state.level}`, W / 2, y + 76, 44, '#ffe2a6', 'center', 'bold');
       if (state.hard) drawBadge(x + w - 62, y + 26);
-      for (let k = 0; k < 3; k++) drawStar(W / 2 + (k - 1) * 118, y + 196, 50, k < state.stars);
+      for (let k = 0; k < 3; k++) { // first star on the right; a landed star swells, then settles
+        const on = k < state.starsShown, since = age - (0.35 + k * 0.32);
+        drawStar(W / 2 + (1 - k) * 118, y + 196, 50 * (on ? 1 + 0.35 * Math.max(0, 1 - since / 0.25) : 1), on);
+      }
       text(`السكبات ${state.moves} · الهدف ${state.par}`, W / 2, y + 300, 34, '#f6e3bd', 'center', 'bold');
       if (state.daily) text(`سلسلة الأيام: ${state.streak}${state.best ? ` · أفضل اليوم: ${state.best.moves} سكبة` : ''}`, W / 2, y + 352, 28, '#ffe2a6', 'center', 'bold');
       else if (state.best) text(`أفضل نتيجة: ${state.best.moves} سكبة`, W / 2, y + 352, 28, '#e9d3a8');
       const why = state.hintUsed ? 'التلميح يحجب النجمة الثالثة' // T2: the gentler rule, said in numbers
-        : `ثلاث نجوم بزيادة ${tune.star3_extra} سكبات أو أقل على الهدف، ونجمتان بزيادة ${Math.max(tune.star2_extra, tune.star3_extra)}`;
+        : `ثلاث نجوم بزيادة ${state.s3} سكبات أو أقل على الهدف، ونجمتان بزيادة ${state.s2}`;
       wrap(why, 26, w - 60, '').slice(0, 2).forEach((ln, k) => text(ln, W / 2, y + 404 + k * 32, 26, '#e9d3a8'));
-      drawButton(B.next, state.daily || state.allDone ? 'القائمة' : 'المستوى التالي', null, true);
+      drawButton(B.next, !more ? 'القائمة' : state.soukDone ? `إلى ${SOUKS[soukOf(state.level + 1)].city}` : 'المستوى التالي', null, true);
       drawButton(B.again, 'أعد المستوى', null);
+      drawSparks();
     },
   },
 };
@@ -1180,19 +1434,19 @@ function drawStats() {
   text('محفوظة على هذا الجهاز فقط، بلا إنترنت', W / 2, y + 40, 24, soft, 'center', 'bold');
   const L = playLog.read(), rows = Object.values(L.rows), won = rows.filter(r => r.w > 0);
   const sum = k => rows.reduce((t, r) => t + (r[k] || 0), 0);
-  [['مكتملة', won.length], ['محاولات', sum('a')], ['تلميحات', sum('h')]].forEach(([lab, n], k) => {
-    const tx = x + w - 30 - (k + 1) * 192 - k * 12, ty = y + 76;
-    ctx.fillStyle = '#4e3018'; rr(tx, ty, 192, 118, 16); ctx.fill(); ctx.strokeStyle = 'rgba(214,164,76,0.6)'; ctx.lineWidth = 2; ctx.stroke();
-    text(String(n), tx + 96, ty + 46, 48, '#ffe2a6', 'center', 'bold'); text(lab, tx + 96, ty + 94, 24, soft, 'center', 'bold');
+  [['نجوم', starsIn(1, LEVELS)], ['مكتملة', won.length], ['محاولات', sum('a')], ['تلميحات', sum('h')]].forEach(([lab, n], k) => {
+    const tx = x + w - 15 - (k + 1) * 150 - k * 10, ty = y + 76;
+    ctx.fillStyle = '#4e3018'; rr(tx, ty, 150, 118, 16); ctx.fill(); ctx.strokeStyle = 'rgba(214,164,76,0.6)'; ctx.lineWidth = 2; ctx.stroke();
+    text(String(n), tx + 75, ty + 46, 44, '#ffe2a6', 'center', 'bold'); text(lab, tx + 75, ty + 94, 24, soft, 'center', 'bold');
   });
   text(`الفوز من أول محاولة: ${won.filter(r => r.f === 1).length} من ${won.length} · قوارير صغيرة: ${sum('e')}`, W / 2, y + 236, 26, ink, 'center', 'bold');
   const sk = streakNow(), daysWon = rows.filter(r => r.d && r.w > 0).length;
   text(`عطر اليوم: سلسلة ${sk.n} · الأطول ${sk.best || 0} · أيام محلولة ${daysWon}`, W / 2, y + 280, 26, ink, 'center', 'bold');
   const R = x + w - 30, cols = [462, 372, 280, 184, 88];
-  text('المستويات', R, y + 336, 28, '#ffe2a6', 'right', 'bold');
+  text('آخر المستويات التي لعبتها', R, y + 336, 28, '#ffe2a6', 'right', 'bold');
   ['المستوى', 'محاولات', 'فوز', 'سكبات', 'وقت', 'تلميح'].forEach((nm, k) => k === 0 ? text(nm, R, y + 378, 24, soft, 'right', 'bold') : text(nm, cols[k - 1], y + 378, 24, soft, 'center', 'bold'));
   ctx.strokeStyle = 'rgba(214,164,76,0.35)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 30, y + 400); ctx.lineTo(R, y + 400); ctx.stroke();
-  const list = []; for (let n = 1; n <= LEVELS; n++) if (L.rows['L' + n]) list.push(L.rows['L' + n]);
+  const list = rows.filter(r => r.lvl).sort((a, b) => (b.q || 0) - (a.q || 0)).slice(0, 12).sort((a, b) => a.lvl - b.lvl); // the twelve played last
   const today = L.rows['D' + dateKey()]; if (today) list.push(today);
   list.forEach((r, k) => {
     const yy = y + 440 + k * 46, name = r.lvl ? String(r.lvl) : 'اليوم';
