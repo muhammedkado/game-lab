@@ -32,4 +32,15 @@ window.CONFIG = {
   stopper_time: { value: 0.5, min: 0.1, max: 1.5, step: 0.05 }, // seconds the gold stopper takes to drop in
   hint_time: { value: 4, min: 1, max: 12, step: 0.5 },       // seconds the hint glow stays
   idle_nudge: { value: 25, min: 0, max: 120, step: 5 },      // round 3: seconds without a pour before the hint button glows (0: never)
+  // Ads (round 4, ads.js). Off here, so the website has none; the Android app's shell switches ads_on to 1,
+  // and ?ads=1 in the address shows the test cards in a browser. Undo and restart never cost an ad.
+  ads_on: { value: 0, min: 0, max: 1, step: 1 },               // 0 = no ads at all: every help is free, as on the website
+  ads_free_hints: { value: 2, min: 0, max: 9, step: 1 },       // free hints in one attempt before a hint costs an ad
+  ads_hint_pack: { value: 3, min: 1, max: 9, step: 1 },        // hints one watched ad gives
+  ads_first_level: { value: 5, min: 1, max: 96, step: 1 },     // no between-levels ad until this level has been won
+  ads_every_wins: { value: 2, min: 1, max: 10, step: 1 },      // wins since the last ad (of any kind) before a between-levels ad
+  ads_gap: { value: 150, min: 0, max: 600, step: 10 },         // seconds since the last ad (of any kind) before a between-levels ad
+  ads_session_cap: { value: 6, min: 0, max: 30, step: 1 },     // most between-levels ads in one visit
+  ads_test_seconds: { value: 5, min: 0.2, max: 30, step: 0.2 }, // how long a test card runs
+  ads_test_skip: { value: 2, min: 0, max: 30, step: 0.5 },     // seconds before a between-levels test card can be skipped
 };

@@ -19,8 +19,9 @@
 <body>
 <canvas id="game"></canvas>
 <script>if (document.fonts) [400, 700, 800].forEach(w => document.fonts.load(w + ' 32px Almarai', '\u0627\u0628\u062c\u062f abc').catch(() => {}));</script>
-<script src="config.js?v=16bc1c04"></script>
+<script src="config.js?v=17870d3c"></script>
 <script src="levels.js?v=19ce5262"></script>
+<script src="ads.js?v=0ecb578a"></script>
 <script>
 'use strict';
 // Attar (عطّار): pour layered scented oils between glass flasks until each holds one scent.
@@ -30,7 +31,8 @@
 
 // ---- Built to be checked ----------------------------------------------------------------
 const params = new URLSearchParams(location.search);
-const LATER = { veil_extra: 2, idle_nudge: 25 }; // knobs added in round 3: a browser still holding the older config.js must not break
+// knobs added after the first release: a browser still holding an older config.js must not break
+const LATER = { veil_extra: 2, idle_nudge: 25, ads_on: 0, ads_free_hints: 2, ads_hint_pack: 3, ads_first_level: 5, ads_every_wins: 2, ads_gap: 150, ads_session_cap: 6, ads_test_seconds: 5, ads_test_skip: 2 };
 const tune = new Proxy({}, { get: (_, k) => (CONFIG[k] || { value: LATER[k] }).value }); // live: tune.speed is CONFIG.speed.value
 const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
 const W = 720, H = 1280;        // logical size: portrait phone
@@ -41,6 +43,10 @@ const CONTROLS = ['اضغط قارورة لترفعها، ثم اضغط أخرى
 // keys also: D the daily flask and S the stats on the title, E the free small flask when stuck
 const TOUCH = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (_) { return false; } })(); // a phone: no key line on the title
 const OPEN_ALL = params.get('open') === 'all'; // the review link: every level open, kept in its own save
+// Ads (round 4, ads.js): off on the website, on in the Android app (its shell sets ads_on); ?ads=1 shows the test cards here.
+if (params.get('ads') === '1' && CONFIG.ads_on) CONFIG.ads_on.value = 1;
+const ADS = window.Ads || { busy: false, offered() {}, noteWin() {}, rewarded: () => Promise.resolve(true), interstitialDue: () => false, interstitial: () => Promise.resolve() };
+const adsOn = () => tune.ads_on > 0;
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
 let seed;
@@ -121,7 +127,7 @@ function startAudio() {
   }
   if (audio.ac.state === 'suspended') { const p = audio.ac.resume(); if (p && p.catch) p.catch(() => {}); } // a device with no sound out must not raise an error
 }
-function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; store.set('muted', m); }
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m || ADS.busy ? 0 : tune.volume; store.set('muted', m); }
 addEventListener('tune', () => setMuted(muted));
 function tone(freq, dur, type = 'square', vol = 0.3, delay = 0, slide = 0) {
   if (!audio || muted) return;
@@ -445,6 +451,7 @@ function reset() {
     daily: false, time: 0, hard: false, extraUsed: false, extraOk: null, streak: 0,
     veil: 0, lock: null, lockAt: -1, seen: [], bursts: [], sparks: [], idle: 0, soukDone: false,
     resAt: 0, starsShown: 0, s3: 0, s2: 0, press: null, log: null,
+    hintsLeft: 0, offerSeen: {},
   };
   SMALL = -1; LOCK = -1; LOCK_NEED = 0;
 }
@@ -527,6 +534,7 @@ function restartLevel(fresh) {
   state.lockAt = LOCK >= 0 && !isLocked(state.st, state.cap) ? 0 : -1;
   state.phase = 'play'; state.stuck = false; state.dead = false; state.plan = null; state.winAt = 0;
   state.bursts = []; state.sparks = []; state.idle = 0;
+  state.hintsLeft = tune.ads_free_hints; state.offerSeen = {}; // A1: with ads on, an attempt starts with its free hints
   if (!fresh) { sfx.ui(); state.msg = null; }
   updatePlan();
 }
@@ -616,15 +624,28 @@ function updatePlan() { // level 1: the drawn hand follows the solver's next mov
 }
 const layersWord = n => n === 1 ? 'طبقة واحدة' : n === 2 ? 'طبقتين' : `${n} طبقات`;
 /** T1: the free small flask, once per attempt, when no pour is left. Never paid, never an ad. */
+/** A1: a button that leads to an ad was shown: counted once per attempt (ads.js keeps the numbers on the device). */
+function seeOffer(placement) { if (!state.offerSeen[placement]) { state.offerSeen[placement] = true; ADS.offered(placement); } }
+const canExtra = () => state.stuck && !state.extraUsed && state.extraOk !== false && state.phase === 'play';
+/** A1: the small flask's button. On the website it is free; with ads on it is earned by a watched ad. */
+function askExtraFlask() {
+  if (!canExtra() || ADS.busy) return;
+  if (!adsOn()) { addExtraFlask(); return; }
+  const lv = state.level, start = state.start;
+  ADS.rewarded('small_flask', 'قارورة صغيرة إضافية').then(ok => {
+    if (scene !== 'play' || state.level !== lv || state.start !== start) return;
+    if (ok) addExtraFlask(); else state.msg = 'لم يكتمل الإعلان: لا قارورة إضافية';
+  });
+}
 function addExtraFlask() {
-  if (!state.stuck || state.extraUsed || state.extraOk === false || state.phase !== 'play') return;
+  if (!canExtra()) return;
   state.extraUsed = true; state.stuck = false;
   state.st = [...state.st, '']; state.hidden = [...state.hidden, []]; state.sealedAt = [...state.sealedAt, -1];
   for (const u of state.undo) { u.st = [...u.st, '']; u.hidden = [...u.hidden, []]; } // undo keeps the flask, empty
   SMALL = state.st.length - 1;
   state.lay = makeLayout(state.st.length, state.cap, SMALL);
   state.sel = -1; state.hint = null; state.cursor = SMALL;
-  state.msg = `قارورة صغيرة مجانية تتسع ${layersWord(smallCap(state.cap))}: أفرغها قبل النهاية`;
+  state.msg = `قارورة صغيرة ${adsOn() ? 'إضافية' : 'مجانية'} تتسع ${layersWord(smallCap(state.cap))}: أفرغها قبل النهاية`;
   sfx.extra(); events.push({ type: 'extra' });
   playLog.row(q => { q.e++; });
   afterChange(false);
@@ -636,7 +657,18 @@ function undo() {
   state.bursts = [];
   sfx.drop(); afterChange(false);
 }
+/** A1: the hint button. On the website every hint is free; with ads on an attempt has ads_free_hints, then one ad gives ads_hint_pack more. */
 function useHint() {
+  if (state.phase !== 'play' || ADS.busy) return;
+  if (!adsOn()) { showHint(); return; }
+  if (state.hintsLeft > 0) { state.hintsLeft--; showHint(); return; }
+  const lv = state.level, start = state.start;
+  ADS.rewarded('hint', tune.ads_hint_pack > 1 ? `${tune.ads_hint_pack} تلميحات` : 'تلميح').then(ok => {
+    if (scene !== 'play' || state.level !== lv || state.start !== start || state.phase !== 'play') return;
+    if (ok) { state.hintsLeft = Math.max(0, tune.ads_hint_pack - 1); showHint(); } else state.msg = 'لم يكتمل الإعلان: لا تلميح';
+  });
+}
+function showHint() {
   if (state.phase !== 'play') return;
   const r = solveAny(state.st, state.cap, tune.hint_weight, tune.hint_nodes);
   state.hintUsed = true; state.idle = 0; playLog.row(q => { q.h++; });
@@ -675,6 +707,7 @@ function finishLevel() {
   playLog.row(q => { q.w++; if (!q.f) q.f = q.a || 1; q.bm = q.bm == null ? state.moves : Math.min(q.bm, state.moves); q.bt = q.bt == null ? secs : Math.min(q.bt, secs); });
   state.gained = `${stars}`; state.score = stars;
   sfx.win(); buzz(30); events.push({ type: 'win', level: state.level, stars });
+  ADS.noteWin();
   state.resAt = state.t; state.starsShown = 0; state.sparks = []; state.bursts = [];
   scene = 'results';
 }
@@ -1136,13 +1169,22 @@ function stuckOffer() {
   B.sUndo.y = B.sRestart.y = offer ? 746 : 640;
   return offer;
 }
+/** A1: the gold "إعلان" tag on every button that leads to an ad. */
+function adPill(x, y) {
+  const w = 108, h = 38;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; rr(x + 1, y + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = '#ffd34d'; rr(x, y, w, h, h / 2); ctx.fill(); ctx.strokeStyle = '#6b4208'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#2a1c00'; ctx.beginPath(); ctx.moveTo(x + 16, y + h / 2 - 8); ctx.lineTo(x + 29, y + h / 2); ctx.lineTo(x + 16, y + h / 2 + 8); ctx.closePath(); ctx.fill();
+  text('إعلان', x + w / 2 + 12, y + h / 2 + 1, 24, '#2a1c00', 'center', 'bold');
+}
 function drawStuck() {
-  const offer = stuckOffer();
+  const offer = stuckOffer(), paid = offer && adsOn();
   ctx.fillStyle = 'rgba(15,8,4,0.66)'; ctx.fillRect(0, 0, W, H);
   const top = offer ? 430 : 470, h = offer ? 450 : 300;
   ctx.fillStyle = '#3a2412'; rr(70, top, W - 140, h, 28); ctx.fill(); ctx.strokeStyle = '#d6a44c'; ctx.lineWidth = 3; ctx.stroke();
   text('لا توجد سكبات', W / 2, top + 62, 48, '#ffe2c4', 'center', 'bold');
-  const sub = offer ? 'كل المخارج هنا مجانية'
+  const sub = paid ? 'القارورة الصغيرة بمشاهدة إعلان، والتراجع والإعادة مجانا'
+    : offer ? 'كل المخارج هنا مجانية'
     : state.extraUsed ? 'استعملت القارورة الصغيرة: تراجع أو أعد المستوى، مجانا'
     : 'القارورة الصغيرة لن تكفي من هنا: تراجع أو أعد المستوى، مجانا';
   wrap(sub, 27, W - 200, 'bold').slice(0, 2).forEach((ln, k, a) => text(ln, W / 2, top + 128 + (k - (a.length - 1) / 2) * 34, 27, '#e9d3a8', 'center', 'bold'));
@@ -1151,8 +1193,9 @@ function drawStuck() {
     drawButton(b, '', null, true);
     const yy = b.y + (state.btnDown === b ? 3 : 0);
     iconVial(b.x + b.w - 64, yy + b.h / 2, 74, '#3a2008');
-    text('قارورة صغيرة مجانية', b.x + b.w / 2 - 34, yy + b.h / 2 - 16, 34, '#3a2008', 'center', 'bold');
+    text(paid ? 'قارورة صغيرة إضافية' : 'قارورة صغيرة مجانية', b.x + b.w / 2 - 34, yy + b.h / 2 - 16, 34, '#3a2008', 'center', 'bold');
     text(`${layersWord(smallCap(state.cap))}، مرة في كل محاولة`, b.x + b.w / 2 - 34, yy + b.h / 2 + 26, 24, '#5a3410', 'center', 'bold');
+    if (paid) { seeOffer('small_flask'); adPill(b.x + 14, b.y - 18); }
   }
   drawButton(B.sUndo, 'تراجع', null, !offer);
   drawButton(B.sRestart, 'إعادة', null);
@@ -1161,7 +1204,15 @@ function drawControls() {
   const pulse = (state.dead || state.stuck) ? 0.45 + 0.45 * Math.sin(state.t * 7) : 0;
   drawButton(B.undo, 'تراجع', iconUndo, false, pulse, state.undo.length > 0);
   const nudge = tune.idle_nudge > 0 && state.idle > tune.idle_nudge && state.phase === 'play' && !state.stuck ? 0.25 + 0.25 * Math.sin(state.t * 4) : 0;
-  drawButton(B.hint, 'تلميح', iconBulb, false, nudge, state.phase === 'play'); // a quiet glow after a long pause: help is free
+  drawButton(B.hint, 'تلميح', iconBulb, false, nudge, state.phase === 'play'); // a quiet glow after a long pause
+  if (adsOn() && state.phase === 'play' && !state.stuck) { // A1: the free hints left in this attempt, then the "إعلان" tag
+    const b = B.hint;
+    if (state.hintsLeft > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.arc(b.x + b.w - 15, b.y + 5, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(b.x + b.w - 16, b.y + 2, 22, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#6b4208'; ctx.lineWidth = 2; ctx.stroke();
+      text(String(state.hintsLeft), b.x + b.w - 16, b.y + 4, 26, '#2a1c00', 'center', 'bold');
+    } else { seeOffer('hint'); adPill(b.x + b.w - 96, b.y - 10); }
+  }
   drawButton(B.restart, 'إعادة', iconRestart, false, state.stuck ? pulse : 0);
 }
 
@@ -1329,7 +1380,7 @@ const scenes = {
       if (state.hint && state.t - state.hint.t > tune.hint_time) state.hint = null;
       if (state.phase === 'won') { if (state.t >= state.winAt && !state.anim) finishLevel(); return; }
       if (!state.stuck) { state.time += dt; state.idle += dt; } // S1: the play log's time (not shown in play); idle: time since the last pour
-      if (pressed('KeyE')) addExtraFlask();
+      if (pressed('KeyE')) askExtraFlask();
       const n = state.st.length, lay = state.lay;
       if (pressed('ArrowRight')) { state.kbd = true; state.cursor = (state.cursor + 1) % n; }
       if (pressed('ArrowLeft')) { state.kbd = true; state.cursor = (state.cursor + n - 1) % n; }
@@ -1366,7 +1417,7 @@ const scenes = {
         else if (k === 'undo' || k === 'sUndo') undo();
         else if (k === 'hint') useHint();
         else if (k === 'restart' || k === 'sRestart') restartLevel(false);
-        else if (k === 'sExtra') addExtraFlask();
+        else if (k === 'sExtra') askExtraFlask();
       }
     },
     draw() {
@@ -1460,10 +1511,19 @@ function drawStats() {
   });
   if (!list.length) text('العب مستوى، وستظهر أرقامه هنا', W / 2, y + 450, 26, soft, 'center', 'bold');
 }
-function nextLevel() { if (state.daily || state.level >= LEVELS) { toTitle(); return; } const lv = state.level + 1; scene = 'play'; startLevel(lv); }
+function nextLevel() {
+  if (state.daily || state.level >= LEVELS) { toTitle(); return; }
+  if (ADS.busy) return;
+  const lv = state.level, go = () => { if (scene === 'results' && state.level === lv) { scene = 'play'; startLevel(lv + 1); } };
+  // A1: a short ad between levels: only here, after a win, by the rules in ads.js (never on the way into a new souk)
+  if (adsOn() && ADS.interstitialDue(lv, state.soukDone)) ADS.interstitial('between_levels').then(go); else go();
+}
 
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------
+let adUp = false;
 function step() {
+  if (ADS.busy !== adUp) { adUp = ADS.busy; if (audio) audio.out.gain.value = muted || adUp ? 0 : tune.volume; } // an ad owns the sound while it is up
+  if (adUp) { ptrQ.length = 0; hit.clear(); return; } // and the game waits under it: no input, no clock
   if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
   const q = ptrQ.splice(0);
   for (const ev of q) if (scenes[scene].pointer) scenes[scene].pointer(ev);
