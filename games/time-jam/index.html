@@ -452,19 +452,36 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
         play('hiss', n, { rate: r, vol: 0.22, pan, delay: 0.15, dur: 0.8 });
       } else if (k === 'motor') { // the boat motor is started and catches
         if (!play('outstart', 0, { rate: (big ? 0.88 : 1.08) * r, vol: 0.5, pan, dur: 1.8 })) sweep(90, 260, 0.3, 'sawtooth', 0.06);
-      } else { // the hovercraft's fans spin up over the spray
-        rush(0.35, 500, 1500, 0.1);
-        if (!play('rotor', n, { rate: big ? 1.1 : 1.3, vol: 0.4, pan, dur: 1.1 })) sweep(160, 520, 0.22, 'sawtooth', 0.06);
+      } else { // the hovercraft's electric motor winds up over the spray
+        rush(0.4, 600, 2200, 0.07);
+        if (!play('podmotor', 0, { rate: (big ? 0.82 : 1.12) * r, vol: 0.75, pan, dur: 1.6 })) sweep(160, 520, 0.22, 'sawtooth', 0.06);
       }
       return;
     }
-    if (m === 'sled') { // a sled is sent: runners bite the snow, then the team's own voice (yips, sleigh bells, an engine, a glider's hum)
-      const k = ERAS[e].snd; rush(0.3, 900, 2600, 0.07);
-      if (k === 'dogs') { for (const d of big ? [0, 0.16] : [0, 0.13, 0.27]) sweep((big ? 300 : 560) * (0.9 + hash(n, 5 + d * 10) * 0.25), big ? 190 : 300, big ? 0.16 : 0.09, 'sawtooth', 0.05, d); } // the dogs yip; the reindeer grunt lower
-      else if (k === 'bells') { jingle(3, 0.05); if (!voice(1, true, pan, 0.7)) tone(big ? 660 : 880, 0.1, 'triangle', 0.04, 0.05); } // sleigh bells, now and then a whinny
-      else if (k === 'engine') { if (!play('start', n, { rate: big ? 0.8 : 1.1, vol: 0.45, pan, dur: 1.3 })) sweep(70, 200, 0.28, 'sawtooth', 0.07); }
-      else if (k === 'ski') { if (!play('moto', n, { rate: big ? 0.8 : 1.25, vol: 0.42, pan, dur: 1.5 })) sweep(110, 320, 0.25, 'sawtooth', 0.06); }
-      else { sweep(big ? 240 : 320, big ? 620 : 880, 0.3, 'sine', 0.06); tone(big ? 988 : 1319, 0.12, 'sine', 0.04, 0.08); }
+    if (m === 'sled') { // a sled is sent, each in its own voice (recorded: design/snow-sfx); runners bite the snow under all of them
+      const k = ERAS[e].snd, r = 0.95 + hash(n, 5) * 0.1; voiceN++; rush(0.3, 900, 2600, 0.06);
+      if (k === 'dogs') {
+        if (!big) { if (!play('dogs', n, { rate: r, vol: 0.5, pan })) for (const d of [0, 0.13, 0.27]) sweep(560 * (0.9 + hash(n, 5 + d * 10) * 0.25), 300, 0.09, 'sawtooth', 0.05, d); } // the dogs bark and pull
+        else { // the reindeer: its bell, a snort, hooves in the snow
+          if (!play('rbell', n, { rate: r, vol: 0.4, pan })) tone(1568, 0.3, 'sine', 0.06);
+          play('snort', n, { rate: 0.9 * r, vol: 0.45, pan, delay: 0.1 }); play('snowhoof', n, { rate: r, vol: 0.4, pan, delay: 0.15, dur: 1.2 });
+        }
+      } else if (k === 'bells') {
+        if (!big) { // one horse: one bright shake of the sleigh bells, a clip-clop
+          if (!play('jingle', n, { rate: 1.05 * r, vol: 0.5, pan })) jingle(3, 0.05);
+          for (const [d, q] of [[0.12, 1], [0.22, 0.9], [0.42, 1], [0.52, 0.9]]) play('hoof', n + (d * 100 | 0), { rate: 1.05 * q, vol: 0.3, pan, delay: d });
+        } else { // two horses: the bells ring on and on over the drumming of the pair, both snort
+          if (!play('jingles', n, { rate: 0.92 * r, vol: 0.5, pan, dur: 1.8 })) jingle(6, 0.05);
+          play('team', n, { rate: r, vol: 0.5, pan, delay: 0.05, dur: 1.7 }); play('snort', n, { rate: 0.85, vol: 0.4, pan: pan - 0.2, delay: 0.2 }); play('snort', n + 1, { rate: 1, vol: 0.35, pan: pan + 0.2, delay: 0.55 });
+        }
+      } else if (k === 'engine') {
+        if (!big) { if (!play('prop', 0, { rate: 1.05 * r, vol: 0.5, pan, dur: 2 })) sweep(70, 200, 0.28, 'sawtooth', 0.07); } // the propeller catches and spins up
+        else { if (!play('dieselstart', 0, { rate: r, vol: 0.55, pan, dur: 2 })) sweep(50, 120, 0.4, 'sawtooth', 0.07); rush(0.5, 300, 900, 0.07, 0.3); } // the plough's diesel starts, the blade drops
+      } else if (k === 'ski') { if (!play('moto', n, { rate: big ? 0.8 : 1.25, vol: 0.42, pan, dur: 1.5 })) sweep(110, 320, 0.25, 'sawtooth', 0.06); }
+      else if (!big) { // the glider: a quick rising whine over its hover tone
+        if (!play('zoom', 0, { rate: 1.9 * r, vol: 0.5, pan, dur: 1.3 })) { sweep(320, 880, 0.3, 'sine', 0.06); tone(1319, 0.12, 'sine', 0.04, 0.08); }
+        play('saucer', 0, { rate: 1.25, vol: 0.2, pan, dur: 0.9 });
+      } else if (!play('shuttle', 0, { rate: 0.95 * r, vol: 0.45, pan, dur: 1.8 })) { sweep(240, 620, 0.3, 'sine', 0.06); tone(988, 0.12, 'sine', 0.04, 0.08); } // the shuttle lifts with a deep hum
       return;
     }
     if (m === 'walk') { sfx.step(e, big, x); if (!voice(e, big, pan)) tone(e ? 880 : 1175, 0.12, 'sine', 0.05, 0.04); return; }
@@ -485,7 +502,13 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
       if (k === 'sail' || k === 'oar') play('hull', n + 2, { rate: 1.05, vol: 0.25, delay: 0.1, dur: 1 });
       else if (k === 'steam') { play('hiss', 0, { rate: 1.1, vol: 0.2, dur: 0.7 }); play('shipbell', 0, { rate: 1.15, vol: 0.22, delay: 0.2, dur: 1.4 }); }
     }
-    else if (m === 'sled') { rush(0.25, 1400, 500, 0.07); tone(1175, 0.2, 'sine', 0.07, 0.05); tone(1760, 0.28, 'sine', 0.035, 0.11); } // runners scrape to a stop, a small bell
+    else if (m === 'sled') { // runners scrape to a stop; then the team pants or snorts, the bells settle, the craft sets down
+      const k = ERAS[e].snd, n = voiceN++; rush(0.25, 1400, 500, 0.07);
+      if (k === 'dogs') { if (!play(n % 2 ? 'pant' : 'snort', n, { vol: 0.35, delay: 0.1, dur: 1 })) tone(1175, 0.2, 'sine', 0.07, 0.05); }
+      else if (k === 'bells') { if (!play('jingle', n, { rate: 0.95, vol: 0.3, delay: 0.05 })) jingle(2, 0.04); }
+      else if (k === 'glide') { if (!play('land', 0, { rate: 1.3, vol: 0.3, dur: 1.2 })) tone(1175, 0.2, 'sine', 0.07, 0.05); }
+      else { tone(1175, 0.2, 'sine', 0.07, 0.05); tone(1760, 0.28, 'sine', 0.035, 0.11); }
+    }
     else if (m === 'walk') { tone(1046, 0.25, 'sine', 0.09, 0.05); tone(1568, 0.3, 'sine', 0.04, 0.09); }
     else if (m === 'drive') { if (!(e === 3 && play('door', 0, { rate: 0.95, vol: 0.5, delay: 0.15 }))) rush(0.22, 2400, 900, 0.1); tone(784, 0.12, 'sine', 0.08, 0.08); }
     else { tone(784, 0.09, 'sine', 0.18); tone(1175, 0.16, 'sine', 0.14, 0.07); }
@@ -535,16 +558,26 @@ const sfx = { // each era sounds like its vehicles: hooves and a bell, engines a
       } else if (k === 'motor') { // a toot of the horn, then the motor opens up and goes
         if (!play('shiphorn', 0, { rate: big ? 1.2 : 1.45, vol: 0.28, pan, dur: big ? 0.7 : 0.45 })) tone(330, 0.25, 'square', 0.05);
         if (!play('outaway', 0, { rate: big ? 0.9 : 1.08, vol: 0.5, pan, delay: big ? 0.45 : 0.3, dur: 2.2 })) play('away', 0, { rate: 1.15, vol: 0.35, pan, dur: 1.4, delay: 0.25 });
-      } else { rush(0.5, 400, 1600, 0.1, 0.1); if (!play('rotor', n, { rate: 1.5, vol: 0.4, pan, dur: 1.2 })) sweep(200, 700, 0.5, 'triangle', 0.05); tone(784, 0.1, 'sine', 0.1, 0.05); }
+      } else { // the hovercraft sweeps away over the water
+        rush(0.9, 500, 2600, 0.09, 0.1);
+        if (!play('podby', 0, { rate: big ? 0.88 : 1.15, vol: 0.55, pan, dur: big ? 2.8 : 2.2 })) sweep(200, 700, 0.5, 'triangle', 0.05);
+      }
       return;
     }
-    if (ERAS[e].move === 'sled') { // a full sled leaves: happy yips, a long shake of bells, a horn and the engine, or the glider's rising hum
-      const k = ERAS[e].snd; rush(0.45, 800, 2400, 0.08, 0.05);
-      if (k === 'dogs') { for (const d of [0, 0.12, 0.3, 0.42]) sweep((big ? 320 : 600) * (0.9 + hash(n, 7 + d * 10) * 0.3), big ? 200 : 320, 0.1, 'sawtooth', 0.045, d); tone(1320, 0.4, 'sine', 0.04, 0.1); }
-      else if (k === 'bells') { jingle(6, 0.045); voice(1, true, pan, 0.8); }
-      else if (k === 'engine') { if (!play('horn', n, { rate: big ? 0.75 : 0.9, vol: 0.28, pan, dur: 0.5 })) tone(294, 0.3, 'square', 0.05); play('away', 0, { rate: big ? 0.85 : 1, vol: 0.4, pan, dur: 1.5, delay: 0.25 }); }
-      else if (k === 'ski') { if (!play('motogo', n, { rate: big ? 0.85 : 1.2, vol: 0.4, pan, dur: 1.8 })) sweep(120, 420, 0.5, 'sawtooth', 0.06); }
-      else { sweep(260, 980, 0.5, 'sine', 0.06); tone(1568, 0.25, 'sine', 0.04, 0.3); }
+    if (ERAS[e].move === 'sled') { // a full sled leaves: the pack in full cry, the bells and a whinny, the engine opening up, the glider's whoosh
+      const k = ERAS[e].snd; rush(0.45, 800, 2400, 0.07, 0.05);
+      if (k === 'dogs') {
+        if (!big) { if (!play('dogsgo', 0, { rate: 0.97 + hash(n, 7) * 0.08, vol: 0.5, pan })) { for (const d of [0, 0.12, 0.3, 0.42]) sweep(600 * (0.9 + hash(n, 7 + d * 10) * 0.3), 320, 0.1, 'sawtooth', 0.045, d); } }
+        else { if (!play('rbell', n, { vol: 0.42, pan })) tone(1320, 0.4, 'sine', 0.04, 0.1); play('rbell', n + 1, { rate: 1.06, vol: 0.36, pan, delay: 0.5 }); play('snowhoof', n, { vol: 0.45, pan, delay: 0.1 }); play('snort', n, { rate: 0.9, vol: 0.4, pan, delay: 0.3 }); }
+      } else if (k === 'bells') {
+        if (!big) { if (!play('jingle', n, { vol: 0.5, pan })) jingle(6, 0.045); play('jingle', n + 1, { rate: 1.04, vol: 0.45, pan, delay: 0.3 }); play('jingle', n + 2, { rate: 0.97, vol: 0.4, pan, delay: 0.6 }); if (!play('horse', n, { rate: 1.05, vol: 0.4, pan, delay: 0.2, dur: 1.6 })) voice(1, true, pan, 0.8); }
+        else { if (!play('jingles', n, { rate: 0.9, vol: 0.5, pan })) jingle(8, 0.045); play('team', n, { vol: 0.5, pan, delay: 0.1 }); play('horse', n, { rate: 0.92, vol: 0.38, pan: pan - 0.25, delay: 0.15, dur: 1.6 }); play('horse', n + 1, { rate: 1.06, vol: 0.34, pan: pan + 0.25, delay: 0.6, dur: 1.5 }); }
+      } else if (k === 'engine') {
+        if (!big) { if (!play('propgo', 0, { rate: 1.05, vol: 0.5, pan, dur: 2.4 })) sweep(120, 420, 0.5, 'sawtooth', 0.06); }
+        else if (!play('plough', 0, { rate: 0.97, vol: 0.55, pan, dur: 2.6 })) { tone(294, 0.3, 'square', 0.05); sweep(60, 160, 0.6, 'sawtooth', 0.06); }
+      } else if (k === 'ski') { if (!play('motogo', n, { rate: big ? 0.85 : 1.2, vol: 0.4, pan, dur: 1.8 })) sweep(120, 420, 0.5, 'sawtooth', 0.06); }
+      else if (!big) { if (!play('whoosh2', 0, { rate: 1.2, vol: 0.7, pan, dur: 2 })) { sweep(260, 980, 0.5, 'sine', 0.06); tone(1568, 0.25, 'sine', 0.04, 0.3); } }
+      else { if (!play('shuttle', 0, { rate: 0.82, vol: 0.5, pan, dur: 2.6 })) sweep(200, 760, 0.6, 'sine', 0.06); play('zoom', 0, { rate: 1.1, vol: 0.28, pan, delay: 0.4, dur: 2 }); }
       return;
     }
     if (ERAS[e].move === 'walk') { tone(1320, 0.4, 'sine', 0.05); voice(e, big, pan, 0.8); return; }
